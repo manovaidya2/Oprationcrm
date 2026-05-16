@@ -1,0 +1,635 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeft, Loader2, Lock, Edit2, IndianRupee, FileText, CreditCard,
+  History, PlusCircle, Plus, Trash2, Download, Send, CheckCircle2, XCircle,
+  RotateCcw, AlertTriangle, Clock, Activity, Paperclip,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from 'sonner';
+import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+
+const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
+const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+
+function PaidToBox({ tx, accMap=[] }) {
+  if (!tx?.paidToAccount && !tx?.paidToAccountLabel) return null;
+  const acc = Array.isArray(accMap)
+    ? accMap.find(a => String(a._id) === String(tx.paidToAccount))
+    : accMap[String(tx.paidToAccount)];
+  const label = acc?.label || tx.paidToAccountLabel || '';
+  const isUPI = acc?.mode === 'UPI';
+  const isBank = acc?.mode === 'Bank Transfer';
+  return (
+    <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 space-y-0.5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">Paid To</span>
+        <span className="text-sm font-semibold text-indigo-800">{label}</span>
+        {acc?.mode && <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isUPI?'bg-blue-100 text-blue-700':'bg-emerald-100 text-emerald-700'}`}>{acc.mode}</span>}
+      </div>
+      {acc && (<div className="space-y-0.5 text-xs text-indigo-700">
+        {isUPI  && acc.upiId         && <div>UPI ID: <span className="font-mono font-bold">{acc.upiId}</span></div>}
+        {isUPI  && acc.upiName        && <div>Name: <span className="font-semibold">{acc.upiName}</span></div>}
+        {isBank && acc.bankName       && <div>Bank: <span className="font-semibold">{acc.bankName}</span></div>}
+        {isBank && acc.accountHolder  && <div>Account Holder: <span className="font-semibold">{acc.accountHolder}</span></div>}
+        {isBank && acc.accountNumber  && <div>Account No: <span className="font-mono font-bold">{acc.accountNumber}</span></div>}
+        {isBank && acc.ifscCode       && <div>IFSC: <span className="font-mono">{acc.ifscCode}</span></div>}
+        {isBank && acc.branch         && <div>Branch: <span className="font-semibold">{acc.branch}</span></div>}
+      </div>)}
+    </div>
+  );
+}
+
+function PaymentInfo({ tx, accMap=[] }) {
+  if (!tx) return null;
+  const isUPI = tx.mode === 'UPI', isBank = tx.mode === 'Bank Transfer';
+  return (
+    <div className="space-y-0.5 text-xs text-muted-foreground">
+      {tx.mode && <span className="inline-block bg-muted px-1.5 py-0.5 rounded font-medium mr-1">{tx.mode}</span>}
+      {isUPI  && tx.upiId        && <div>UPI ID: <b>{tx.upiId}</b></div>}
+      {tx.utrRef                  && <div>UTR: <b className="font-mono">{tx.utrRef}</b></div>}
+      {isBank && tx.bankName      && <div>Bank: <b>{tx.bankName}</b></div>}
+      {isBank && tx.accountHolder && <div>Account Holder: <b>{tx.accountHolder}</b></div>}
+      {isBank && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
+      {isBank && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
+      {tx.note && <div>Note: {tx.note}</div>}
+      <PaidToBox tx={tx} accMap={accMap}/>
+    </div>
+  );
+}
+
+const STATUS_COLORS = {
+  Draft:'bg-gray-100 text-gray-700', Submitted:'bg-blue-100 text-blue-700',
+  Changes_Requested:'bg-amber-100 text-amber-700', Counselor_Approved:'bg-indigo-100 text-indigo-700',
+  Rejected:'bg-red-100 text-red-700', Accountant_Pending:'bg-amber-100 text-amber-700',
+  Sent_To_University:'bg-purple-100 text-purple-700', Enrolled:'bg-emerald-100 text-emerald-700',
+};
+
+const DOC_STATUS_COLORS = {
+  Requested:'bg-blue-100 text-blue-700', Forwarded:'bg-indigo-100 text-indigo-700',
+  Fee_Approved:'bg-green-100 text-green-700', Fee_Rejected:'bg-red-100 text-red-700',
+  Sent_To_University:'bg-purple-100 text-purple-700', Center_Notified:'bg-amber-100 text-amber-700',
+  Payment_Submitted:'bg-blue-100 text-blue-700', Payment_Verified:'bg-green-100 text-green-700',
+  Dispatched:'bg-teal-100 text-teal-700', Delivered:'bg-emerald-100 text-emerald-700',
+};
+
+export default function StudentDetailPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const [student, setStudent] = useState(null);
+  const [payment, setPayment] = useState(null);
+  const [docs,    setDocs]    = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [editOpen,   setEditOpen]   = useState(false);
+  const [form,       setForm]       = useState({});
+  const [actionOpen, setActionOpen] = useState(null); // 'approve'|'reject'|'changes'
+  const [note,       setNote]       = useState('');
+  const [saving,     setSaving]     = useState(false);
+
+  const [txOpen, setTxOpen] = useState(false);
+  const EMPTY_TF = { amount:'', mode:'', upiId:'', utrRef:'', bankName:'', accountHolder:'', accountNumber:'', ifscCode:'', note:'', paidAt:'', paidToAccount:'', paidToAccountLabel:'' };
+  const [tf, setTf] = useState({...EMPTY_TF});
+  const [payAccounts, setPayAccounts] = useState([]);
+
+  useEffect(() => {
+    paymentAccountsApi.list().then(setPayAccounts).catch(()=>{});
+  }, []);
+  const [feeOpen, setFeeOpen] = useState(false);
+  const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
+
+  const [docOpen, setDocOpen] = useState(false);
+  const [docForm, setDocForm] = useState({ name:'', type:'', chargeFee:'', note:'' });
+  const [docFile, setDocFile] = useState(null);
+  const fileRef = useRef();
+
+  const [fwdDoc, setFwdDoc] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [s, p, d] = await Promise.all([
+        studentsApi.getOne(id),
+        paymentsApi.get(id).catch(()=>null),
+        docsApi.list({ studentId: id, all: '1' }).catch(()=>[]),
+      ]);
+      setStudent(s); setPayment(p); setDocs(d);
+    } catch(e) { toast.error(e.message); } finally { setLoading(false); }
+  }, [id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function saveEdit() {
+    setSaving(true);
+    try { const u = await studentsApi.update(id, form); setStudent(u); toast.success('Updated'); setEditOpen(false); load(); }
+    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function doAction(action) {
+    if ((action==='reject'||action==='changes')&&!note.trim()) return toast.error('Note required');
+    setSaving(true);
+    try {
+      if (action==='approve')  await studentsApi.approve(id);
+      if (action==='reject')   await studentsApi.reject(id, note);
+      if (action==='changes')  await studentsApi.requestChanges(id, note);
+      toast.success('Done'); setActionOpen(null); setNote(''); load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function saveFee() {
+    if (!ff.totalFee) return toast.error('Total fee required');
+    setSaving(true);
+    try { await paymentsApi.upsertFee(id, { totalFee:Number(ff.totalFee), discount:Number(ff.discount)||0, notes:ff.notes }); toast.success('Fee saved'); setFeeOpen(false); load(); }
+    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function addTx() {
+    if (!tf.amount||Number(tf.amount)<=0) return toast.error('Enter valid amount');
+    setSaving(true);
+    try { await paymentsApi.addTransaction(id, {...tf, amount:Number(tf.amount)}); toast.success('Payment recorded'); setTxOpen(false); setTf({...EMPTY_TF}); load(); }
+    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function delTx(txId) {
+    if (!confirm('Delete transaction?')) return;
+    try { await paymentsApi.deleteTransaction(id, txId); toast.success('Deleted'); load(); }
+    catch(e) { toast.error(e.message); }
+  }
+
+  async function addDoc() {
+    if (!docForm.name.trim()) return toast.error('Document name required');
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append('studentId', id); fd.append('name', docForm.name);
+      fd.append('type', docForm.type); fd.append('note', docForm.note);
+      fd.append('chargeFee', docForm.chargeFee||0);
+      if (docFile) fd.append('file', docFile);
+      await docsApi.create(fd);
+      toast.success('Document added'); setDocOpen(false);
+      setDocForm({name:'',type:'',chargeFee:'',note:''}); setDocFile(null);
+      if (fileRef.current) fileRef.current.value='';
+      load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function forwardDoc(docId) {
+    try { await docsApi.forward(docId); toast.success('Forwarded to accountant'); load(); }
+    catch(e) { toast.error(e.message); }
+  }
+
+  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
+  if (!student) return <div className="text-center py-16 text-muted-foreground">Student not found</div>;
+
+  const canEdit = !student.coreLocked || user?.role==='Admin';
+  const isCounselor = user?.role === 'Counselor';
+  const isAdmin = user?.role === 'Admin';
+  const st = STATUS_COLORS[student.applicationStatus] || 'bg-gray-100 text-gray-700';
+
+  // Merged payments for timeline
+  const allPayments = [];
+  payment?.transactions?.forEach(t => allPayments.push({...t, source:'Fee'}));
+  docs.forEach(d => d.payments?.forEach(p => allPayments.push({...p, source:`Doc: ${d.name}`})));
+  allPayments.sort((a,b) => new Date(b.paidAt||b.createdAt)-new Date(a.paidAt||a.createdAt));
+
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={() => navigate(-1)}><ArrowLeft className="h-4 w-4 mr-1"/>Back</Button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl font-semibold">{student.name}</h1>
+            {student.coreLocked && <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"><Lock className="h-3 w-3"/>Core Locked</span>}
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st}`}>{student.applicationStatus?.replace('_',' ')}</span>
+            {student.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{student.enrollmentNumber}</span>}
+          </div>
+          <div className="text-sm text-muted-foreground">{student.center?.name} · {student.counselor?.name}</div>
+        </div>
+        <div className="flex gap-2 flex-shrink-0">
+          {canEdit && <Button variant="outline" size="sm" onClick={() => { setForm({name:student.name,phone:student.phone||'',email:student.email||'',fatherName:student.fatherName||'',motherName:student.motherName||'',dob:student.dob?student.dob.split('T')[0]:'',gender:student.gender||'',address:student.address||'',aadharNumber:student.aadharNumber||'',courseName:student.courseName||'',courseYear:student.courseYear||'',university:student.university||''}); setEditOpen(true); }}><Edit2 className="h-3.5 w-3.5 mr-1"/>Edit</Button>}
+          {(isCounselor||isAdmin) && student.applicationStatus==='Submitted' && (
+            <>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={()=>{setActionOpen('approve');setNote('');}}>Approve</Button>
+              <Button size="sm" variant="outline" className="border-amber-400 text-amber-700" onClick={()=>{setActionOpen('changes');setNote('');}}>Changes</Button>
+              <Button size="sm" variant="destructive" onClick={()=>{setActionOpen('reject');setNote('');}}>Reject</Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Alerts */}
+      {student.applicationStatus==='Changes_Requested' && student.changesRequested && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700 flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0"/>
+          <div><b>Changes Requested:</b> {student.changesRequested}</div>
+        </div>
+      )}
+      {student.applicationStatus==='Rejected' && student.rejectionReason && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+          <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0"/>
+          <div><b>Rejected:</b> {student.rejectionReason}</div>
+        </div>
+      )}
+
+      <Tabs defaultValue="info">
+        <TabsList>
+          <TabsTrigger value="info">Info</TabsTrigger>
+          <TabsTrigger value="fees">Fees</TabsTrigger>
+          <TabsTrigger value="docs">Documents</TabsTrigger>
+          <TabsTrigger value="payments">Payments</TabsTrigger>
+        </TabsList>
+
+        {/* Info Tab */}
+        <TabsContent value="info" className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[['Name', student.name], ['Phone', student.phone], ['Email', student.email],
+              ['Father Name', student.fatherName], ['Mother Name', student.motherName],
+              ['DOB', fmtDt(student.dob)], ['Gender', student.gender], ['Aadhaar', student.aadharNumber],
+              ['Course', student.courseName], ['Year/Batch', student.courseYear],
+              ['University', student.university?.name || student.universityName || student.university],
+              ['Address', student.address],
+              ['10th %',   student.tenth_percent   ? `${student.tenth_percent}%`   : null],
+              ['10th Year',student.tenth_year      || null],
+              ['10th Board',student.tenth_board    || null],
+              ['12th %',   student.twelfth_percent ? `${student.twelfth_percent}%` : null],
+              ['12th Year',student.twelfth_year    || null],
+              ['12th Board',student.twelfth_board  || null],
+            ].filter(([,v])=>v).map(([l,v])=>(
+              <div key={l} className="bg-muted/30 rounded-lg px-3 py-2">
+                <div className="text-xs text-muted-foreground">{l}</div>
+                <div className="text-sm font-medium mt-0.5 break-words">{v}</div>
+              </div>
+            ))}
+          </div>
+          {student.enrollmentNumber && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3">
+              <div className="text-xs text-muted-foreground">Enrollment Number</div>
+              <div className="text-lg font-mono font-bold text-emerald-700 mt-0.5">{student.enrollmentNumber}</div>
+            </div>
+          )}
+
+          {/* Submission Documents uploaded by Center */}
+          <div className="border rounded-lg p-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+              <Paperclip className="h-3.5 w-3.5"/> Submitted Documents ({student.submissionDocs?.length || 0})
+            </p>
+            {student.submissionDocs?.length > 0 ? (
+              <div className="space-y-1.5">
+                {student.submissionDocs.map((d, i) => (
+                  <div key={i} className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0"/>
+                      <span className="truncate font-medium">{d.name}</span>
+                      {d.sizeKb > 0 && <span className="text-xs text-muted-foreground shrink-0">{d.sizeKb} KB</span>}
+                    </div>
+                    {d.fileUrl
+                      ? <a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer"
+                          className="text-xs text-blue-600 underline shrink-0 ml-2 hover:text-blue-800">
+                          View / Download
+                        </a>
+                      : <span className="text-xs text-muted-foreground shrink-0 ml-2">No file uploaded</span>
+                    }
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">No documents submitted yet</p>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Fees Tab */}
+        <TabsContent value="fees" className="mt-4 space-y-4">
+          {payment ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[['Total Fee',fmt(payment.totalFee),'text-foreground'],['Discount',fmt(payment.discount),'text-amber-600'],['Net Fee',fmt(payment.netFee),'text-blue-600'],['Paid',fmt(payment.paidAmount),'text-emerald-600']].map(([l,v,c])=>(
+                  <Card key={l}><CardContent className="pt-4 pb-3 text-center"><div className={`text-xl font-bold ${c}`}>{v}</div><div className="text-xs text-muted-foreground">{l}</div></CardContent></Card>
+                ))}
+              </div>
+              <div className={`flex items-center justify-between rounded-lg border p-3 ${payment.dueAmount>0?'border-amber-300 bg-amber-50':'border-emerald-300 bg-emerald-50'}`}>
+                <div><span className="text-sm font-medium">Balance Due: </span><span className={`text-lg font-bold ${payment.dueAmount>0?'text-amber-700':'text-emerald-700'}`}>{fmt(payment.dueAmount)}</span></div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:payment.totalFee,discount:payment.discount,notes:payment.notes||''});setFeeOpen(true);}}>Edit</Button>
+                  <Button size="sm" onClick={()=>setTxOpen(true)}><PlusCircle className="h-3.5 w-3.5 mr-1"/>Add Payment</Button>
+                </div>
+              </div>
+              {payment.notes && <p className="text-sm text-muted-foreground">Note: {payment.notes}</p>}
+            </>
+          ) : (
+            <div className="text-center py-10 border border-dashed rounded-lg">
+              <IndianRupee className="h-8 w-8 mx-auto text-muted-foreground mb-2"/>
+              <p className="text-sm text-muted-foreground mb-3">No fee structure</p>
+              <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}}>Set Up Fees</Button>
+            </div>
+          )}
+          {payment?.transactions?.length>0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2 flex items-center gap-1"><History className="h-4 w-4"/>Fee Payment History</h4>
+              <div className="space-y-1.5">
+                {[...payment.transactions].reverse().map(tx=>(
+                  <div key={tx._id} className="bg-muted/40 rounded-lg px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-emerald-700">{fmt(tx.amount)}</span>
+                        {tx.mode && <span className="bg-muted px-1.5 py-0.5 rounded text-xs font-medium">{tx.mode}</span>}
+                        {tx.recordedBy?.name && <span className="text-xs text-muted-foreground">by {tx.recordedBy.name}</span>}
+                        {tx.verificationStatus==='verified'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✓ Verified</span>}
+                        {tx.verificationStatus==='rejected'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">✗ Rejected</span>}
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">{fmtDt(tx.paidAt)}</span>
+                    </div>
+                    <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                      {tx.mode==='UPI' && tx.upiId      && <div>UPI ID: <b>{tx.upiId}</b></div>}
+                      {tx.utrRef                         && <div>UTR: <b className="font-mono">{tx.utrRef}</b></div>}
+                      {tx.mode==='Bank Transfer' && tx.bankName      && <div>Bank: <b>{tx.bankName}</b></div>}
+                      {tx.mode==='Bank Transfer' && tx.accountHolder && <div>Account Holder: <b>{tx.accountHolder}</b></div>}
+                      {tx.mode==='Bank Transfer' && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
+                      {tx.mode==='Bank Transfer' && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
+                      {tx.note && <div>Note: {tx.note}</div>}
+                      <PaidToBox tx={tx} accMap={payAccounts}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Docs Tab */}
+        <TabsContent value="docs" className="mt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">{docs.length} document{docs.length!==1?'s':''}</p>
+            {(isCounselor||isAdmin) && student.applicationStatus==='Enrolled' && (
+              <Button size="sm" onClick={()=>setDocOpen(true)}><Plus className="h-4 w-4 mr-1"/>Request Document</Button>
+            )}
+          </div>
+          {docs.length===0?(
+            <div className="text-center py-10 border border-dashed rounded-lg"><FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">No documents</p></div>
+          ):docs.map(d=>(
+            <Card key={d._id}>
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{d.name}</span>
+                      {d.type && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{d.type}</span>}
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${DOC_STATUS_COLORS[d.status]||'bg-gray-100 text-gray-700'}`}>{d.status?.replace(/_/g,' ')}</span>
+                    </div>
+                    {d.note && <p className="text-xs text-muted-foreground mt-0.5">{d.note}</p>}
+                    {d.fileUrl && <a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline mt-1 flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>View file</a>}
+                    {d.scannedUrl && <a href={`${MEDIA}${d.scannedUrl}`} target="_blank" rel="noreferrer" className="text-xs text-teal-600 underline mt-1 flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>Scanned copy</a>}
+                    {d.courierInfo?.trackingNo && <div className="text-xs text-muted-foreground mt-1">🚚 {d.courierInfo.company} · {d.courierInfo.trackingNo}</div>}
+                    {(d.chargeFee>0||d.totalPaid>0) && (
+                      <div className="flex gap-3 text-xs mt-1.5">
+                        {d.chargeFee>0 && <span>Charge: <b>{fmt(d.chargeFee)}</b></span>}
+                        {d.totalPaid>0 && <span className="text-emerald-600">Paid: <b>{fmt(d.totalPaid)}</b></span>}
+                      </div>
+                    )}
+                    {/* Status history */}
+                    {d.statusHistory?.length>0 && (
+                      <div className="mt-2 border-t pt-2">
+                        <p className="text-xs text-muted-foreground font-medium mb-1">History</p>
+                        <div className="space-y-0.5">
+                          {d.statusHistory.slice(-4).map((h,i)=>(
+                            <div key={i} className="text-xs flex gap-2 text-muted-foreground">
+                              <span className="font-medium">{h.status?.replace(/_/g,' ')}</span>
+                              {h.note && <span>· {h.note}</span>}
+                              <span className="ml-auto">{fmtDt(h.at)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {(isCounselor||isAdmin) && d.status==='Requested' && (
+                    <Button size="sm" variant="outline" onClick={()=>forwardDoc(d._id)}>
+                      <Send className="h-3.5 w-3.5 mr-1"/>Forward
+                    </Button>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </TabsContent>
+
+        {/* Payments Tab - unified */}
+        <TabsContent value="payments" className="mt-4 space-y-3">
+          <div className="flex items-center justify-between bg-muted/40 rounded-lg px-4 py-3">
+            <span className="text-sm font-medium">Total Collected ({allPayments.length} transactions)</span>
+            <span className="text-lg font-bold text-emerald-600">{fmt(allPayments.reduce((s,p)=>s+(p.amount||0),0))}</span>
+          </div>
+          {allPayments.length===0?(
+            <div className="text-center py-10 border border-dashed rounded-lg"><CreditCard className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">No payments yet</p></div>
+          ):allPayments.map((p,i)=>(
+            <div key={p._id||i} className="border rounded-lg px-3 py-2.5 text-sm bg-card">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-emerald-700">{fmt(p.amount)}</span>
+                  <span className="text-xs bg-muted px-2 py-0.5 rounded">{p.source}</span>
+                  {p.mode && <span className="text-xs bg-muted px-1.5 py-0.5 rounded font-medium">{p.mode}</span>}
+                  {p.recordedBy?.name && <span className="text-xs text-muted-foreground">by {p.recordedBy.name}</span>}
+                </div>
+                <span className="text-xs text-muted-foreground shrink-0">{fmtDt(p.paidAt||p.createdAt)}</span>
+              </div>
+              <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                {p.mode==='UPI' && p.upiId      && <div>UPI ID: <b>{p.upiId}</b></div>}
+                {p.utrRef                        && <div>UTR: <b className="font-mono">{p.utrRef}</b></div>}
+                {p.mode==='Bank Transfer' && p.bankName      && <div>Bank: <b>{p.bankName}</b></div>}
+                {p.mode==='Bank Transfer' && p.accountHolder && <div>Account Holder: <b>{p.accountHolder}</b></div>}
+                {p.mode==='Bank Transfer' && p.accountNumber && <div>Account No: <b>{p.accountNumber}</b></div>}
+                {p.mode==='Bank Transfer' && p.ifscCode      && <div>IFSC: <b>{p.ifscCode}</b></div>}
+                {p.note && <div>Note: {p.note}</div>}
+                <PaidToBox tx={p} accMap={payAccounts}/>
+              </div>
+            </div>
+          ))}
+        </TabsContent>
+      </Tabs>
+
+      {/* Edit Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Edit Student{student.coreLocked?' (Core fields locked)':''}</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Label>Full Name {student.coreLocked&&'🔒'}</Label><Input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
+            <div><Label>Phone</Label><Input value={form.phone||''} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/></div>
+            <div><Label>Email</Label><Input value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/></div>
+            <div><Label>Father Name {student.coreLocked&&'🔒'}</Label><Input value={form.fatherName||''} onChange={e=>setForm(p=>({...p,fatherName:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
+            <div><Label>Mother Name</Label><Input value={form.motherName||''} onChange={e=>setForm(p=>({...p,motherName:e.target.value}))}/></div>
+            <div><Label>DOB {student.coreLocked&&'🔒'}</Label><Input type="date" value={form.dob||''} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
+            <div><Label>Gender</Label>
+              <Select value={form.gender||''} onValueChange={v=>setForm(p=>({...p,gender:v}))}>
+                <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
+                <SelectContent>{['Male','Female','Other'].map(g=><SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div><Label>Aadhar {student.coreLocked&&'🔒'}</Label><Input value={form.aadharNumber||''} onChange={e=>setForm(p=>({...p,aadharNumber:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
+            <div><Label>Course</Label><Input value={form.courseName||''} onChange={e=>setForm(p=>({...p,courseName:e.target.value}))}/></div>
+            <div><Label>Year / Batch</Label><Input value={form.courseYear||''} onChange={e=>setForm(p=>({...p,courseYear:e.target.value}))}/></div>
+            <div className="col-span-2"><Label>Address</Label><Input value={form.address||''} onChange={e=>setForm(p=>({...p,address:e.target.value}))}/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setEditOpen(false)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Review Action Dialog */}
+      <Dialog open={!!actionOpen} onOpenChange={()=>setActionOpen(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {actionOpen==='approve'&&'Approve Application'}
+              {actionOpen==='reject'&&'Reject Application'}
+              {actionOpen==='changes'&&'Request Changes'}
+            </DialogTitle>
+          </DialogHeader>
+          <div><Label>Note {(actionOpen==='reject'||actionOpen==='changes')&&'*'}</Label><Textarea value={note} onChange={e=>setNote(e.target.value)} rows={3}/></div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setActionOpen(null)}>Cancel</Button>
+            <Button
+              className={actionOpen==='approve'?'bg-green-600 hover:bg-green-700':actionOpen==='reject'?'bg-red-600 hover:bg-red-700':''}
+              onClick={()=>doAction(actionOpen)} disabled={saving}>
+              {saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fee Setup Dialog */}
+      <Dialog open={feeOpen} onOpenChange={setFeeOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Fee Structure</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Total Fee (₹) *</Label><Input type="number" value={ff.totalFee} onChange={e=>setFf(p=>({...p,totalFee:e.target.value}))}/></div>
+            <div><Label>Discount (₹)</Label><Input type="number" value={ff.discount} onChange={e=>setFf(p=>({...p,discount:e.target.value}))}/></div>
+            {ff.totalFee && <p className="text-sm text-muted-foreground">Net: {fmt(Number(ff.totalFee)-Number(ff.discount||0))}</p>}
+            <div><Label>Notes</Label><Textarea rows={2} value={ff.notes} onChange={e=>setFf(p=>({...p,notes:e.target.value}))}/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setFeeOpen(false)}>Cancel</Button>
+            <Button onClick={saveFee} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Transaction Dialog */}
+      <Dialog open={txOpen} onOpenChange={setTxOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Record Payment</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Amount (₹) *</Label><Input type="number" value={tf.amount} onChange={e=>setTf(p=>({...p,amount:e.target.value}))}/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Mode *</Label>
+                <Select value={tf.mode} onValueChange={v=>setTf(p=>({...p,mode:v}))}>
+                  <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
+                  <SelectContent><SelectItem value="UPI">UPI</SelectItem><SelectItem value="Bank Transfer">Bank Transfer</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div><Label>Date</Label><Input type="date" value={tf.paidAt} onChange={e=>setTf(p=>({...p,paidAt:e.target.value}))}/></div>
+            </div>
+            {tf.mode==='UPI' && (
+              <div className="space-y-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs font-semibold text-blue-700">UPI Details</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">UPI ID *</Label><Input value={tf.upiId} onChange={e=>setTf(p=>({...p,upiId:e.target.value}))} placeholder="name@upi"/></div>
+                  <div><Label className="text-xs">UTR Number *</Label><Input value={tf.utrRef} onChange={e=>setTf(p=>({...p,utrRef:e.target.value}))} placeholder="12-digit UTR"/></div>
+                </div>
+              </div>
+            )}
+            {tf.mode==='Bank Transfer' && (
+              <div className="space-y-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                <p className="text-xs font-semibold text-emerald-700">Bank Transfer Details</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><Label className="text-xs">Bank Name *</Label><Input value={tf.bankName} onChange={e=>setTf(p=>({...p,bankName:e.target.value}))} placeholder="e.g. SBI"/></div>
+                  <div><Label className="text-xs">Account Holder *</Label><Input value={tf.accountHolder} onChange={e=>setTf(p=>({...p,accountHolder:e.target.value}))}/></div>
+                  <div><Label className="text-xs">Account Number</Label><Input value={tf.accountNumber} onChange={e=>setTf(p=>({...p,accountNumber:e.target.value}))}/></div>
+                  <div><Label className="text-xs">IFSC Code</Label><Input value={tf.ifscCode} onChange={e=>setTf(p=>({...p,ifscCode:e.target.value}))}/></div>
+                  <div className="col-span-2"><Label className="text-xs">UTR / Reference *</Label><Input value={tf.utrRef} onChange={e=>setTf(p=>({...p,utrRef:e.target.value}))}/></div>
+                </div>
+              </div>
+            )}
+            {payAccounts.length > 0 && (
+              <div>
+                <Label>Paid To Account *</Label>
+                <Select value={tf.paidToAccount||''} onValueChange={v => {
+                  const acc = payAccounts.find(a => a._id === v);
+                  setTf(p => ({...p, paidToAccount: v, paidToAccountLabel: acc?.label || ''}));
+                }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Select account payment was made to…"/></SelectTrigger>
+                  <SelectContent>
+                    {payAccounts.map(acc => (
+                      <SelectItem key={acc._id} value={acc._id}>
+                        <span className={`text-xs mr-1.5 px-1 py-0.5 rounded ${acc.mode==='UPI'?'bg-blue-100 text-blue-700':'bg-emerald-100 text-emerald-700'}`}>{acc.mode}</span>
+                        {acc.label}
+                        {acc.mode==='UPI' && acc.upiId ? ` — ${acc.upiId}` : ''}
+                        {acc.mode==='Bank Transfer' && acc.bankName ? ` — ${acc.bankName}` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {tf.paidToAccount && (() => {
+                  const acc = payAccounts.find(a => a._id === tf.paidToAccount);
+                  if (!acc) return null;
+                  return (
+                    <div className="mt-1 bg-indigo-50 border border-indigo-200 rounded px-3 py-2 text-xs text-indigo-800 space-y-0.5">
+                      <div className="font-semibold">{acc.label}</div>
+                      {acc.mode==='UPI' && acc.upiId && <div>UPI ID: <span className="font-mono font-bold">{acc.upiId}</span></div>}
+                      {acc.mode==='Bank Transfer' && acc.bankName && <div>Bank: <span className="font-semibold">{acc.bankName}</span></div>}
+                      {acc.mode==='Bank Transfer' && acc.accountNumber && <div>Account No: <span className="font-mono font-bold">{acc.accountNumber}</span></div>}
+                      {acc.mode==='Bank Transfer' && acc.ifscCode && <div>IFSC: <span className="font-mono">{acc.ifscCode}</span></div>}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+            <div><Label>Note</Label><Input value={tf.note} onChange={e=>setTf(p=>({...p,note:e.target.value}))}/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setTxOpen(false)}>Cancel</Button>
+            <Button onClick={addTx} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Record</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Doc Dialog */}
+      <Dialog open={docOpen} onOpenChange={setDocOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Request Document</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Document Name *</Label><Input value={docForm.name} onChange={e=>setDocForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Migration Certificate Sem1"/></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Type</Label>
+                <Select value={docForm.type} onValueChange={v=>setDocForm(p=>({...p,type:v}))}>
+                  <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
+                  <SelectContent>{['Identity','Academic','Medical','Financial','Other'].map(t=><SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div><Label>Charge (₹)</Label><Input type="number" value={docForm.chargeFee} onChange={e=>setDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
+            </div>
+            <div><Label>Note</Label><Input value={docForm.note} onChange={e=>setDocForm(p=>({...p,note:e.target.value}))}/></div>
+            <div><Label>Upload File</Label><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setDocFile(e.target.files[0])} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-muted"/></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setDocOpen(false)}>Cancel</Button>
+            <Button onClick={addDoc} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Request</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

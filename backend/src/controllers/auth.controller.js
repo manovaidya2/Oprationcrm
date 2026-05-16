@@ -1,0 +1,118 @@
+const asyncHandler = require('express-async-handler');
+const User       = require('../models/User');
+const Counselor  = require('../models/Counselor');
+const Center     = require('../models/Center');
+const University = require('../models/University');
+const { signToken } = require('../utils/token');
+
+function sanitize(u) {
+  return {
+    id: u._id, name: u.name, email: u.email, role: u.role,
+    counselorId: u.counselorId, centerId: u.centerId,
+    universityId: u.universityId,
+    avatarColor: u.avatarColor,
+  };
+}
+
+// POST /api/auth/login  — public
+exports.login = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+  const user = await User.findOne({ email, isActive: true }).select('+password');
+  if (!user || !(await user.comparePassword(password))) {
+    const e = new Error('Invalid credentials'); e.status = 401; throw e;
+  }
+  res.json({ token: signToken(user), user: sanitize(user) });
+});
+
+// GET /api/auth/me
+exports.me = asyncHandler(async (req, res) => {
+  res.json({ user: sanitize(req.user) });
+});
+
+// POST /api/auth/users  — Admin or Counselor creates accounts
+exports.createUser = asyncHandler(async (req, res) => {
+  const { name, email, password, role, avatarColor, centerId, universityId, phone } = req.body;
+
+  // Counselor can only create Center accounts
+  if (req.user.role === 'Counselor' && role !== 'Center') {
+    const e = new Error('Counselors can only create Center accounts'); e.status = 403; throw e;
+  }
+
+  const exists = await User.findOne({ email });
+  if (exists) { const e = new Error('Email already in use'); e.status = 409; throw e; }
+
+  let counselorId;
+  let resolvedCenterId;
+  let resolvedUniversityId;
+
+  if (role === 'Counselor') {
+    const c = await Counselor.create({ name, email, phone: phone || '', avatarColor: avatarColor || '#6366f1' });
+    counselorId = c._id;
+  }
+
+  if (role === 'Center') {
+    if (!centerId) { const e = new Error('centerId required for Center role'); e.status = 400; throw e; }
+    const center = await Center.findById(centerId);
+    if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+    resolvedCenterId = center._id;
+  }
+
+  if (role === 'University') {
+    if (!universityId) { const e = new Error('universityId required for University role'); e.status = 400; throw e; }
+    const uni = await University.findById(universityId);
+    if (!uni) { const e = new Error('University not found'); e.status = 404; throw e; }
+    resolvedUniversityId = uni._id;
+  }
+
+  const user = await User.create({
+    name, email, password, role,
+    counselorId, centerId: resolvedCenterId,
+    universityId: resolvedUniversityId,
+    avatarColor: avatarColor || '#6366f1',
+  });
+
+  res.status(201).json({ user: sanitize(user) });
+});
+
+// GET /api/auth/users  — Admin + Counselor
+exports.listUsers = asyncHandler(async (req, res) => {
+  const filter = { isActive: true };
+  if (req.query.role) filter.role = req.query.role;
+  // Counselor can only see Center users
+  if (req.user.role === 'Counselor') filter.role = 'Center';
+
+  const users = await User.find(filter).select('-password')
+    .populate('counselorId centerId universityId').sort('-createdAt');
+  res.json(users);
+});
+
+// PATCH /api/auth/users/:id/password  — Admin only
+exports.resetPassword = asyncHandler(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) { const e = new Error('Password min 6 chars'); e.status = 400; throw e; }
+  const user = await User.findById(req.params.id);
+  if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  user.password = password;
+  await user.save();
+  res.json({ ok: true });
+});
+
+// PATCH /api/auth/users/:id/toggle  — Admin only — activate/deactivate
+exports.toggleUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  if (String(user._id) === String(req.user._id)) { const e = new Error('Cannot deactivate yourself'); e.status = 400; throw e; }
+  user.isActive = !user.isActive;
+  await user.save();
+  res.json({ ok: true, isActive: user.isActive });
+});
+
+// DELETE /api/auth/users/:id  — Admin only
+exports.deleteUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  if (String(user._id) === String(req.user._id)) { const e = new Error('Cannot delete yourself'); e.status = 400; throw e; }
+  await User.findByIdAndDelete(req.params.id);
+  res.status(204).end();
+});
+
