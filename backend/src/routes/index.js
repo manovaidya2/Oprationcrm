@@ -13,7 +13,7 @@ const payC    = require('../controllers/payment.controller');
 const docC    = require('../controllers/document.controller');
 const misc    = require('../controllers/misc.controller');
 const uniC    = require('../controllers/university.controller');
-const payAccC = require('../controllers/paymentAccount.controller');
+const payAccC = require('../controllers/paymentaccount.controller');
 
 // ── Validation schemas ───────────────────────────────────────
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
