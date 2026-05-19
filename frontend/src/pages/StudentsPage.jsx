@@ -78,7 +78,7 @@ export default function StudentsPage() {
   function exportCSV() {
   const headers = [
     'Name','Father Name','Mother Name','DOB','Gender','Phone','Email','Aadhaar',
-    'Address','Course','Year/Batch','University','10th %','10th Year','10th Board',
+    'Address','Course','Session','University','10th %','10th Year','10th Board',
     '12th %','12th Year','12th Board','Center','Counselor','Status','Enrollment No'
   ];
   const rows = students.map(s => [

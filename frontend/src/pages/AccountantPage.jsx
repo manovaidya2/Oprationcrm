@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Loader2, IndianRupee, CheckCircle2, XCircle, Clock, Eye,
-  Paperclip, History, User, Calendar, Hash, Search, X, Send,
+  Paperclip, History, User, Calendar, Hash, Search, X, Send,Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -98,7 +98,7 @@ function StudentDetailModal({ student, onClose }) {
                 ['Aadhaar',      s.aadharNumber],
                 ['Address',      s.address],
                 ['Course',       s.courseName],
-                ['Year/Batch',   s.courseYear],
+                ['Session',   s.courseYear],
                 ['University',   s.university?.name || s.universityName || null],
                 ['10th %',       s.tenth_percent   ? `${s.tenth_percent}%`   : null],
                 ['10th Year',    s.tenth_year      || null],
@@ -849,6 +849,15 @@ export default function AccountantPage() {
                     {tx.mode==='Bank Transfer' && tx.accountNumber && <div className="text-xs text-muted-foreground">Account No: <span className="font-mono font-semibold text-foreground">{tx.accountNumber}</span></div>}
                     {tx.mode==='Bank Transfer' && tx.ifscCode && <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{tx.ifscCode}</span></div>}
                     {tx.note && <div className="text-xs text-muted-foreground italic">Note: "{tx.note}"</div>}
+                    {tx.paymentScreenshot && (   // ← YE DAALO
+  <div className="mt-1.5">
+    <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+      target="_blank" rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
                     <PaidToAccountBox tx={tx} accMap={payAccounts}/>
                   </div>
                 </div>
@@ -942,6 +951,15 @@ export default function AccountantPage() {
                   {d.payments?.slice(-1).map(p => (
                     <div key={p._id} className="text-xs mt-1 space-y-0.5">
                       <PaymentInfo tx={p}/>
+                       {p.paymentScreenshot && (   // ← YE DAALO
+    <div className="mt-1.5">
+      <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+        target="_blank" rel="noreferrer"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+        <Download className="h-3 w-3"/>View Payment Screenshot
+      </a>
+    </div>
+  )}
                     </div>
                   ))}
                   {studentPayMap[d.student?._id] && (

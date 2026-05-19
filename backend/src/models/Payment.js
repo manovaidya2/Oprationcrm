@@ -10,8 +10,10 @@ const transactionSchema = new mongoose.Schema({
   // Bank Transfer fields
   bankName:    { type: String, trim: true },
   accountHolder:{ type: String, trim: true },
-  accountNumber:{ type: String, trim: true },
+  accountNumber:{ type: String, trim: true },  
   ifscCode:    { type: String, trim: true },
+  // paidToAccountLabel ke baad add karo:
+  paymentScreenshot: { type: String, trim: true }, // file URL
   note:        { type: String, trim: true },
   paidAt:      { type: Date, default: Date.now },
   recordedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

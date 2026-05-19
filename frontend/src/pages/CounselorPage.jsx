@@ -138,7 +138,7 @@ function StudentModal({ student, onClose }) {
                 ['Aadhaar',      s.aadharNumber],
                 ['Address',      s.address],
                 ['Course',       s.courseName],
-                ['Year/Batch',   s.courseYear],
+                ['Session',   s.courseYear],
                 ['10th %',       s.tenth_percent   ? `${s.tenth_percent}%`   : null],
                 ['10th Year',    s.tenth_year      || null],
                 ['10th Board',   s.tenth_board     || null],
@@ -547,6 +547,15 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
                     {p.mode==='Bank Transfer' && p.accountNumber && <div className="text-xs text-slate-500">Account No: <span className="font-mono font-semibold text-slate-700">{p.accountNumber}</span></div>}
                     {p.mode==='Bank Transfer' && p.ifscCode && <div className="text-xs text-slate-500">IFSC: <span className="font-mono font-semibold text-slate-700">{p.ifscCode}</span></div>}
                     {p.note && <div className="text-xs text-slate-400 italic">"{p.note}"</div>}
+                    {p.paymentScreenshot && (   // ← YE DAALO
+  <div className="mt-1.5">
+    <a href={`${MEDIA}${p.paymentScreenshot}`}
+      target="_blank" rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
                     {(p.paidToAccountLabel || p.paidToAccount) && (
                       <PaidToAccountBox tx={p} accMap={accMap}/>
                     )}
@@ -941,6 +950,15 @@ export default function CounselorPage() {
                       {tx.mode==='Bank Transfer' && tx.accountNumber && <div className="text-xs text-slate-500">Account No: <span className="font-mono font-semibold text-slate-700">{tx.accountNumber}</span></div>}
                       {tx.mode==='Bank Transfer' && tx.ifscCode && <div className="text-xs text-slate-500">IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
                       {tx.note && <div className="text-xs text-slate-400 italic">Note: "{tx.note}"</div>}
+                      {tx.paymentScreenshot && (
+  <div className="mt-1.5">
+    <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+      target="_blank" rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
                       <PaidToAccountBox tx={tx} accMap={payAccounts}/>
                     </div>
                   </div>

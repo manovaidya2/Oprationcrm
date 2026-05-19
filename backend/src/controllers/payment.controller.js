@@ -78,6 +78,7 @@ exports.addTransaction = asyncHandler(async (req, res) => {
     verificationStatus,
     paidToAccount: paidToAccount || undefined,
     paidToAccountLabel: paidToAccountLabel || '',
+    paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
   });
   await payment.save();
 

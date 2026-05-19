@@ -88,7 +88,7 @@ router.post('/students/:id/counselor-send-to-center', protect, requireRole('Admi
 // ── PAYMENTS ─────────────────────────────────────────────────
 router.get   ('/payments/:studentId',                          protect, payC.get);
 router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Counselor','Center'), payC.upsertFee);
-router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','Center','Accountant'), payC.addTransaction);
+router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','Center','Accountant'), upload.single('paymentScreenshot'), payC.addTransaction);
 router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','Center','Accountant'), payC.updateTransaction);
 router.patch ('/payments/:studentId/transactions/:txId/counsel-verify', protect, requireRole('Admin','Counselor'), payC.counselorForwardFeePayment);
 router.patch ('/payments/:studentId/transactions/:txId/account-verify',  protect, requireRole('Admin','Accountant'), payC.accountantVerifyFeePayment);

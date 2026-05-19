@@ -3,31 +3,31 @@ const mongoose = require('mongoose');
 const studentSchema = new mongoose.Schema({
   // Core info — locked after enrollment number assigned
   name:         { type: String, required: true, trim: true },
-  fatherName:   { type: String, trim: true },
-  motherName:   { type: String, trim: true },
+  fatherName:   { type: String, trim: true, uppercase: true },
+  motherName:   { type: String, trim: true, uppercase: true },
   dob:          { type: Date },
   gender:       { type: String, enum: ['Male', 'Female', 'Other', ''], trim: true },
   phone:        { type: String, trim: true },
   email:        { type: String, trim: true, lowercase: true },
-  address:      { type: String, trim: true },
-  aadharNumber: { type: String, trim: true },
+  address:      { type: String, trim: true, uppercase: true },
+  aadharNumber: { type: String, trim: true, uppercase: true },
 
   // Enrollment
   enrollmentNumber: { type: String, trim: true },
   coreLocked:       { type: Boolean, default: false }, // locked after enrollment
 
   // Academic
-  courseName:   { type: String, trim: true },
-  courseYear:   { type: String, trim: true },
+  courseName:   { type: String, trim: true, uppercase: true },
+  courseYear:   { type: String, trim: true, uppercase: true },
   universityName: { type: String, trim: true },  // denormalized display name
   // 10th details
-  tenth_percent:{ type: String, trim: true },
-  tenth_year:   { type: String, trim: true },
-  tenth_board:  { type: String, trim: true },
+  tenth_percent:{ type: String, trim: true, uppercase: true },
+  tenth_year:   { type: String, trim: true, uppercase: true },
+  tenth_board:  { type: String, trim: true, uppercase: true },
   // 12th details
-  twelfth_percent:{ type: String, trim: true },
-  twelfth_year:   { type: String, trim: true },
-  twelfth_board:  { type: String, trim: true },
+  twelfth_percent:{ type: String, trim: true, uppercase: true },
+  twelfth_year:   { type: String, trim: true, uppercase: true },
+  twelfth_board:  { type: String, trim: true, uppercase: true },
   // Age
   age:          { type: String, trim: true },
 

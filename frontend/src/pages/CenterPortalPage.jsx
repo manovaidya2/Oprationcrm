@@ -152,6 +152,31 @@ function PaymentFields({ form, setForm, showAmount = true, showDate = true }) {
         </div>
       )}
 
+      {/* Payment Screenshot */}
+<div>
+  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+    Payment Screenshot *
+  </Label>
+  <input
+    type="file"
+    accept="image/*,.pdf"
+    onChange={e => set('paymentScreenshot', e.target.files[0])}
+    className="mt-1 block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-600 file:font-medium"
+  />
+  {form.paymentScreenshot && typeof form.paymentScreenshot === 'string' && (
+    <a href={`${MEDIA}${form.paymentScreenshot}`} target="_blank" rel="noreferrer"
+      className="text-xs text-indigo-600 underline mt-1 flex items-center gap-1">
+      <Download className="h-3 w-3"/>View uploaded screenshot
+    </a>
+  )}
+</div>
+
+
+
+
+
+
+
       <div>
         <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Note</Label>
         <Input value={form.note||''} onChange={e=>set('note',e.target.value)} placeholder="Optional note" className="mt-1 h-9 border-slate-200"/>
@@ -180,6 +205,18 @@ function PaymentDetail({ tx, accMap }) {
       {isBank && tx.accountNumber  && <div>Account No: <span className="font-mono font-semibold text-slate-700">{tx.accountNumber}</span></div>}
       {isBank && tx.ifscCode       && <div>IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
       {tx.note && <div className="italic text-slate-400">"{tx.note}"</div>}
+      {tx.paymentScreenshot && (
+  <div className="mt-1.5">
+    <a
+      href={`${MEDIA}${tx.paymentScreenshot}`}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors"
+    >
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
       {/* Paid To Account box */}
       {(acc || tx.paidToAccountLabel) && (
         <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 space-y-0.5">
@@ -356,7 +393,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 
   async function handleSave() {
     if (!form.name.trim())       return toast.error('Student name required');
-    if (!form.phone.trim())      return toast.error('Phone required');
+    // if (!form.phone.trim())      return toast.error('Phone required');
     if (!form.courseName.trim()) return toast.error('Course name required');
     if (!form.universityId)      return toast.error('Please select a university');
     if (!defCounselor)           return toast.error('No counselor assigned. Contact admin.');
@@ -399,15 +436,15 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label className="text-xs font-semibold text-slate-600">Full Name *</Label>
-                <Input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="Student's full name" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.name} onChange={e=>set('name',e.target.value.toUpperCase())} placeholder="Student's full name" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Father's Name *</Label>
-                <Input value={form.fatherName} onChange={e=>set('fatherName',e.target.value)} placeholder="Father's full name" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.fatherName} onChange={e=>set('fatherName',e.target.value.toUpperCase())} placeholder="Father's full name" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Mother's Name</Label>
-                <Input value={form.motherName} onChange={e=>set('motherName',e.target.value)} placeholder="Mother's full name" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.motherName} onChange={e=>set('motherName',e.target.value.toUpperCase())} placeholder="Mother's full name" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Date of Birth</Label>
@@ -429,7 +466,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
                 </Select>
               </div>
               <div>
-                <Label className="text-xs font-semibold text-slate-600">Phone *</Label>
+                <Label className="text-xs font-semibold text-slate-600">Phone </Label>
                 <Input value={form.phone} onChange={e=>set('phone',e.target.value)} placeholder="+91 XXXXX XXXXX" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
@@ -438,11 +475,11 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Aadhaar Number</Label>
-                <Input value={form.aadharNumber} onChange={e=>set('aadharNumber',e.target.value)} placeholder="XXXX XXXX XXXX" className="mt-1 border-slate-200 h-10 font-mono"/>
+                <Input value={form.aadharNumber} onChange={e=>set('aadharNumber',e.target.value.toUpperCase())} placeholder="XXXX XXXX XXXX" className="mt-1 border-slate-200 h-10 font-mono"/>
               </div>
               <div className="col-span-2">
                 <Label className="text-xs font-semibold text-slate-600">Address</Label>
-                <Input value={form.address} onChange={e=>set('address',e.target.value)} placeholder="Full address" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.address} onChange={e=>set('address',e.target.value.toUpperCase())} placeholder="Full address" className="mt-1 border-slate-200 h-10"/>
               </div>
             </div>
           </FieldGroup>
@@ -456,15 +493,15 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">10th %</Label>
-                <Input value={form.tenth_percent} onChange={e=>set('tenth_percent',e.target.value)} placeholder="e.g. 85.5" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.tenth_percent} onChange={e=>set('tenth_percent',e.target.value.toUpperCase())} placeholder="e.g. 85.5" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Passing Year</Label>
-                <Input value={form.tenth_year} onChange={e=>set('tenth_year',e.target.value)} placeholder="e.g. 2020" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.tenth_year} onChange={e=>set('tenth_year',e.target.value.toUpperCase())} placeholder="e.g. 2020" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Board</Label>
-                <Input value={form.tenth_board} onChange={e=>set('tenth_board',e.target.value)} placeholder="CBSE / State" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.tenth_board} onChange={e=>set('tenth_board',e.target.value.toUpperCase())} placeholder="CBSE / State" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div className="col-span-3">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-1 flex items-center gap-1.5">
@@ -473,15 +510,15 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">12th %</Label>
-                <Input value={form.twelfth_percent} onChange={e=>set('twelfth_percent',e.target.value)} placeholder="e.g. 78.0" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.twelfth_percent} onChange={e=>set('twelfth_percent',e.target.value.toUpperCase())} placeholder="e.g. 78.0" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Passing Year</Label>
-                <Input value={form.twelfth_year} onChange={e=>set('twelfth_year',e.target.value)} placeholder="e.g. 2022" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.twelfth_year} onChange={e=>set('twelfth_year',e.target.value.toUpperCase())} placeholder="e.g. 2022" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Board</Label>
-                <Input value={form.twelfth_board} onChange={e=>set('twelfth_board',e.target.value)} placeholder="CBSE / State" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.twelfth_board} onChange={e=>set('twelfth_board',e.target.value.toUpperCase())} placeholder="CBSE / State" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div className="col-span-3">
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-1 flex items-center gap-1.5">
@@ -490,11 +527,11 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
               </div>
               <div className="col-span-2">
                 <Label className="text-xs font-semibold text-slate-600">Course Name *</Label>
-                <Input value={form.courseName} onChange={e=>set('courseName',e.target.value)} placeholder="e.g. MBA, BCA, B.Tech" className="mt-1 border-slate-200 h-10"/>
+                <Input value={form.courseName} onChange={e=>set('courseName',e.target.value.toUpperCase())} placeholder="e.g. MBA, BCA, B.Tech" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div>
-                <Label className="text-xs font-semibold text-slate-600">Year / Batch</Label>
-                <Input value={form.courseYear} onChange={e=>set('courseYear',e.target.value)} placeholder="2024-26" className="mt-1 border-slate-200 h-10"/>
+                <Label className="text-xs font-semibold text-slate-600">Session</Label>
+                <Input value={form.courseYear} onChange={e=>set('courseYear',e.target.value.toUpperCase())} placeholder="2024-26" className="mt-1 border-slate-200 h-10"/>
               </div>
               <div className="col-span-3">
                 <Label className="text-xs font-semibold text-slate-600">University *</Label>
@@ -616,7 +653,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
                 ['Phone', form.phone],['Email', form.email],['Aadhaar', form.aadharNumber],
                 ['10th %', form.tenth_percent && `${form.tenth_percent}% (${form.tenth_year})`],
                 ['12th %', form.twelfth_percent && `${form.twelfth_percent}% (${form.twelfth_year})`],
-                ['Course', form.courseName],['Year/Batch', form.courseYear],
+                ['Course', form.courseName],['Session', form.courseYear],
                 ['University', form.universityId ? (universities.find(u=>u._id===form.universityId)?.name || form.universityId) : ''],
               ].filter(([,v])=>v).map(([l,v])=>(
                 <div key={l} className="bg-slate-50 rounded-lg px-3 py-2">
@@ -678,7 +715,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
             <Button onClick={() => {
               if (step===1) {
                 if (!form.name.trim())     return toast.error('Name required');
-                if (!form.phone.trim())    return toast.error('Phone required');
+                // if (!form.phone.trim())    return toast.error('Phone required');
                 if (!form.courseName.trim()) return toast.error('Course name required');
               }
               setStep(p=>p+1);
@@ -706,7 +743,7 @@ function FeeSection({ studentId, appStatus }) {
   const [saving,setSaving]=useState(false);
   const [accMap,setAccMap]=useState({});
   const [ff,setFf]=useState({totalFee:'',discount:'',notes:''});
-  const EMPTY_TF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:''};
+  const EMPTY_TF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'', paymentScreenshot: null};
   const [tf,setTf]=useState({...EMPTY_TF});
 
   useEffect(() => {
@@ -733,12 +770,34 @@ function FeeSection({ studentId, appStatus }) {
     if(!tf.amount||Number(tf.amount)<=0) return toast.error('Enter valid amount');
     if(!tf.mode) return toast.error('Select payment mode');
     if(!tf.utrRef.trim()) return toast.error('UTR number is required');
+    if (!tf.paymentScreenshot) return toast.error('Payment screenshot is required');
     if(tf.mode==='UPI' && !tf.upiId.trim()) return toast.error('UPI ID is required');
     if(tf.mode==='Bank Transfer' && !tf.bankName.trim()) return toast.error('Bank name is required');
     if(tf.mode==='Bank Transfer' && !tf.accountHolder.trim()) return toast.error('Account holder name is required');
     setSaving(true);
     try{
-      await paymentsApi.addTransaction(studentId,{...tf,amount:Number(tf.amount)});
+      const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const token = localStorage.getItem('crm_token');
+    const fd = new FormData();
+    fd.append('amount', tf.amount);
+    fd.append('mode', tf.mode);
+    fd.append('upiId', tf.upiId || '');
+    fd.append('utrRef', tf.utrRef || '');
+    fd.append('bankName', tf.bankName || '');
+    fd.append('accountHolder', tf.accountHolder || '');
+    fd.append('accountNumber', tf.accountNumber || '');
+    fd.append('ifscCode', tf.ifscCode || '');
+    fd.append('note', tf.note || '');
+    fd.append('paidAt', tf.paidAt || '');
+    fd.append('paidToAccount', tf.paidToAccount || '');
+    fd.append('paidToAccountLabel', tf.paidToAccountLabel || '');
+    if (tf.paymentScreenshot) fd.append('paymentScreenshot', tf.paymentScreenshot);
+
+    await fetch(`${BASE}/payments/${studentId}/transactions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: fd,
+    });
       toast.success('Payment recorded'); setTxOpen(false);
       setTf({...EMPTY_TF}); load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1609,9 +1668,9 @@ function StudentDetail({ student, onBack, onRefresh }) {
               <div>
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Personal Information</p>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Full Name *</Label><Input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">Father's Name</Label><Input value={form.fatherName||''} onChange={e=>setForm(p=>({...p,fatherName:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">Mother's Name</Label><Input value={form.motherName||''} onChange={e=>setForm(p=>({...p,motherName:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Full Name *</Label><Input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">Father's Name</Label><Input value={form.fatherName||''} onChange={e=>setForm(p=>({...p,fatherName:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">Mother's Name</Label><Input value={form.motherName||''} onChange={e=>setForm(p=>({...p,motherName:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Date of Birth</Label><Input type="date" value={form.dob?form.dob.split('T')[0]:''} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Age</Label><Input type="number" value={form.age||''} onChange={e=>setForm(p=>({...p,age:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Gender</Label>
@@ -1622,21 +1681,21 @@ function StudentDetail({ student, onBack, onRefresh }) {
                   </div>
                   <div><Label className="text-xs font-semibold text-slate-600">Phone</Label><Input value={form.phone||''} onChange={e=>setForm(p=>({...p,phone:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Email</Label><Input value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">Aadhaar No.</Label><Input value={form.aadharNumber||''} onChange={e=>setForm(p=>({...p,aadharNumber:e.target.value}))} className="mt-1 border-slate-200 h-10 font-mono"/></div>
-                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Address</Label><Input value={form.address||''} onChange={e=>setForm(p=>({...p,address:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">Aadhaar No.</Label><Input value={form.aadharNumber||''} onChange={e=>setForm(p=>({...p,aadharNumber:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10 font-mono"/></div>
+                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Address</Label><Input value={form.address||''} onChange={e=>setForm(p=>({...p,address:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
                 </div>
               </div>
               <div>
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Academic Information</p>
                 <div className="grid grid-cols-3 gap-3">
-                  <div><Label className="text-xs font-semibold text-slate-600">10th %</Label><Input value={form.tenth_percent||''} onChange={e=>setForm(p=>({...p,tenth_percent:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">10th Year</Label><Input value={form.tenth_year||''} onChange={e=>setForm(p=>({...p,tenth_year:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">10th Board</Label><Input value={form.tenth_board||''} onChange={e=>setForm(p=>({...p,tenth_board:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">12th %</Label><Input value={form.twelfth_percent||''} onChange={e=>setForm(p=>({...p,twelfth_percent:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">12th Year</Label><Input value={form.twelfth_year||''} onChange={e=>setForm(p=>({...p,twelfth_year:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">12th Board</Label><Input value={form.twelfth_board||''} onChange={e=>setForm(p=>({...p,twelfth_board:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Course Name</Label><Input value={form.courseName||''} onChange={e=>setForm(p=>({...p,courseName:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
-                  <div><Label className="text-xs font-semibold text-slate-600">Year/Batch</Label><Input value={form.courseYear||''} onChange={e=>setForm(p=>({...p,courseYear:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">10th %</Label><Input value={form.tenth_percent||''} onChange={e=>setForm(p=>({...p,tenth_percent:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">10th Year</Label><Input value={form.tenth_year||''} onChange={e=>setForm(p=>({...p,tenth_year:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">10th Board</Label><Input value={form.tenth_board||''} onChange={e=>setForm(p=>({...p,tenth_board:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">12th %</Label><Input value={form.twelfth_percent||''} onChange={e=>setForm(p=>({...p,twelfth_percent:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">12th Year</Label><Input value={form.twelfth_year||''} onChange={e=>setForm(p=>({...p,twelfth_year:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">12th Board</Label><Input value={form.twelfth_board||''} onChange={e=>setForm(p=>({...p,twelfth_board:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div className="col-span-2"><Label className="text-xs font-semibold text-slate-600">Course Name</Label><Input value={form.courseName||''} onChange={e=>setForm(p=>({...p,courseName:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
+                  <div><Label className="text-xs font-semibold text-slate-600">Session</Label><Input value={form.courseYear||''} onChange={e=>setForm(p=>({...p,courseYear:e.target.value.toUpperCase()}))} className="mt-1 border-slate-200 h-10"/></div>
                   <div className="col-span-3">
                     <Label className="text-xs font-semibold text-slate-600">University</Label>
                     <Select value={form.universityId||''} onValueChange={v=>setForm(p=>({...p,universityId:v}))}>

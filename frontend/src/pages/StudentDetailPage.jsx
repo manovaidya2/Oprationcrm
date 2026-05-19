@@ -257,7 +257,7 @@ export default function StudentDetailPage() {
             {[['Name', student.name], ['Phone', student.phone], ['Email', student.email],
               ['Father Name', student.fatherName], ['Mother Name', student.motherName],
               ['DOB', fmtDt(student.dob)], ['Gender', student.gender], ['Aadhaar', student.aadharNumber],
-              ['Course', student.courseName], ['Year/Batch', student.courseYear],
+              ['Course', student.courseName], ['Session', student.courseYear],
               ['University', student.university?.name || student.universityName || student.university],
               ['Address', student.address],
               ['10th %',   student.tenth_percent   ? `${student.tenth_percent}%`   : null],
@@ -359,6 +359,14 @@ export default function StudentDetailPage() {
                       {tx.mode==='Bank Transfer' && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
                       {tx.mode==='Bank Transfer' && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
                       {tx.note && <div>Note: {tx.note}</div>}
+                      {tx.paymentScreenshot && (
+  <div className="mt-1.5">
+    <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
                       <PaidToBox tx={tx} accMap={payAccounts}/>
                     </div>
                   </div>
@@ -452,6 +460,14 @@ export default function StudentDetailPage() {
                 {p.mode==='Bank Transfer' && p.accountNumber && <div>Account No: <b>{p.accountNumber}</b></div>}
                 {p.mode==='Bank Transfer' && p.ifscCode      && <div>IFSC: <b>{p.ifscCode}</b></div>}
                 {p.note && <div>Note: {p.note}</div>}
+                {p.paymentScreenshot && (
+  <div className="mt-1.5">
+    <a href={`${MEDIA}${p.paymentScreenshot}`} target="_blank" rel="noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+      <Download className="h-3 w-3"/>View Payment Screenshot
+    </a>
+  </div>
+)}
                 <PaidToBox tx={p} accMap={payAccounts}/>
               </div>
             </div>
