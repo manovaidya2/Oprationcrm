@@ -878,7 +878,7 @@ export default function CounselorPage() {
               </Button>
               <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'sendToCenterFinal'});setNote(s.rejectionReason||'');}}>
-                Reject → Center
+                Cancel → Center
               </Button>
             </StudentCard>
           ))}
@@ -1128,7 +1128,7 @@ export default function CounselorPage() {
                  actionOpen?.action==='reject'?'Reject':
                  actionOpen?.action==='reforward'?'Re-forward':
                  actionOpen?.action==='sendToCenter'?'Send to Center':
-                 actionOpen?.action==='sendToCenterFinal'?'Reject → Send to Center':
+                 actionOpen?.action==='sendToCenterFinal'?'Cancel → Send to Center':
                  'Request Changes'}: {actionOpen?.student?.name}
               </span>
             </DialogTitle>
