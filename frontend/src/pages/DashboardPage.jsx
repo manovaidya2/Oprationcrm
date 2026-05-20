@@ -7,7 +7,6 @@ import { dashApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 const fmt   = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
-const fmtCr = n => { const v = Number(n)||0; if (v>=10000000) return `₹${(v/10000000).toFixed(1)}Cr`; if (v>=100000) return `₹${(v/100000).toFixed(1)}L`; if (v>=1000) return `₹${(v/1000).toFixed(1)}K`; return fmt(v); };
 
 const STATUS_LABELS = {
   Draft: 'Draft', Submitted: 'Under Review', Changes_Requested: 'Changes Needed',
@@ -60,7 +59,7 @@ function MonthlyChart({ data }) {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
               <div className="text-xs text-muted-foreground">This Month</div>
-              <div className="font-bold text-emerald-600">{fmtCr(thisMonth?.amount)}</div>
+              <div className="font-bold text-emerald-600">{fmt(thisMonth?.amount||0)}</div>
             </div>
             {growth !== null && (
               <div className={`text-xs font-bold px-2 py-1 rounded-full ${growth >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
@@ -78,7 +77,7 @@ function MonthlyChart({ data }) {
             return (
               <div key={d.key} className="flex-1 flex flex-col items-center gap-1 group relative">
                 <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                  {fmtCr(d.amount)}
+                  {fmt(d.amount)}
                 </div>
                 <div
                   className={`w-full rounded-t-sm transition-all ${isLast ? 'bg-indigo-500' : d.amount > 0 ? 'bg-indigo-300' : 'bg-slate-100'}`}
@@ -102,7 +101,7 @@ function MonthlyChart({ data }) {
 
 // ── Center Fees Table ─────────────────────────────────────────
 function CenterFeesTable({ centers }) {
-  const [sort, setSort]         = useState('due');   // due | paid | total | name
+  const [sort, setSort]         = useState('due');
   const [dir,  setDir]          = useState('desc');
   const [search, setSearch]     = useState('');
   const [expanded, setExpanded] = useState(null);
@@ -158,7 +157,7 @@ function CenterFeesTable({ centers }) {
           ].map(({ label, value, color }) => (
             <div key={label} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
               <div className="text-xs text-muted-foreground">{label}</div>
-              <div className={`font-bold text-sm ${color}`}>{fmtCr(value)}</div>
+              <div className={`font-bold text-sm ${color}`}>{fmt(value)}</div>
             </div>
           ))}
         </div>
@@ -189,10 +188,10 @@ function CenterFeesTable({ centers }) {
                     <div className="font-semibold truncate">{c.centerName}</div>
                     {c.city && <div className="text-xs text-muted-foreground">{c.city}</div>}
                   </div>
-                  <div className="col-span-2 text-right font-medium text-slate-700">{fmtCr(c.totalFees||0)}</div>
-                  <div className="col-span-2 text-right font-medium text-emerald-600">{fmtCr(c.totalPaid||0)}</div>
+                  <div className="col-span-2 text-right font-medium text-slate-700">{fmt(c.totalFees||0)}</div>
+                  <div className="col-span-2 text-right font-medium text-emerald-600">{fmt(c.totalPaid||0)}</div>
                   <div className={`col-span-2 text-right font-bold ${(c.totalDue||0) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {fmtCr(c.totalDue||0)}
+                    {fmt(c.totalDue||0)}
                   </div>
                   <div className="col-span-2 flex items-center gap-1.5 justify-end">
                     <div className="flex-1 bg-slate-200 rounded-full h-1.5 max-w-12">
@@ -264,9 +263,9 @@ export default function DashboardPage() {
         <h1 className="text-2xl font-bold">Center Dashboard</h1>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <StatCard icon={GraduationCap} label="Total Students" value={stats?.totalStudents || 0} />
-          <StatCard icon={IndianRupee} label="Total Fees" value={fmt(stats?.totalFees)} color="text-blue-600" />
-          <StatCard icon={CheckCircle2} label="Paid" value={fmt(stats?.totalPaid)} color="text-emerald-600" />
-          <StatCard icon={Clock} label="Due" value={fmt(stats?.totalDue)} color="text-amber-600" />
+          <StatCard icon={IndianRupee} label="Total Fees" value={fmt(stats?.totalFees||0)} color="text-blue-600" />
+          <StatCard icon={CheckCircle2} label="Paid" value={fmt(stats?.totalPaid||0)} color="text-emerald-600" />
+          <StatCard icon={Clock} label="Due" value={fmt(stats?.totalDue||0)} color="text-amber-600" />
         </div>
         {stats?.statusCounts && Object.keys(stats.statusCounts).length > 0 && (
           <Card>
@@ -334,9 +333,9 @@ export default function DashboardPage() {
         {role === 'Admin' && <StatCard icon={Building2} label="Centers"    value={stats?.centerCount || 0} />}
         {role === 'Admin' && <StatCard icon={UserCog}   label="Counselors" value={stats?.counselorCount || 0} />}
         <StatCard icon={CheckCircle2} label="Enrolled"          value={stats?.statusBreakdown?.find(s=>s._id==='Enrolled')?.count||0} color="text-emerald-600" />
-        <StatCard icon={IndianRupee}  label="Total Fees"        value={fmtCr(stats?.totalFees)}  color="text-blue-600" />
-        <StatCard icon={CheckCircle2} label="Total Collected"   value={fmtCr(stats?.totalPaid)}  color="text-emerald-600" />
-        <StatCard icon={Clock}        label="Outstanding"       value={fmtCr(stats?.totalDue)}   color="text-amber-600" />
+        <StatCard icon={IndianRupee}  label="Total Fees"        value={fmt(stats?.totalFees||0)}  color="text-blue-600" />
+        <StatCard icon={CheckCircle2} label="Total Collected"   value={fmt(stats?.totalPaid||0)}  color="text-emerald-600" />
+        <StatCard icon={Clock}        label="Outstanding"       value={fmt(stats?.totalDue||0)}   color="text-amber-600" />
       </div>
 
       {/* Monthly chart — Admin only */}
