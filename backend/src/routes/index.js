@@ -25,7 +25,8 @@ const userCreateSchema= z.object({
   avatarColor:  z.string().optional(),
   phone:        z.string().optional(),
 });
-const pwdSchema       = z.object({ password: z.string().min(6) });
+const pwdSchema           = z.object({ password: z.string().min(6) });
+const changePwdSchema     = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(6) });
 
 // ── AUTH ─────────────────────────────────────────────────────
 router.post('/auth/login',               val(loginSchema), authC.login);
@@ -33,6 +34,7 @@ router.get ('/auth/me',                  protect, authC.me);
 router.get ('/auth/users',               protect, requireRole('Admin','Counselor'), authC.listUsers);
 router.post('/auth/users',               protect, requireRole('Admin','Counselor'), val(userCreateSchema), authC.createUser);
 router.patch('/auth/users/:id/password', protect, requireRole('Admin'), val(pwdSchema), authC.resetPassword);
+router.patch('/auth/me/password',        protect, val(changePwdSchema), authC.changeOwnPassword);
 router.patch('/auth/users/:id/toggle',   protect, requireRole('Admin'), authC.toggleUser);
 router.delete('/auth/users/:id',         protect, requireRole('Admin'), authC.deleteUser);
 

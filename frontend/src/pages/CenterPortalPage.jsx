@@ -3,7 +3,7 @@ import {
   Plus, Search, Edit2, Phone, Mail, ArrowLeft, Loader2,
   IndianRupee, FileText, CreditCard, PlusCircle, Trash2,
   History, Download, Send, AlertTriangle, Paperclip, Pencil,
-  CheckCircle2, ChevronRight, User, GraduationCap, BookOpen,
+  CheckCircle2, ChevronRight, User, GraduationCap, BookOpen, KeyRound,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
-import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
+import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi, authApi } from '@/lib/api';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -1850,6 +1850,25 @@ export default function CenterPortalPage() {
   const [search,setSearch]=useState(''); const [selected,setSelected]=useState(null);
   const [addOpen,setAddOpen]=useState(false);
 
+  // ── Change Own Password ──────────────────────────────────
+  const [pwdOpen, setPwdOpen]         = useState(false);
+  const [pwdSaving, setPwdSaving]     = useState(false);
+  const [pwdForm, setPwdForm]         = useState({ current: '', newPwd: '', confirm: '' });
+
+  async function handleChangePassword() {
+    if (!pwdForm.current) return toast.error('Please enter your current password');
+    if (pwdForm.newPwd.length < 6) return toast.error('New password must be at least 6 characters');
+    if (pwdForm.newPwd !== pwdForm.confirm) return toast.error('Passwords do not match');
+    try {
+      setPwdSaving(true);
+      await authApi.changeOwnPassword(pwdForm.current, pwdForm.newPwd);
+      toast.success('Password changed successfully!');
+      setPwdOpen(false);
+      setPwdForm({ current: '', newPwd: '', confirm: '' });
+    } catch(e) { toast.error(e.message || 'Failed to change password'); }
+    finally { setPwdSaving(false); }
+  }
+
   const loadAll=useCallback(async()=>{
     try{
       setLoading(true);
@@ -1888,9 +1907,14 @@ export default function CenterPortalPage() {
             </p>
           )}
         </div>
-        <Button onClick={()=>setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-200">
-          <Plus className="h-4 w-4 mr-1.5"/>Add Student
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={()=>setPwdOpen(true)} className="border-slate-200 text-slate-600 hover:bg-slate-50">
+            <KeyRound className="h-4 w-4 mr-1.5"/>Change Password
+          </Button>
+          <Button onClick={()=>setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-200">
+            <Plus className="h-4 w-4 mr-1.5"/>Add Student
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -2012,6 +2036,64 @@ export default function CenterPortalPage() {
             defCounselor={defCounselor}
             centerId={centerId}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Change Password Dialog ─────────────────────── */}
+      <Dialog open={pwdOpen} onOpenChange={open=>{ if(!open){setPwdForm({current:'',newPwd:'',confirm:''});} setPwdOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800">
+              <div className="h-8 w-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <KeyRound className="h-4 w-4 text-indigo-600"/>
+              </div>
+              Change Password
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Current Password *</Label>
+              <Input
+                type="password"
+                className="mt-1 h-10 border-slate-200 focus:border-indigo-400 focus:ring-indigo-100"
+                placeholder="Enter your current password"
+                value={pwdForm.current}
+                onChange={e=>setPwdForm(p=>({...p,current:e.target.value}))}
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">New Password *</Label>
+              <Input
+                type="password"
+                className="mt-1 h-10 border-slate-200 focus:border-indigo-400 focus:ring-indigo-100"
+                placeholder="Min 6 characters"
+                value={pwdForm.newPwd}
+                onChange={e=>setPwdForm(p=>({...p,newPwd:e.target.value}))}
+              />
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Confirm New Password *</Label>
+              <Input
+                type="password"
+                className="mt-1 h-10 border-slate-200 focus:border-indigo-400 focus:ring-indigo-100"
+                placeholder="Re-enter new password"
+                value={pwdForm.confirm}
+                onChange={e=>setPwdForm(p=>({...p,confirm:e.target.value}))}
+              />
+              {pwdForm.confirm && pwdForm.newPwd !== pwdForm.confirm && (
+                <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>{ setPwdOpen(false); setPwdForm({current:'',newPwd:'',confirm:''}); }} className="border-slate-200">
+              Cancel
+            </Button>
+            <Button onClick={handleChangePassword} disabled={pwdSaving} className="bg-indigo-600 hover:bg-indigo-700">
+              {pwdSaving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Update Password
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

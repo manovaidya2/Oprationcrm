@@ -38,6 +38,7 @@ export const authApi = {
   listUsers:      (role)     => request(`/auth/users${role ? `?role=${role}` : ''}`),
   createUser:     (data)     => request('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
   resetPassword:  (id, pwd)  => request(`/auth/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password: pwd }) }),
+  changeOwnPassword: (currentPassword, newPassword) => request(`/auth/me/password`, { method: 'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }),
   toggleUser:     (id)       => request(`/auth/users/${id}/toggle`, { method: 'PATCH' }),
   deleteUser:     (id)       => request(`/auth/users/${id}`, { method: 'DELETE' }),
 };

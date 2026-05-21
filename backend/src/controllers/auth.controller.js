@@ -97,6 +97,22 @@ exports.resetPassword = asyncHandler(async (req, res) => {
   res.json({ ok: true });
 });
 
+// PATCH /api/auth/me/password  — Any logged-in user (change own password)
+exports.changeOwnPassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 6) {
+    const e = new Error('New password must be at least 6 characters'); e.status = 400; throw e;
+  }
+  const user = await User.findById(req.user._id || req.user.id).select('+password');
+  if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  if (!(await user.comparePassword(currentPassword))) {
+    const e = new Error('Current password is incorrect'); e.status = 401; throw e;
+  }
+  user.password = newPassword;
+  await user.save();
+  res.json({ ok: true, message: 'Password changed successfully' });
+});
+
 // PATCH /api/auth/users/:id/toggle  — Admin only — activate/deactivate
 exports.toggleUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
