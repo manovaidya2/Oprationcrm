@@ -119,13 +119,73 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
       tx[f] = f === 'amount' ? Number(req.body[f]) : f === 'paidAt' ? new Date(req.body[f]) : req.body[f];
     }
   });
+  if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
   await payment.save();
   res.json(await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role'));
 });
 
-// PATCH /api/payments/:studentId/transactions/:txId/counsel-verify
+// PATCH /api/payments/:studentId/transactions/:txId/resend
+// Center resends a rejected payment for counselor review
+exports.resendTransaction = asyncHandler(async (req, res) => {
+  const payment = await Payment.findOne({ student: req.params.studentId });
+  if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  const tx = payment.transactions.id(req.params.txId);
+  if (!tx) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
+  if (tx.verificationStatus === 'verified') {
+    const e = new Error('Cannot resend a verified payment'); e.status = 403; throw e;
+  }
+
+  // Update fields if provided
+  const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt'];
+  fields.forEach(f => {
+    if (req.body[f] !== undefined) {
+      tx[f] = f === 'amount' ? Number(req.body[f]) : f === 'paidAt' ? new Date(req.body[f]) : req.body[f];
+    }
+  });
+  if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
+
+  tx.verificationStatus = 'pending_counselor';
+  await payment.save();
+
+  const student = await Student.findById(req.params.studentId);
+  await notifyRole('Counselor', {
+    message: `Fee payment resubmitted by center for ${student?.name} — ₹${tx.amount}. Please review.`,
+    type: 'fee_payment_resubmitted', studentId: student?._id, role: 'Counselor',
+  });
+
+  await audit('fee_payment_resubmitted', 'Payment', payment._id, req.user, { amount: tx.amount }, `Center resubmitted fee payment of ₹${tx.amount}`);
+  res.json({ ok: true, message: 'Payment resubmitted for review' });
+});
+// PATCH /api/payments/:studentId/transactions/:txId/counsel-reject
+// Counselor rejects fee payment — sends back to center to resubmit
+exports.counselorRejectFeePayment = asyncHandler(async (req, res) => {
+  const { note } = req.body;
+  const payment = await Payment.findOne({ student: req.params.studentId });
+  if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  const tx = payment.transactions.id(req.params.txId);
+  if (!tx) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
+  if (tx.verificationStatus !== 'pending_counselor') {
+    const e = new Error('Payment is not pending counselor review'); e.status = 400; throw e;
+  }
+  tx.verificationStatus = 'rejected';
+  tx.verificationNote   = note || '';
+  tx.verifiedBy         = req.user._id;
+  tx.verifiedAt         = new Date();
+  await payment.save();
+
+  const student = await Student.findById(req.params.studentId).populate('center');
+  const centerUsers = await User.find({ center: student?.center?._id, role: 'Center' });
+  await Promise.all(centerUsers.map(u => notify(u._id, {
+    message: `Fee payment of ₹${tx.amount} for ${student?.name} was rejected by counselor${note ? ': ' + note : ''}. Please correct and resubmit.`,
+    type: 'fee_payment_rejected', studentId: student?._id, role: 'Center',
+  })));
+
+  await audit('fee_payment_rejected', 'Payment', payment._id, req.user, { note }, `Counselor rejected fee payment of ₹${tx.amount}`);
+  res.json({ ok: true, message: 'Fee payment rejected' });
+});
+
 // Counselor reviews fee payment -> forwards to accountant
 exports.counselorForwardFeePayment = asyncHandler(async (req, res) => {
   const payment = await Payment.findOne({ student: req.params.studentId });

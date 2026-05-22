@@ -91,10 +91,12 @@ router.post('/students/:id/counselor-send-to-center', protect, requireRole('Admi
 router.get   ('/payments/:studentId',                          protect, payC.get);
 router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Counselor','Center'), payC.upsertFee);
 router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','Center','Accountant'), upload.single('paymentScreenshot'), payC.addTransaction);
-router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','Center','Accountant'), payC.updateTransaction);
-router.patch ('/payments/:studentId/transactions/:txId/counsel-verify', protect, requireRole('Admin','Counselor'), payC.counselorForwardFeePayment);
+router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','Center','Accountant'), upload.single('paymentScreenshot'), payC.updateTransaction);
+router.patch ('/payments/:studentId/transactions/:txId/counsel-verify',  protect, requireRole('Admin','Counselor'), payC.counselorForwardFeePayment);
+router.patch ('/payments/:studentId/transactions/:txId/counsel-reject',  protect, requireRole('Admin','Counselor'), payC.counselorRejectFeePayment);
+router.patch ('/payments/:studentId/transactions/:txId/resend',          protect, requireRole('Admin','Center'),    upload.single('paymentScreenshot'), payC.resendTransaction);
 router.patch ('/payments/:studentId/transactions/:txId/account-verify',  protect, requireRole('Admin','Accountant'), payC.accountantVerifyFeePayment);
-router.delete('/payments/:studentId/transactions/:txId',                 protect, requireRole('Admin','Counselor'), payC.deleteTransaction);
+router.delete('/payments/:studentId/transactions/:txId',                 protect, requireRole('Admin','Counselor','Center'), payC.deleteTransaction);
 
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);

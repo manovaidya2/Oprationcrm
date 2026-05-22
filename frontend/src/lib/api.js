@@ -105,7 +105,17 @@ export const paymentsApi = {  get:            (sid)          => request(`/paymen
   upsertFee:      (sid, data)    => request(`/payments/${sid}`, { method: 'PUT', body: JSON.stringify(data) }),
   addTransaction: (sid, data)    => request(`/payments/${sid}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
   updateTransaction:      (sid, txId, data) => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  resendTransaction: async (sid, txId, formData) => {
+    const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+    const token = localStorage.getItem('crm_token');
+    const res = await fetch(`${BASE}/payments/${sid}/transactions/${txId}/resend`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${token}` }, body: formData,
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.message || 'Failed'); }
+    return res.json();
+  },
   counselorForwardPayment:(sid, txId)       => request(`/payments/${sid}/transactions/${txId}/counsel-verify`, { method: 'PATCH' }),
+  counselorRejectPayment: (sid, txId, note) => request(`/payments/${sid}/transactions/${txId}/counsel-reject`, { method: 'PATCH', body: JSON.stringify({ note }) }),
   accountantVerifyPayment:(sid, txId, data) => request(`/payments/${sid}/transactions/${txId}/account-verify`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTransaction:      (sid, txId)       => request(`/payments/${sid}/transactions/${txId}`, { method: 'DELETE' }),
 };

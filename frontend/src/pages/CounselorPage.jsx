@@ -731,6 +731,18 @@ export default function CounselorPage() {
     } catch(e) { toast.error(e.message); }
   }
 
+  const [rejectFeeDialog, setRejectFeeDialog] = useState(null); // {studentId, txId, studentName, amount}
+  const [rejectFeeNote, setRejectFeeNote]     = useState('');
+
+  async function rejectFeePayment() {
+    if (!rejectFeeDialog) return;
+    try {
+      await paymentsApi.counselorRejectPayment(rejectFeeDialog.studentId, rejectFeeDialog.txId, rejectFeeNote);
+      toast.success('Payment rejected — center notified to resubmit');
+      setRejectFeeDialog(null); setRejectFeeNote(''); load();
+    } catch(e) { toast.error(e.message); }
+  }
+
   const pending           = allStudents.filter(s => s.applicationStatus === 'Submitted');
   const acctRejected      = allStudents.filter(s => s.applicationStatus === 'Accountant_Rejected');
   const newDocs           = docs.filter(d => d.status === 'Requested');
@@ -963,10 +975,16 @@ export default function CounselorPage() {
                     </div>
                   </div>
                 </div>
-                <Button size="sm" className="bg-orange-500 hover:bg-orange-600 flex-shrink-0 text-xs h-8"
-                  onClick={()=>forwardFeePaymentToAccountant(student._id, tx._id)}>
-                  <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
-                </Button>
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 text-xs h-8"
+                    onClick={()=>{ setRejectFeeDialog({studentId:student._id, txId:tx._id, studentName:student.name, amount:tx.amount}); setRejectFeeNote(''); }}>
+                    <XCircle className="h-3.5 w-3.5 mr-1"/>Reject
+                  </Button>
+                  <Button size="sm" className="bg-orange-500 hover:bg-orange-600 flex-shrink-0 text-xs h-8"
+                    onClick={()=>forwardFeePaymentToAccountant(student._id, tx._id)}>
+                    <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
+                  </Button>
+                </div>
               </div>
             </div>
           ))}
@@ -1161,6 +1179,41 @@ export default function CounselorPage() {
       {studentModal && <StudentModal student={studentModal} onClose={()=>setStudentModal(null)}/>}
       {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}/>}
       {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts}/>}
+
+      {/* Reject Fee Payment Dialog */}
+      <Dialog open={!!rejectFeeDialog} onOpenChange={()=>{ setRejectFeeDialog(null); setRejectFeeNote(''); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-700">
+              <XCircle className="h-5 w-5"/>Reject Fee Payment
+            </DialogTitle>
+          </DialogHeader>
+          {rejectFeeDialog && (
+            <div className="space-y-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm">
+                <span className="font-semibold text-slate-800">{rejectFeeDialog.studentName}</span>
+                <span className="text-slate-500 ml-2">· ₹{Number(rejectFeeDialog.amount||0).toLocaleString('en-IN')}</span>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Reason for Rejection *</Label>
+                <Textarea
+                  className="mt-1 border-slate-200 focus:border-red-400"
+                  rows={3}
+                  placeholder="Tell center what's wrong and what to correct…"
+                  value={rejectFeeNote}
+                  onChange={e => setRejectFeeNote(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>{ setRejectFeeDialog(null); setRejectFeeNote(''); }}>Cancel</Button>
+            <Button variant="destructive" onClick={rejectFeePayment} disabled={!rejectFeeNote.trim()}>
+              <XCircle className="h-4 w-4 mr-1.5"/>Confirm Reject
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
