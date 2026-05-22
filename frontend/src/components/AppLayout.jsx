@@ -32,6 +32,7 @@ const NAV_CONFIG = {
   ],
   Accountant: [
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
+    { to: '/students',   label: 'Students',         icon: GraduationCap },
   ],
   University: [
     { to: '/university', label: 'Student Records', icon: BookOpen },

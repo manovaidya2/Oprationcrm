@@ -40,7 +40,7 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/'],
-  Accountant: ['/accountant', '/students/'],
+  Accountant: ['/accountant', '/students', '/students/'],
   University: ['/university', '/students/'],
   Dispatch:   ['/dispatch', '/students/'],
   Counselor:  ['/counselor', '/students', '/centers', '/settings', '/dashboard'],

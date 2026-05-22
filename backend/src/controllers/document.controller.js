@@ -348,6 +348,7 @@ exports.addPayment = asyncHandler(async (req, res) => {
     recordedBy: req.user._id,
     paidToAccount: paidToAccount || undefined,
     paidToAccountLabel: paidToAccountLabel || '',
+    paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
   });
 
   const newTotalPaid = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);

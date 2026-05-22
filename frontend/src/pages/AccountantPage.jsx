@@ -325,7 +325,9 @@ export default function AccountantPage() {
   const [amountSettleQueue, setAmountSettleQueue] = useState([]);
   const [docs,        setDocs]        = useState([]);
   const [payDocs,     setPayDocs]     = useState([]);
-  const [feePayments, setFeePayments] = useState([]);
+  const [feePayments, setFeePayments] = useState([]);   // only pending
+  const [allFeePayments, setAllFeePayments] = useState([]); // pending + verified + rejected
+  const [allPayDocs, setAllPayDocs] = useState([]);     // all doc payments (any verification status)
   const [scanDocs,    setScanDocs]    = useState([]);
   const [history,     setHistory]     = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -360,6 +362,10 @@ export default function AccountantPage() {
       setDocs(allD.filter(d => ['Forwarded','Fee_Pending'].includes(d.status)));
       setScanDocs(allD.filter(d => d.status === 'Accountant_Received'));
       setPayDocs(allD.filter(d => d.status === 'Payment_Submitted'));
+      setAllPayDocs(allD.filter(d =>
+        ['Payment_Submitted','Payment_Verified','Center_Notified','Fee_Rejected'].includes(d.status) &&
+        d.payments?.length > 0
+      ));
 
       // Build complete history from all sources
       const hist = [];
@@ -465,15 +471,22 @@ export default function AccountantPage() {
         });
       });
 
-      // 3. Fee payments verified/rejected
+      // 3. Fee payments — ALL transactions (pending + verified + rejected)
       const pending = [];
+      const allFeePayments = [];
       await Promise.all(allS.map(async (student) => {
         try {
           const pay = await paymentsApi.get(student._id);
-          if (!pay?.transactions) return;
-          pay.transactions.forEach(tx => {
+          if (!pay?.transactions?.length) return;
+          const relevantTx = pay.transactions.filter(tx =>
+            ['pending_accountant','verified','rejected'].includes(tx.verificationStatus)
+          );
+          if (relevantTx.length === 0) return;
+          relevantTx.forEach(tx => {
+            const entry = { student, payment: pay, tx };
+            allFeePayments.push(entry);
             if (tx.verificationStatus === 'pending_accountant') {
-              pending.push({ student, payment: pay, tx });
+              pending.push(entry);
             }
             if (['verified','rejected'].includes(tx.verificationStatus)) {
               hist.push({
@@ -495,6 +508,7 @@ export default function AccountantPage() {
       }));
 
       setFeePayments(pending);
+      setAllFeePayments(allFeePayments);
 
       // Build payment map for doc cards (Doc Request + Doc Payments tabs)
       const allDocStudentIds = [...new Set([
@@ -580,7 +594,9 @@ export default function AccountantPage() {
   const filtAmountSettle   = amountSettleQueue.filter(matchS);
   const filtDocs           = docs.filter(matchD);
   const filtPayDocs     = payDocs.filter(matchD);
-  const filtFeePayments = feePayments.filter(matchFP);
+  const filtFeePayments    = feePayments.filter(matchFP);
+  const filtAllFeePayments = allFeePayments.filter(matchFP);
+  const filtAllPayDocs     = allPayDocs.filter(matchD);
   const filtHistory     = history.filter(matchH);
 
   const pendingSettleCount = amountSettleQueue.filter(s => !s.amountSettled).length;
@@ -874,6 +890,123 @@ export default function AccountantPage() {
               </CardContent>
             </Card>
           ))}
+
+          {/* ── Permanent list: ALL fee payment students ───── */}
+          {allFeePayments.length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="h-px flex-1 bg-border"/>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
+                  All Fee Payment Students ({allFeePayments.length})
+                </span>
+                <div className="h-px flex-1 bg-border"/>
+              </div>
+              <div className="space-y-2">
+                {allFeePayments.map(({ student, payment, tx }, idx) => {
+                  const isPending  = tx.verificationStatus === 'pending_accountant';
+                  const isVerified = tx.verificationStatus === 'verified';
+                  const isRejected = tx.verificationStatus === 'rejected';
+                  return (
+                    <div
+                      key={`alllist-${tx._id}`}
+                      className={`rounded-xl border transition-colors ${
+                        isPending  ? 'bg-amber-50  border-amber-200'  :
+                        isVerified ? 'bg-emerald-50 border-emerald-200' :
+                                     'bg-red-50    border-red-200'
+                      }`}
+                    >
+                      {/* Header row */}
+                      <div
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                        onClick={() => setDetailStudent(student)}
+                      >
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${
+                          isPending  ? 'bg-amber-200  text-amber-800'  :
+                          isVerified ? 'bg-emerald-200 text-emerald-800' :
+                                       'bg-red-200    text-red-800'
+                        }`}>
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-800 text-sm">{student.name}</span>
+                            {student.enrollmentNumber && (
+                              <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                {student.enrollmentNumber}
+                              </span>
+                            )}
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              isPending  ? 'bg-amber-200  text-amber-800'  :
+                              isVerified ? 'bg-emerald-200 text-emerald-800' :
+                                           'bg-red-200    text-red-800'
+                            }`}>
+                              {isPending ? '⏳ Pending' : isVerified ? '✓ Verified' : '✗ Rejected'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {student.center?.name}{student.courseName ? ` · ${student.courseName}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-sm font-bold text-emerald-700">{fmt(tx.amount)}</div>
+                          <div className="text-xs text-muted-foreground">{tx.mode || '—'}</div>
+                        </div>
+                      </div>
+
+                      {/* Payment details */}
+                      <div className="px-4 pb-3">
+                        <div className="bg-white/70 border border-white rounded-lg px-3 py-2 space-y-1.5">
+                          {/* Mode + date */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {tx.mode && <span className="text-xs bg-muted border border-border px-1.5 py-0.5 rounded font-medium">via {tx.mode}</span>}
+                            {tx.paidAt && <span className="text-xs text-muted-foreground">📅 {fmtD(tx.paidAt)}</span>}
+                          </div>
+                          {tx.mode === 'UPI' && tx.upiId && (
+                            <div className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-semibold text-foreground">{tx.upiId}</span></div>
+                          )}
+                          {tx.utrRef && (
+                            <div className="text-xs text-muted-foreground">UTR: <span className="font-mono font-semibold text-foreground">{tx.utrRef}</span></div>
+                          )}
+                          {tx.mode === 'Bank Transfer' && tx.bankName && (
+                            <div className="text-xs text-muted-foreground">Bank: <span className="font-semibold text-foreground">{tx.bankName}</span></div>
+                          )}
+                          {tx.mode === 'Bank Transfer' && tx.accountHolder && (
+                            <div className="text-xs text-muted-foreground">A/C Holder: <span className="font-semibold text-foreground">{tx.accountHolder}</span></div>
+                          )}
+                          {tx.mode === 'Bank Transfer' && tx.accountNumber && (
+                            <div className="text-xs text-muted-foreground">A/C No: <span className="font-mono font-semibold text-foreground">{tx.accountNumber}</span></div>
+                          )}
+                          {tx.mode === 'Bank Transfer' && tx.ifscCode && (
+                            <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{tx.ifscCode}</span></div>
+                          )}
+                          {tx.note && (
+                            <div className="text-xs text-muted-foreground italic">Note: "{tx.note}"</div>
+                          )}
+                          {/* Verified/Rejected by info */}
+                          {(isVerified || isRejected) && tx.verifiedAt && (
+                            <div className={`text-xs mt-1 ${isVerified ? 'text-emerald-700' : 'text-red-700'}`}>
+                              {isVerified ? '✓ Verified' : '✗ Rejected'} by {tx.verifiedBy?.name || 'Accountant'} · {fmtD(tx.verifiedAt)}
+                              {tx.verificationNote && <span className="ml-1 italic">— "{tx.verificationNote}"</span>}
+                            </div>
+                          )}
+                          {/* Screenshot */}
+                          {tx.paymentScreenshot && (
+                            <a
+                              href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+                              target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
+                            >
+                              <Download className="h-3 w-3"/>View Payment Screenshot
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* Doc Fees Tab */}
@@ -919,7 +1052,16 @@ export default function AccountantPage() {
 
 
                   {d.payments?.length>0 && d.payments.map(p => (
-                    <div key={p._id} className="mt-1"><PaymentInfo tx={p}/></div>
+                    <div key={p._id} className="mt-1 space-y-1">
+                      <PaymentInfo tx={p}/>
+                      {p.paymentScreenshot && (
+                        <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                          target="_blank" rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+                          <Download className="h-3 w-3"/>View Payment Screenshot
+                        </a>
+                      )}
+                    </div>
                   ))}
                   
                 </div>
@@ -948,18 +1090,18 @@ export default function AccountantPage() {
     </span>
   )}
 </div>
-                  {d.payments?.slice(-1).map(p => (
-                    <div key={p._id} className="text-xs mt-1 space-y-0.5">
+                  {d.payments?.map(p => (
+                    <div key={p._id} className="text-xs mt-1 space-y-0.5 border border-slate-100 rounded-lg p-2 bg-slate-50/50">
                       <PaymentInfo tx={p}/>
-                       {p.paymentScreenshot && (   // ← YE DAALO
-    <div className="mt-1.5">
-      <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
-        target="_blank" rel="noreferrer"
-        className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
-        <Download className="h-3 w-3"/>View Payment Screenshot
-      </a>
-    </div>
-  )}
+                      {p.paymentScreenshot && (
+                        <div className="mt-1.5">
+                          <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                            target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+                            <Download className="h-3 w-3"/>View Payment Screenshot
+                          </a>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {studentPayMap[d.student?._id] && (
@@ -985,6 +1127,127 @@ export default function AccountantPage() {
               </CardContent>
             </Card>
           ))}
+
+          {/* ── Permanent list: ALL doc payment students ─────── */}
+          {allPayDocs.length > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="h-px flex-1 bg-border"/>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
+                  All Doc Payment Students ({allPayDocs.length})
+                </span>
+                <div className="h-px flex-1 bg-border"/>
+              </div>
+              <div className="space-y-2">
+                {allPayDocs.map((d, idx) => {
+                  const isPending  = d.status === 'Payment_Submitted';
+                  const isVerified = d.status === 'Payment_Verified';
+                  const isRejected = d.status === 'Center_Notified' || d.status === 'Fee_Rejected';
+                  const lastPay    = d.payments?.slice(-1)[0];
+                  return (
+                    <div
+                      key={`doclist-${d._id}`}
+                      className={`rounded-xl border transition-colors ${
+                        isPending  ? 'bg-blue-50   border-blue-200'   :
+                        isVerified ? 'bg-emerald-50 border-emerald-200' :
+                        isRejected ? 'bg-red-50    border-red-200'    :
+                                     'bg-slate-50  border-slate-200'
+                      }`}
+                    >
+                      {/* Header row */}
+                      <div
+                        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                        onClick={() => setDetailStudent(d.student)}
+                      >
+                        <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${
+                          isPending  ? 'bg-blue-200   text-blue-800'   :
+                          isVerified ? 'bg-emerald-200 text-emerald-800' :
+                          isRejected ? 'bg-red-200    text-red-800'    :
+                                       'bg-slate-200  text-slate-700'
+                        }`}>
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-800 text-sm">{d.student?.name || '—'}</span>
+                            {d.student?.enrollmentNumber && (
+                              <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                {d.student.enrollmentNumber}
+                              </span>
+                            )}
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              isPending  ? 'bg-blue-200   text-blue-800'   :
+                              isVerified ? 'bg-emerald-200 text-emerald-800' :
+                              isRejected ? 'bg-red-200    text-red-800'    :
+                                           'bg-slate-200  text-slate-700'
+                            }`}>
+                              {isPending ? '⏳ Pending' : isVerified ? '✓ Verified' : isRejected ? '✗ Rejected' : d.status?.replace(/_/g,' ')}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                            {d.name}{d.center?.name ? ` · ${d.center.name}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-sm font-bold text-emerald-700">{fmt(lastPay?.amount)}</div>
+                          <div className="text-xs text-muted-foreground">{lastPay?.mode || '—'}</div>
+                        </div>
+                      </div>
+
+                      {/* Payment details for each payment */}
+                      {d.payments?.length > 0 && (
+                        <div className="px-4 pb-3 space-y-2">
+                          {d.payments.map((p, pi) => (
+                            <div key={p._id || pi} className="bg-white/70 border border-white rounded-lg px-3 py-2 space-y-1.5">
+                              {/* Amount + mode + date */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-emerald-700 text-sm">{fmt(p.amount)}</span>
+                                {p.mode && <span className="text-xs bg-muted border border-border px-1.5 py-0.5 rounded font-medium">via {p.mode}</span>}
+                                {p.paidAt && <span className="text-xs text-muted-foreground">📅 {fmtD(p.paidAt)}</span>}
+                              </div>
+                              {/* UPI details */}
+                              {p.mode === 'UPI' && p.upiId && (
+                                <div className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-semibold text-foreground">{p.upiId}</span></div>
+                              )}
+                              {p.utrRef && (
+                                <div className="text-xs text-muted-foreground">UTR: <span className="font-mono font-semibold text-foreground">{p.utrRef}</span></div>
+                              )}
+                              {/* Bank details */}
+                              {p.mode === 'Bank Transfer' && p.bankName && (
+                                <div className="text-xs text-muted-foreground">Bank: <span className="font-semibold text-foreground">{p.bankName}</span></div>
+                              )}
+                              {p.mode === 'Bank Transfer' && p.accountHolder && (
+                                <div className="text-xs text-muted-foreground">A/C Holder: <span className="font-semibold text-foreground">{p.accountHolder}</span></div>
+                              )}
+                              {p.mode === 'Bank Transfer' && p.accountNumber && (
+                                <div className="text-xs text-muted-foreground">A/C No: <span className="font-mono font-semibold text-foreground">{p.accountNumber}</span></div>
+                              )}
+                              {p.mode === 'Bank Transfer' && p.ifscCode && (
+                                <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{p.ifscCode}</span></div>
+                              )}
+                              {p.note && (
+                                <div className="text-xs text-muted-foreground italic">Note: "{p.note}"</div>
+                              )}
+                              {/* Screenshot */}
+                              {p.paymentScreenshot && (
+                                <a
+                                  href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
+                                >
+                                  <Download className="h-3 w-3"/>View Payment Screenshot
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         {/* History Tab */}

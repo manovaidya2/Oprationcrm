@@ -113,7 +113,7 @@ router.patch('/documents/:id/forward-to-center',    protect, requireRole('Admin'
 router.patch('/documents/:id/request-dispatch',      protect, requireRole('Admin','Center'), docC.requestDispatch);
 router.patch('/documents/:id/forward-payment',       protect, requireRole('Admin','Counselor'), docC.counselorForwardPayment);
 router.patch('/documents/:id/university-dispatch',  protect, requireRole('Admin','University'), docC.universityDispatch);
-router.post ('/documents/:id/payments',             protect, requireRole('Admin','Center','Counselor'), docC.addPayment);
+router.post ('/documents/:id/payments',             protect, requireRole('Admin','Center','Counselor'), upload.single('paymentScreenshot'), docC.addPayment);
 router.patch('/documents/:id/payments/:payId',      protect, requireRole('Admin','Center','Counselor'), docC.updatePayment);
 router.patch('/documents/:id/verify-payment',       protect, requireRole('Admin','Accountant'), docC.verifyPayment);
 router.patch('/documents/:id/dispatch-to-center',   protect, requireRole('Admin','Dispatch'), docC.dispatchToCenter);

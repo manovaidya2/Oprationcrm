@@ -19,6 +19,7 @@ const docPaymentSchema = new mongoose.Schema({
   verifiedAt: { type: Date },
   paidToAccount:      { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel: { type: String, trim: true },
+  paymentScreenshot:  { type: String, trim: true },
 }, { _id: true });
 
 const historyEntrySchema = new mongoose.Schema({

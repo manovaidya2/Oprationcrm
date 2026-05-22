@@ -943,7 +943,7 @@ function DocsSection({ studentId, isEnrolled }) {
   const [saving,setSaving]=useState(false);
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
-  const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:''};
+  const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
   const [df,setDf]=useState({name:'',type:'',chargeFee:'',note:'',payAmount:''});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
@@ -997,9 +997,29 @@ function DocsSection({ studentId, isEnrolled }) {
     if(pf.mode==='UPI' && !pf.upiId.trim()) return toast.error('UPI ID is required');
     if(pf.mode==='Bank Transfer' && !pf.bankName.trim()) return toast.error('Bank name is required');
     if(pf.mode==='Bank Transfer' && !pf.accountHolder.trim()) return toast.error('Account holder name is required');
+    if(!pf.paymentScreenshot) return toast.error('Payment screenshot is required');
     setSaving(true);
     try{
-      await docsApi.addPayment(payDoc._id,{...pf,amount:Number(pf.amount)});
+      const fd = new FormData();
+      fd.append('amount', String(Number(pf.amount)));
+      fd.append('mode', pf.mode||'');
+      fd.append('upiId', pf.upiId||'');
+      fd.append('utrRef', pf.utrRef||'');
+      fd.append('bankName', pf.bankName||'');
+      fd.append('accountHolder', pf.accountHolder||'');
+      fd.append('accountNumber', pf.accountNumber||'');
+      fd.append('ifscCode', pf.ifscCode||'');
+      fd.append('note', pf.note||'');
+      fd.append('paidAt', pf.paidAt||'');
+      fd.append('paidToAccount', pf.paidToAccount||'');
+      fd.append('paidToAccountLabel', pf.paidToAccountLabel||'');
+      if(pf.paymentScreenshot instanceof File) fd.append('paymentScreenshot', pf.paymentScreenshot);
+      const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+      const token = localStorage.getItem('crm_token');
+      const res = await fetch(`${BASE}/documents/${payDoc._id}/payments`, {
+        method:'POST', headers:{ Authorization:`Bearer ${token}` }, body:fd
+      });
+      if(!res.ok){ const e=await res.json(); throw new Error(e.message||'Failed'); }
       toast.success('Payment recorded'); setPayDoc(null); load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
@@ -1241,6 +1261,21 @@ function DocsSection({ studentId, isEnrolled }) {
     <div className="overflow-y-auto flex-1 pr-2 pl-2">
       {payDoc&&<div className="flex gap-4 text-sm mb-3 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2.5"><span className="text-slate-600">Charge: <span className="font-bold text-slate-800">{fmt(payDoc.chargeFee)}</span></span><span className="text-emerald-600">Paid: <span className="font-bold">{fmt(payDoc.totalPaid)}</span></span><span className="text-amber-600">Due: <span className="font-bold">{fmt(payDoc.chargeFee-payDoc.totalPaid)}</span></span></div>}
       <PaymentFields form={pf} setForm={setPf} showAmount={true} showDate={false}/>
+      {/* Payment Screenshot */}
+      <div className="mt-3">
+        <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Payment Screenshot *</Label>
+        <input
+          type="file"
+          accept="image/*,.pdf"
+          onChange={e => setPf(p => ({ ...p, paymentScreenshot: e.target.files[0] || null }))}
+          className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-600 file:font-medium hover:file:bg-indigo-100 cursor-pointer"
+        />
+        {pf.paymentScreenshot && (
+          <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+            ✓ {pf.paymentScreenshot.name}
+          </p>
+        )}
+      </div>
     </div>
           <DialogFooter><Button variant="outline" onClick={()=>setPayDoc(null)} className="border-slate-200">Cancel</Button><Button onClick={addDocPay} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Submit Payment</Button></DialogFooter>
         </DialogContent>
