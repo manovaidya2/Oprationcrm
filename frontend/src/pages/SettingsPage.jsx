@@ -74,7 +74,12 @@ export default function SettingsPage() {
   }
 
   async function toggleUser(u) {
-    try { await authApi.toggleUser(u._id); toast.success(u.isActive?'Deactivated':'Activated'); load(); }
+    const action = u.isActive === false ? 'activate' : 'deactivate';
+    const msg = u.isActive === false
+      ? `Activate "${u.name}"? They will be able to login again.`
+      : `Deactivate "${u.name}"? They will not be able to login until reactivated.`;
+    if (!confirm(msg)) return;
+    try { await authApi.toggleUser(u._id); toast.success(u.isActive===false?'Activated':'Deactivated'); load(); }
     catch(e) { toast.error(e.message); }
   }
 
@@ -132,9 +137,13 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               {roleUsers.map(u => (
-                <div key={u._id} className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 ${u.isActive===false?'opacity-50 bg-muted/30':'bg-muted/20'}`}>
+                <div key={u._id} className={`flex items-center justify-between gap-3 rounded-lg px-3 py-2 ${u.isActive===false?'opacity-60 bg-muted/30':'bg-muted/20'}`}>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium">{u.name} {String(u._id)===String(me._id||me.id) && <span className="text-xs text-muted-foreground">(you)</span>}</div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-medium">{u.name}</span>
+                      {String(u._id)===String(me._id||me.id) && <span className="text-xs text-muted-foreground">(you)</span>}
+                      {u.isActive===false && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
+                    </div>
                     <div className="text-xs text-muted-foreground truncate">{u.email}</div>
                     {u.centerId?.name && <div className="text-xs text-sky-600">{u.centerId.name}</div>}
                     {u.universityId?.name && <div className="text-xs text-purple-600">🎓 {u.universityId.name}</div>}

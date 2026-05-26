@@ -11,6 +11,7 @@ const Payment      = require('../models/Payment');
 const StudentDoc   = require('../models/StudentDocument');
 const AuditLog     = require('../models/AuditLog');
 const User         = require('../models/User');
+const PaymentAccount = require('../models/PaymentAccount');
 
 // ── NOTIFICATIONS ────────────────────────────────────────────
 exports.listNotifications = asyncHandler(async (req, res) => {
@@ -358,7 +359,56 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
       };
     });
 
-    return res.json({ studentCount, centerCount, counselorCount, statusBreakdown, totalFees, totalPaid, totalDue: totalFees - totalPaid, centersBreakdown, monthlyFees });
+    // Bank/Account wise breakdown — ALL active accounts, with verified transaction totals
+    const allAccounts = await PaymentAccount.find({ isActive: { $ne: false } }).lean();
+    const accMap = {};
+    allAccounts.forEach(a => { accMap[String(a._id)] = a; });
+
+    // Init map with all accounts (even those with 0 transactions)
+    const bankWiseMap = {};
+    allAccounts.forEach(a => {
+      bankWiseMap[String(a._id)] = {
+        id:            String(a._id),
+        label:         a.label,
+        mode:          a.mode,
+        upiId:         a.upiId         || '',
+        upiName:       a.upiName        || '',
+        bankName:      a.bankName       || '',
+        accountNumber: a.accountNumber  || '',
+        accountHolder: a.accountHolder  || '',
+        ifscCode:      a.ifscCode       || '',
+        branch:        a.branch         || '',
+        total: 0,
+        count: 0,
+      };
+    });
+
+    // Accumulate verified transactions — match strictly by ObjectId
+    allPayments.forEach(p => {
+      (p.transactions || []).forEach(tx => {
+        if (tx.verificationStatus !== 'verified') return;
+        if (!tx.paidToAccount) return; // skip unassigned
+        const key = String(tx.paidToAccount);
+        if (!bankWiseMap[key]) return; // account not in active list
+        bankWiseMap[key].total += tx.amount || 0;
+        bankWiseMap[key].count += 1;
+      });
+    });
+
+    const bankWiseBreakdown = Object.values(bankWiseMap).sort((a, b) => b.total - a.total);
+
+    // Flat transactions for modal CSV (student name + all tx fields)
+    const studentMap = {};
+    (await Student.find({}).select('_id name').lean()).forEach(s => { studentMap[String(s._id)] = s.name; });
+    const allPaymentsFlat = allPayments.map(p => ({
+      studentName: studentMap[String(p.student)] || '',
+      transactions: (p.transactions || []).map(tx => ({
+        ...tx,
+        paidToAccount: tx.paidToAccount ? String(tx.paidToAccount) : null,
+      })),
+    }));
+
+    return res.json({ studentCount, centerCount, counselorCount, statusBreakdown, totalFees, totalPaid, totalDue: totalFees - totalPaid, centersBreakdown, monthlyFees, bankWiseBreakdown, allPaymentsFlat });
   }
 
   res.json({ studentCount, centerCount, counselorCount, statusBreakdown, totalFees, totalPaid, totalDue: totalFees - totalPaid, centersBreakdown });

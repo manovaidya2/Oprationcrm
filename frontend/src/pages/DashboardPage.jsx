@@ -235,10 +235,222 @@ function CenterFeesTable({ centers }) {
   );
 }
 
+// ── Bank / Account Wise Breakdown ────────────────────────────
+function BankWiseSection({ data, allPayments }) {
+  const [modal,    setModal]    = useState(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+  if (!data?.length) return null;
+
+  const fmtD = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+
+  // Match strictly by ObjectId string
+  function getTxns(accId) {
+    const rows = [];
+    (allPayments || []).forEach(p => {
+      (p.transactions || []).forEach(tx => {
+        if (tx.verificationStatus !== 'verified') return;
+        if (!tx.paidToAccount || String(tx.paidToAccount) !== accId) return;
+        if (dateFrom && new Date(tx.verifiedAt) < new Date(dateFrom)) return;
+        if (dateTo   && new Date(tx.verifiedAt) > new Date(dateTo + 'T23:59:59')) return;
+        rows.push({ ...tx, studentName: p.studentName || '' });
+      });
+    });
+    return rows.sort((a,b) => new Date(b.verifiedAt) - new Date(a.verifiedAt));
+  }
+
+  function downloadCSV(acc, txns) {
+    if (!txns.length) { alert('No transactions found'); return; }
+    const total     = txns.reduce((s,t) => s + Number(t.amount||0), 0);
+    const dateLabel = dateFrom||dateTo ? `${dateFrom||'start'} to ${dateTo||'today'}` : 'All time';
+    const summary = [
+      ['Account', acc.label], ['Mode', acc.mode],
+      acc.upiId         ? ['UPI ID',        acc.upiId]         : null,
+      acc.upiName       ? ['UPI Name',       acc.upiName]       : null,
+      acc.bankName      ? ['Bank',           acc.bankName]      : null,
+      acc.accountHolder ? ['Account Holder', acc.accountHolder] : null,
+      acc.accountNumber ? ['Account No',     acc.accountNumber] : null,
+      acc.ifscCode      ? ['IFSC',           acc.ifscCode]      : null,
+      acc.branch        ? ['Branch',         acc.branch]        : null,
+      ['Period', dateLabel],
+      ['Total Transactions', txns.length],
+      ['Total Amount', total], [],
+      ['Sr.No','Student Name','Amount','Mode','UTR','UPI ID','Bank','Account Holder','Account No','Paid Date','Verified Date','Verified By'],
+    ].filter(Boolean);
+    const rows = txns.map((t,i) => [
+      i+1, t.studentName, t.amount||0, t.mode||'',
+      t.utrRef||'', t.upiId||'', t.bankName||'', t.accountHolder||'', t.accountNumber||'',
+      fmtD(t.paidAt), fmtD(t.verifiedAt), t.verifiedBy?.name||'',
+    ]);
+    const esc  = v => `"${String(v).replace(/"/g,'""')}"`;
+    const csv  = [...summary,...rows].map(r => r.map(esc).join(',')).join('\n');
+    const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    const ds = dateFrom||dateTo ? `_${dateFrom||''}to${dateTo||''}` : '';
+    a.download = `${acc.label.replace(/[^a-z0-9]/gi,'_')}_history${ds}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  return (
+    <>
+      {/* Account Cards — same style as Settings page */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <IndianRupee className="h-4 w-4 text-indigo-600"/>Payment Accounts — Collection Summary
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">Click on any account to view its transaction history</p>
+        </CardHeader>
+        <CardContent className="space-y-2 pt-1">
+          {data.map(acc => {
+            const isUPI  = acc.mode === 'UPI';
+            const isBank = acc.mode === 'Bank Transfer';
+            return (
+              <div key={acc.id}
+                className="flex items-center justify-between rounded-lg border px-4 py-3 bg-background hover:bg-slate-50 cursor-pointer transition-colors group"
+                onClick={() => setModal(acc)}>
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isUPI ? 'bg-blue-100' : 'bg-emerald-100'}`}>
+                    <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`}/>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{acc.label}</span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isUPI ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{acc.mode}</span>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {isUPI && acc.upiId && <span>UPI: <span className="font-mono font-medium">{acc.upiId}</span>{acc.upiName ? ` — ${acc.upiName}` : ''}</span>}
+                      {isBank && <span>{acc.bankName}{acc.accountHolder ? ` · ${acc.accountHolder}` : ''}{acc.accountNumber ? ` · A/C: ${acc.accountNumber}` : ''}{acc.ifscCode ? ` · ${acc.ifscCode}` : ''}</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="text-right">
+                    <div className={`font-bold text-sm ${acc.total > 0 ? 'text-emerald-700' : 'text-muted-foreground'}`}>{fmt(acc.total)}</div>
+                    <div className="text-xs text-muted-foreground">{acc.count} txn{acc.count !== 1 ? 's' : ''}</div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-500 transition-colors"/>
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* Transaction Modal */}
+      {modal && (() => {
+        const txns = getTxns(modal.id);
+        const total = txns.reduce((s,t) => s + Number(t.amount||0), 0);
+        const isUPI  = modal.mode === 'UPI';
+        const isBank = modal.mode === 'Bank Transfer';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setModal(null)}>
+            <div className="absolute inset-0 bg-black/40"/>
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+              onClick={e => e.stopPropagation()}>
+
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-slate-100 flex-shrink-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isUPI ? 'bg-blue-100' : 'bg-emerald-100'}`}>
+                      <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`}/>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 className="font-bold text-slate-800">{modal.label}</h2>
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isUPI ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{modal.mode}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {isUPI && modal.upiId && <span>UPI: <b className="font-mono">{modal.upiId}</b>{modal.upiName ? ` — ${modal.upiName}` : ''}</span>}
+                        {isBank && <span>{modal.bankName}{modal.accountHolder ? ` · ${modal.accountHolder}` : ''}{modal.accountNumber ? ` · A/C: ${modal.accountNumber}` : ''}{modal.ifscCode ? ` · ${modal.ifscCode}` : ''}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none mt-0.5">✕</button>
+                </div>
+
+                {/* Date filter + CSV */}
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">From</div>
+                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400"/>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">To</div>
+                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                      onClick={e => e.stopPropagation()}
+                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400"/>
+                  </div>
+                  {(dateFrom||dateTo) && (
+                    <button onClick={e=>{e.stopPropagation();setDateFrom('');setDateTo('');}}
+                      className="text-xs text-red-400 hover:text-red-600 h-8 px-1">✕ Clear</button>
+                  )}
+                  <button onClick={e=>{e.stopPropagation();downloadCSV(modal,txns);}}
+                    className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 h-8 transition-colors">
+                    ↓ Download CSV
+                  </button>
+                </div>
+
+                {/* Summary */}
+                <div className="mt-3 flex gap-2">
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
+                    <div className="text-xs text-indigo-500">Total Collected</div>
+                    <div className="font-bold text-indigo-700">{fmt(total)}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+                    <div className="text-xs text-muted-foreground">Transactions</div>
+                    <div className="font-bold text-slate-700">{txns.length}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Transactions list */}
+              <div className="overflow-y-auto flex-1 px-5 py-3 space-y-2">
+                {txns.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-12">
+                    <IndianRupee className="h-8 w-8 mx-auto mb-2 opacity-20"/>
+                    <p className="text-sm">No verified transactions{(dateFrom||dateTo) ? ' in selected date range' : ''}</p>
+                  </div>
+                ) : txns.map((tx, ti) => (
+                  <div key={tx._id||ti} className="border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-colors">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs text-slate-400 font-mono w-5">#{ti+1}</span>
+                          <span className="font-semibold text-slate-800 text-sm">{tx.studentName}</span>
+                          <span className="font-bold text-emerald-700">{fmt(tx.amount)}</span>
+                          {tx.mode && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{tx.mode}</span>}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-0.5 pl-7">
+                          {tx.utrRef && <span>UTR: <b className="font-mono text-foreground">{tx.utrRef}</b></span>}
+                          {tx.upiId  && <span>UPI: {tx.upiId}</span>}
+                          {tx.accountHolder && <span>A/C Holder: <b>{tx.accountHolder}</b></span>}
+                          <span>Paid: {fmtD(tx.paidAt)}</span>
+                          <span className="text-emerald-600">✓ Verified: {fmtD(tx.verifiedAt)}</span>
+                          {tx.verifiedBy?.name && <span>by {tx.verifiedBy.name}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </>
+  );
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [stats, setStats]     = useState(null);
+  const [stats,   setStats]   = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -343,6 +555,11 @@ export default function DashboardPage() {
         <MonthlyChart data={stats.monthlyFees}/>
       )}
 
+      {/* Bank/Account wise collections — Admin only */}
+      {role === 'Admin' && stats?.bankWiseBreakdown?.length > 0 && (
+        <BankWiseSection data={stats.bankWiseBreakdown} allPayments={stats.allPaymentsFlat || []}/>
+      )}
+
       {/* Center fees table — Admin only */}
       {role === 'Admin' && stats?.centersBreakdown?.length > 0 && (
         <CenterFeesTable centers={stats.centersBreakdown}/>
@@ -362,7 +579,7 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
               {stats.centersBreakdown.map((c) => (
                 <div key={c._id} className="border rounded-xl p-4 hover:bg-muted/30 transition-colors cursor-pointer"
                   onClick={()=>navigate('/students')}>

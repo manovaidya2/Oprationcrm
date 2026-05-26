@@ -23,7 +23,7 @@ const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',mon
 const MODES = ['UPI', 'Bank Transfer'];
 
 // ── Payment Form Fields Component ─────────────────────────────
-function PaymentFields({ form, setForm, showAmount = true, showDate = true }) {
+function PaymentFields({ form, setForm, showAmount = true, showDate = true, showScreenshot = 'required' }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const isUPI  = form.mode === 'UPI';
   const isBank = form.mode === 'Bank Transfer';
@@ -153,23 +153,26 @@ function PaymentFields({ form, setForm, showAmount = true, showDate = true }) {
       )}
 
       {/* Payment Screenshot */}
-<div>
+{showScreenshot && <div>
   <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-    Payment Screenshot *
+    Payment Screenshot {showScreenshot === 'required' ? '*' : ''}
   </Label>
+  {form.paymentScreenshot && typeof form.paymentScreenshot === 'string' && (
+    <a href={`${MEDIA}${form.paymentScreenshot}`} target="_blank" rel="noreferrer"
+      className="text-xs text-indigo-600 underline mt-1 mb-1 flex items-center gap-1">
+      <Download className="h-3 w-3"/>View current screenshot
+    </a>
+  )}
   <input
     type="file"
     accept="image/*,.pdf"
     onChange={e => set('paymentScreenshot', e.target.files[0])}
     className="mt-1 block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-600 file:font-medium"
   />
-  {form.paymentScreenshot && typeof form.paymentScreenshot === 'string' && (
-    <a href={`${MEDIA}${form.paymentScreenshot}`} target="_blank" rel="noreferrer"
-      className="text-xs text-indigo-600 underline mt-1 flex items-center gap-1">
-      <Download className="h-3 w-3"/>View uploaded screenshot
-    </a>
+  {form.paymentScreenshot && form.paymentScreenshot instanceof File && (
+    <p className="text-xs text-emerald-600 mt-1 flex items-center gap-1">✓ {form.paymentScreenshot.name}</p>
   )}
-</div>
+</div>}
 
 
 
@@ -819,7 +822,7 @@ function FeeSection({ studentId, appStatus }) {
       fd.append('ifscCode',      editTx.ifscCode      || '');
       fd.append('note',          editTx.note          || '');
       fd.append('paidAt',        editTx.paidAt        || '');
-      if(editTx.newScreenshot instanceof File) fd.append('paymentScreenshot', editTx.newScreenshot);
+      if(editTx.paymentScreenshot instanceof File) fd.append('paymentScreenshot', editTx.paymentScreenshot);
       const BASE  = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('crm_token');
       const res   = await fetch(`${BASE}/payments/${studentId}/transactions/${editTx._id}`, {
@@ -847,7 +850,7 @@ function FeeSection({ studentId, appStatus }) {
       fd.append('ifscCode',      editTx.ifscCode      || '');
       fd.append('note',          editTx.note          || '');
       fd.append('paidAt',        editTx.paidAt        || '');
-      if(editTx.newScreenshot instanceof File) fd.append('paymentScreenshot', editTx.newScreenshot);
+      if(editTx.paymentScreenshot instanceof File) fd.append('paymentScreenshot', editTx.paymentScreenshot);
       await paymentsApi.resendTransaction(studentId, editTx._id, fd);
       toast.success('Payment sent to counselor for review!'); setEditTx(null); load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -961,32 +964,12 @@ function FeeSection({ studentId, appStatus }) {
       </Dialog>
 
       <Dialog open={!!editTx} onOpenChange={()=>setEditTx(null)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
           <DialogHeader><DialogTitle className="text-slate-800">Update Payment Details</DialogTitle></DialogHeader>
-          {editTx && <PaymentFields form={editTx} setForm={setEditTx} showAmount={true} showDate={true}/>}
-
-          {/* Screenshot upload */}
-          {editTx && (
-            <div className="mt-1 space-y-1.5">
-              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Payment Screenshot</Label>
-              {editTx.paymentScreenshot && !editTx.newScreenshot && (
-                <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${editTx.paymentScreenshot}`}
-                  target="_blank" rel="noreferrer"
-                  className="flex items-center gap-1 text-xs text-indigo-600 underline w-fit">
-                  <Download className="h-3 w-3"/> View uploaded screenshot
-                </a>
-              )}
-              <input type="file" accept="image/*,.pdf"
-                onChange={e => setEditTx(p=>({...p, newScreenshot: e.target.files[0]||null}))}
-                className="block w-full text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-indigo-50 file:text-indigo-600 file:font-medium hover:file:bg-indigo-100 cursor-pointer"
-              />
-              {editTx.newScreenshot && (
-                <p className="text-xs text-emerald-600 flex items-center gap-1">✓ {editTx.newScreenshot.name}</p>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="flex-wrap gap-2">
+          <div className="overflow-y-auto flex-1 pr-1">
+            {editTx && <PaymentFields form={editTx} setForm={setEditTx} showAmount={true} showDate={true} showScreenshot="optional"/>}
+          </div>
+          <DialogFooter className="flex-wrap gap-2 pt-3 border-t border-slate-100">
             <Button variant="outline" onClick={()=>setEditTx(null)} className="border-slate-200">Cancel</Button>
             <Button onClick={updateTx} disabled={saving} variant="outline" className="border-slate-300 text-slate-700 hover:bg-slate-50">
               {saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Only

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Loader2, GraduationCap, Filter, ChevronRight, Download } from 'lucide-react';
+import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { studentsApi, centersApi, counselorsApi } from '@/lib/api';
+import { studentsApi, centersApi, counselorsApi, paymentsApi, docsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 const STATUS_COLORS = {
@@ -16,13 +16,17 @@ const STATUS_COLORS = {
   Changes_Requested: 'bg-amber-100 text-amber-700', Counselor_Approved: 'bg-indigo-100 text-indigo-700',
   Rejected: 'bg-red-100 text-red-700', Accountant_Pending: 'bg-amber-100 text-amber-700',
   Sent_To_University: 'bg-purple-100 text-purple-700', Enrolled: 'bg-emerald-100 text-emerald-700',
+  University_Rejected: 'bg-orange-100 text-orange-700',
 };
 const STATUS_LABELS = {
   Draft: 'Draft', Submitted: 'Submitted', Changes_Requested: 'Changes Needed',
-  Counselor_Approved: 'Approved', Rejected: 'Rejected',
-  Accountant_Pending: 'Fee Pending', Sent_To_University: 'At University', Enrolled: 'Enrolled',
+  Counselor_Approved: 'Approved', Rejected: 'Rejected', Accountant_Pending: 'Fee Pending',
+  Sent_To_University: 'At University', Enrolled: 'Enrolled', University_Rejected: 'Uni Rejected',
 };
 const ALL_STATUSES = Object.keys(STATUS_LABELS);
+
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+const fmtAmt  = n => n != null && n !== '' ? Number(n).toString() : '';
 
 export default function StudentsPage() {
   const navigate = useNavigate();
@@ -35,11 +39,20 @@ export default function StudentsPage() {
   const [loading,    setLoading]    = useState(true);
 
   // Filters
-  const [search,     setSearch]     = useState('');
-  const [statusF,    setStatusF]    = useState('all');
-  const [centerF,    setCenterF]    = useState('all');
+  const [search,    setSearch]    = useState('');
+  const [statusF,   setStatusF]   = useState('all');
+  const [centerF,   setCenterF]   = useState('all');
 
-  // Add student dialog (admin/counselor)
+  // Selection
+  const [selected, setSelected] = useState(new Set()); // Set of student _ids
+
+  // CSV dialog state
+  const [csvOpen,    setCsvOpen]    = useState(false);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [dateFrom,   setDateFrom]   = useState('');
+  const [dateTo,     setDateTo]     = useState('');
+
+  // Add student dialog
   const [addOpen, setAddOpen] = useState(false);
   const [form,    setForm]    = useState({ name:'', phone:'', email:'', courseName:'', courseYear:'', center:'', counselor:'' });
   const [saving,  setSaving]  = useState(false);
@@ -48,20 +61,163 @@ export default function StudentsPage() {
     try {
       setLoading(true);
       const params = {};
-      if (statusF && statusF !== 'all')  params.status = statusF;
-      if (centerF && centerF !== 'all')  params.centerId = centerF;
-      if (search)   params.search     = search;
+      if (statusF && statusF !== 'all') params.status   = statusF;
+      if (centerF && centerF !== 'all') params.centerId = centerF;
+      if (search)                        params.search   = search;
       const [s, c, co] = await Promise.all([
         studentsApi.getAll(params),
         centersApi.getAll(),
         counselorsApi.getAll(),
       ]);
       setStudents(s); setCenters(c); setCounselors(co);
+      // Reset selection when list changes
+      setSelected(new Set());
     } catch { toast.error('Failed to load students'); }
     finally { setLoading(false); }
   }, [search, statusF, centerF]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── Selection helpers ──────────────────────────────────────
+  const allSelected   = students.length > 0 && students.every(s => selected.has(s._id));
+  const someSelected  = selected.size > 0;
+
+  function toggleAll() {
+    if (allSelected) setSelected(new Set());
+    else setSelected(new Set(students.map(s => s._id)));
+  }
+  function toggleOne(id) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  // ── CSV Export ─────────────────────────────────────────────
+  async function doExportCSV() {
+    const toExport = students.filter(s => selected.size === 0 || selected.has(s._id));
+    if (toExport.length === 0) { toast.error('No students to export'); return; }
+
+    setCsvLoading(true);
+    try {
+      // Fetch payment + docs for each student in parallel
+      const enriched = await Promise.all(toExport.map(async s => {
+        let pay = null, docs = [];
+        try { pay  = await paymentsApi.get(s._id); }  catch {}
+        try { docs = await docsApi.list({ studentId: s._id, all: '1' }); } catch {}
+        return { s, pay, docs };
+      }));
+
+      // Apply date filter — keep student if any verified tx falls in range
+      const filtered = enriched.filter(({ pay }) => {
+        if (!dateFrom && !dateTo) return true;
+        const txs = pay?.transactions || [];
+        const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
+        if (verifiedTxs.length === 0) return !dateFrom && !dateTo; // no verified tx — only include if no date filter
+        return verifiedTxs.some(t => {
+          const d = new Date(t.verifiedAt);
+          if (dateFrom && d < new Date(dateFrom)) return false;
+          if (dateTo   && d > new Date(dateTo + 'T23:59:59')) return false;
+          return true;
+        });
+      });
+
+      if (filtered.length === 0) { toast.error('No students match the date filter'); setCsvLoading(false); return; }
+
+      const headers = [
+        // Student basic
+        'Name', 'Father Name', 'Mother Name', 'DOB', 'Gender', 'Phone', 'Email', 'Aadhaar', 'Address',
+        'Course', 'Session', 'University', 'Center', 'Counselor', 'Status', 'Enrollment No',
+        '10th %', '10th Year', '10th Board', '12th %', '12th Year', '12th Board',
+        // Fees
+        'Total Fee', 'Discount', 'Net Fee', 'Total Paid', 'Balance Due',
+        // Transactions (up to 5)
+        'Tx1 Amount', 'Tx1 Mode', 'Tx1 UTR', 'Tx1 Paid Date', 'Tx1 Verified Date', 'Tx1 Status',
+        'Tx2 Amount', 'Tx2 Mode', 'Tx2 UTR', 'Tx2 Paid Date', 'Tx2 Verified Date', 'Tx2 Status',
+        'Tx3 Amount', 'Tx3 Mode', 'Tx3 UTR', 'Tx3 Paid Date', 'Tx3 Verified Date', 'Tx3 Status',
+        'Tx4 Amount', 'Tx4 Mode', 'Tx4 UTR', 'Tx4 Paid Date', 'Tx4 Verified Date', 'Tx4 Status',
+        'Tx5 Amount', 'Tx5 Mode', 'Tx5 UTR', 'Tx5 Paid Date', 'Tx5 Verified Date', 'Tx5 Status',
+        // Last verified payment date
+        'Last Payment Verified Date',
+        // Documents (up to 5 doc requests)
+        'Doc1 Name', 'Doc1 Status', 'Doc1 Charge', 'Doc1 Paid',
+        'Doc2 Name', 'Doc2 Status', 'Doc2 Charge', 'Doc2 Paid',
+        'Doc3 Name', 'Doc3 Status', 'Doc3 Charge', 'Doc3 Paid',
+      ];
+
+      const rows = filtered.map(({ s, pay, docs }) => {
+        const txs = pay?.transactions || [];
+        // Last verified date
+        const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
+        const lastVerifiedDate = verifiedTxs.length > 0
+          ? fmtDate(verifiedTxs.sort((a,b) => new Date(b.verifiedAt) - new Date(a.verifiedAt))[0].verifiedAt)
+          : '';
+
+        // Tx columns (up to 5)
+        const txCols = [];
+        for (let i = 0; i < 5; i++) {
+          const t = txs[i];
+          txCols.push(
+            t ? fmtAmt(t.amount)    : '',
+            t ? t.mode || ''        : '',
+            t ? t.utrRef || ''      : '',
+            t ? fmtDate(t.paidAt)   : '',
+            t ? fmtDate(t.verifiedAt) : '',
+            t ? (t.verificationStatus || '') : '',
+          );
+        }
+
+        // Doc columns (up to 3)
+        const docCols = [];
+        for (let i = 0; i < 3; i++) {
+          const d = docs[i];
+          docCols.push(
+            d ? d.name || ''                    : '',
+            d ? (d.status || '').replace(/_/g,' ') : '',
+            d ? fmtAmt(d.chargeFee)             : '',
+            d ? fmtAmt(d.totalPaid)             : '',
+          );
+        }
+
+        return [
+          s.name || '', s.fatherName || '', s.motherName || '',
+          fmtDate(s.dob), s.gender || '', s.phone || '', s.email || '',
+          s.aadharNumber || '', s.address || '',
+          s.courseName || '', s.courseYear || '',
+          s.university?.name || s.universityName || '',
+          s.center?.name || '', s.counselor?.name || '',
+          STATUS_LABELS[s.applicationStatus] || s.applicationStatus || '',
+          s.enrollmentNumber || '',
+          s.tenth_percent || '', s.tenth_year || '', s.tenth_board || '',
+          s.twelfth_percent || '', s.twelfth_year || '', s.twelfth_board || '',
+          // Fee
+          fmtAmt(pay?.totalFee), fmtAmt(pay?.discount), fmtAmt(pay?.netFee),
+          fmtAmt(pay?.paidAmount), fmtAmt(pay?.dueAmount),
+          // Transactions
+          ...txCols,
+          lastVerifiedDate,
+          // Docs
+          ...docCols,
+        ];
+      });
+
+      const escape = v => `"${String(v).replace(/"/g, '""')}"`;
+      const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      const suffix = centerF !== 'all' ? `_${centers.find(c=>c._id===centerF)?.name||'center'}` : '';
+      const dateSuffix = dateFrom || dateTo ? `_${dateFrom||''}to${dateTo||''}` : '';
+      a.download = `students${suffix}${dateSuffix}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`CSV downloaded — ${filtered.length} student${filtered.length > 1 ? 's' : ''}`);
+      setCsvOpen(false);
+    } catch(e) { toast.error('Export failed: ' + e.message); }
+    finally { setCsvLoading(false); }
+  }
 
   async function addStudent() {
     if (!form.name || !form.center || !form.counselor) return toast.error('Name, center and counselor required');
@@ -74,51 +230,17 @@ export default function StudentsPage() {
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
-  // CSV export
-  function exportCSV() {
-  const headers = [
-    'Name','Father Name','Mother Name','DOB','Gender','Phone','Email','Aadhaar',
-    'Address','Course','Session','University','10th %','10th Year','10th Board',
-    '12th %','12th Year','12th Board','Center','Counselor','Status','Enrollment No'
-  ];
-  const rows = students.map(s => [
-    s.name||'',
-    s.fatherName||'',
-    s.motherName||'',
-    s.dob ? new Date(s.dob).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '',
-    s.gender||'',
-    s.phone||'',
-    s.email||'',
-    s.aadharNumber||'',
-    s.address||'',
-    s.courseName||'',
-    s.courseYear||'',
-    s.university?.name || s.universityName || '',
-    s.tenth_percent||'',
-    s.tenth_year||'',
-    s.tenth_board||'',
-    s.twelfth_percent||'',
-    s.twelfth_year||'',
-    s.twelfth_board||'',
-    s.center?.name||'',
-    s.counselor?.name||'',
-    STATUS_LABELS[s.applicationStatus] || s.applicationStatus || '',
-    s.enrollmentNumber||'',
-  ]);
-    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = 'students.csv'; a.click();
-    URL.revokeObjectURL(url);
-    toast.success('CSV downloaded');
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Students ({students.length})</h1>
+        <h1 className="text-xl font-semibold">
+          Students ({students.length})
+          {someSelected && <span className="ml-2 text-sm font-normal text-indigo-600">{selected.size} selected</span>}
+        </h1>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCSV}><Download className="h-4 w-4 mr-1"/>CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => setCsvOpen(true)}>
+            <Download className="h-4 w-4 mr-1"/>CSV
+          </Button>
           {isAdmin && <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1"/>Add Student</Button>}
         </div>
       </div>
@@ -148,6 +270,28 @@ export default function StudentsPage() {
         )}
       </div>
 
+      {/* Select All bar */}
+      {!loading && students.length > 0 && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg">
+          <button onClick={toggleAll} className="flex items-center gap-2 text-sm text-slate-600 hover:text-indigo-600 transition-colors">
+            {allSelected
+              ? <CheckSquare className="h-4 w-4 text-indigo-600"/>
+              : <Square className="h-4 w-4"/>}
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </button>
+          {someSelected && (
+            <>
+              <span className="text-xs text-slate-400">|</span>
+              <span className="text-xs text-slate-500">{selected.size} of {students.length} selected for CSV</span>
+              <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
+                <X className="h-3 w-3"/>Clear
+              </button>
+            </>
+          )}
+          {!someSelected && <span className="text-xs text-slate-400 ml-2">Select students for CSV, or leave unselected to export all</span>}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex h-48 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>
       ) : students.length === 0 ? (
@@ -158,32 +302,112 @@ export default function StudentsPage() {
       ) : (
         <div className="space-y-2">
           {students.map(s => (
-            <Card key={s._id} className="cursor-pointer hover:border-primary/50 transition-colors"
-              onClick={() => navigate(`/students/${s._id}`)}>
+            <Card key={s._id}
+              className={`transition-colors cursor-pointer ${selected.has(s._id) ? 'border-indigo-400 bg-indigo-50/30' : 'hover:border-primary/50'}`}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{s.name}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s.applicationStatus] || 'bg-gray-100 text-gray-700'}`}>
-                        {STATUS_LABELS[s.applicationStatus] || s.applicationStatus}
-                      </span>
-                      {s.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{s.enrollmentNumber}</span>}
+                <div className="flex items-center gap-3">
+                  {/* Checkbox */}
+                  <button
+                    onClick={e => { e.stopPropagation(); toggleOne(s._id); }}
+                    className="flex-shrink-0 text-slate-300 hover:text-indigo-500 transition-colors"
+                  >
+                    {selected.has(s._id)
+                      ? <CheckSquare className="h-4 w-4 text-indigo-600"/>
+                      : <Square className="h-4 w-4"/>}
+                  </button>
+                  {/* Row content */}
+                  <div className="flex-1 min-w-0 flex items-center justify-between gap-3"
+                    onClick={() => navigate(`/students/${s._id}`)}>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{s.name}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s.applicationStatus] || 'bg-gray-100 text-gray-700'}`}>
+                          {STATUS_LABELS[s.applicationStatus] || s.applicationStatus}
+                        </span>
+                        {s.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{s.enrollmentNumber}</span>}
+                      </div>
+                      <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
+                        {s.center?.name    && <span>{s.center.name}</span>}
+                        {s.counselor?.name && <span>· {s.counselor.name}</span>}
+                        {s.courseName      && <span>· {s.courseName} {s.courseYear}</span>}
+                        {s.phone           && <span>· {s.phone}</span>}
+                      </div>
                     </div>
-                    <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
-                      {s.center?.name && <span>{s.center.name}</span>}
-                      {s.counselor?.name && <span>· {s.counselor.name}</span>}
-                      {s.courseName && <span>· {s.courseName} {s.courseYear}</span>}
-                      {s.phone && <span>· {s.phone}</span>}
-                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                   </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* ── CSV Export Dialog ────────────────────────────────── */}
+      <Dialog open={csvOpen} onOpenChange={v => { setCsvOpen(v); if (!v) { setDateFrom(''); setDateTo(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="h-4 w-4"/>Export CSV
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-1">
+            {/* Which students */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm space-y-1">
+              <div className="font-medium text-slate-700">Students to export:</div>
+              <div className="text-slate-500">
+                {selected.size > 0
+                  ? <span className="text-indigo-600 font-semibold">{selected.size} selected student{selected.size > 1 ? 's' : ''}</span>
+                  : <span>All <b>{students.length}</b> students (current filters)</span>}
+              </div>
+              {centerF !== 'all' && (
+                <div className="text-xs text-slate-400">Center: {centers.find(c=>c._id===centerF)?.name}</div>
+              )}
+              {statusF !== 'all' && (
+                <div className="text-xs text-slate-400">Status: {STATUS_LABELS[statusF]}</div>
+              )}
+            </div>
+
+            {/* Date filter */}
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                Filter by Payment Verified Date <span className="text-slate-400 font-normal normal-case">(optional)</span>
+              </Label>
+              <p className="text-xs text-slate-400 mt-0.5 mb-2">Only students whose fee was verified in this date range will be included.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-slate-500">From</Label>
+                  <Input type="date" className="mt-1 h-9" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500">To</Label>
+                  <Input type="date" className="mt-1 h-9" value={dateTo} onChange={e => setDateTo(e.target.value)}/>
+                </div>
+              </div>
+              {(dateFrom || dateTo) && (
+                <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="mt-1.5 text-xs text-red-400 hover:text-red-600 flex items-center gap-1">
+                  <X className="h-3 w-3"/>Clear date filter
+                </button>
+              )}
+            </div>
+
+            {/* What's included */}
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-xs text-emerald-700 space-y-1">
+              <div className="font-semibold">CSV includes:</div>
+              <div>✓ Student details (name, DOB, phone, address, marks…)</div>
+              <div>✓ Fee summary (total, paid, due, discount)</div>
+              <div>✓ All payment transactions (amount, mode, UTR, dates)</div>
+              <div>✓ Last payment verified date</div>
+              <div>✓ Document requests (name, status, charge, paid)</div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCsvOpen(false)}>Cancel</Button>
+            <Button onClick={doExportCSV} disabled={csvLoading} className="bg-indigo-600 hover:bg-indigo-700">
+              {csvLoading ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin"/>Preparing…</> : <><Download className="h-4 w-4 mr-1.5"/>Download CSV</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Student Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

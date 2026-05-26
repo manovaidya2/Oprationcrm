@@ -76,10 +76,10 @@ exports.createUser = asyncHandler(async (req, res) => {
 
 // GET /api/auth/users  — Admin + Counselor
 exports.listUsers = asyncHandler(async (req, res) => {
-  const filter = { isActive: true };
+  const filter = {};
+  // Counselor only sees active Center users; Admin sees all (active + inactive)
+  if (req.user.role === 'Counselor') { filter.role = 'Center'; filter.isActive = true; }
   if (req.query.role) filter.role = req.query.role;
-  // Counselor can only see Center users
-  if (req.user.role === 'Counselor') filter.role = 'Center';
 
   const users = await User.find(filter).select('-password')
     .populate('counselorId centerId universityId').sort('-createdAt');
@@ -131,4 +131,3 @@ exports.deleteUser = asyncHandler(async (req, res) => {
   await User.findByIdAndDelete(req.params.id);
   res.status(204).end();
 });
-

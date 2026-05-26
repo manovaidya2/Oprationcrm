@@ -136,10 +136,15 @@ export default function UniversityManagePage() {
     }
   };
 
-  const toggleUser = async (userId) => {
+  const toggleUser = async (u) => {
+    const action = u.isActive ? 'deactivate' : 'activate';
+    const msg = u.isActive
+      ? `Deactivate "${u.name}"? They will not be able to login until reactivated.`
+      : `Activate "${u.name}"? They will be able to login again.`;
+    if (!confirm(msg)) return;
     try {
-      await authApi.toggleUser(userId);
-      toast.success('User status updated');
+      await authApi.toggleUser(u._id);
+      toast.success(`User ${action}d successfully`);
       load();
     } catch (e) {
       toast.error(e.message);
@@ -256,23 +261,24 @@ export default function UniversityManagePage() {
                     ) : (
                       <div className="space-y-1">
                         {uniUsers.map(u => (
-                          <div key={u._id} className="flex items-center justify-between bg-background rounded px-2 py-1.5">
+                          <div key={u._id} className={`flex items-center justify-between rounded px-2 py-1.5 ${u.isActive ? 'bg-background' : 'bg-muted/50 opacity-70'}`}>
                             <div className="flex items-center gap-2 min-w-0">
                               <div className="h-6 w-6 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                                   style={{ background: u.avatarColor || '#8b5cf6' }}>
+                                   style={{ background: u.isActive ? (u.avatarColor || '#8b5cf6') : '#94a3b8' }}>
                                 {u.name.slice(0,1)}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-xs font-medium truncate">{u.name}</p>
+                                <p className={`text-xs font-medium truncate ${!u.isActive ? 'line-through text-muted-foreground' : ''}`}>{u.name}</p>
                                 <p className="text-xs text-muted-foreground truncate">{u.email}</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <Badge variant={u.isActive ? 'default' : 'secondary'} className="text-xs h-5">
+                              <Badge variant={u.isActive ? 'default' : 'secondary'} className={`text-xs h-5 ${u.isActive ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-600 border-red-200'}`}>
                                 {u.isActive ? 'Active' : 'Inactive'}
                               </Badge>
-                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => toggleUser(u._id)} title={u.isActive ? 'Deactivate' : 'Activate'}>
-                                {u.isActive ? <EyeOff className="h-3 w-3"/> : <Eye className="h-3 w-3"/>}
+                              <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => toggleUser(u)}
+                                title={u.isActive ? 'Deactivate (block login)' : 'Activate (allow login)'}>
+                                {u.isActive ? <EyeOff className="h-3 w-3 text-amber-500"/> : <Eye className="h-3 w-3 text-emerald-500"/>}
                               </Button>
                             </div>
                           </div>
