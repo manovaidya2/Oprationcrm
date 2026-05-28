@@ -45,7 +45,6 @@ exports.upsertFee = asyncHandler(async (req, res) => {
 });
 
 // POST /api/payments/:studentId/transactions - add payment
-// If Center adds fee payment on enrolled student -> notify counselor for verification
 exports.addTransaction = asyncHandler(async (req, res) => {
   const {
     amount, mode, utrRef, note, paidAt, type, documentRef,
@@ -92,7 +91,6 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   });
   await payment.save();
 
-  // Notify counselor if verification needed
   if (needsVerification) {
     const counselorUser = await User.findOne({ counselorId: student.counselor, isActive: true });
     if (counselorUser) {
@@ -118,17 +116,23 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
   const tx = payment.transactions.id(req.params.txId);
   if (!tx) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
 
-  // Block editing verified transactions
-  if (tx.verificationStatus === 'verified') {
+  // Only Admin can edit verified transactions; all others are blocked
+  if (tx.verificationStatus === 'verified' && req.user.role !== 'Admin') {
     const e = new Error('Cannot edit a verified payment'); e.status = 403; throw e;
   }
 
-  const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt'];
+  const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt','paidToAccount'];
   fields.forEach(f => {
     if (req.body[f] !== undefined) {
       tx[f] = f === 'amount' ? Number(req.body[f]) : f === 'paidAt' ? new Date(req.body[f]) : req.body[f];
     }
   });
+
+  // Admin can also change verification status directly
+  if (req.user.role === 'Admin' && req.body.verificationStatus !== undefined) {
+    tx.verificationStatus = req.body.verificationStatus;
+  }
+
   if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
   await payment.save();
   res.json(await Payment.findById(payment._id)
@@ -147,7 +151,6 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
     const e = new Error('Cannot resend a verified payment'); e.status = 403; throw e;
   }
 
-  // Update fields if provided
   const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt'];
   fields.forEach(f => {
     if (req.body[f] !== undefined) {
@@ -168,6 +171,7 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
   await audit('fee_payment_resubmitted', 'Payment', payment._id, req.user, { amount: tx.amount }, `Center resubmitted fee payment of ₹${tx.amount}`);
   res.json({ ok: true, message: 'Payment resubmitted for review' });
 });
+
 // PATCH /api/payments/:studentId/transactions/:txId/counsel-reject
 // Counselor rejects fee payment — sends back to center to resubmit
 exports.counselorRejectFeePayment = asyncHandler(async (req, res) => {
@@ -210,7 +214,6 @@ exports.counselorForwardFeePayment = asyncHandler(async (req, res) => {
   await payment.save();
 
   const student = await Student.findById(req.params.studentId);
-  // Notify accountant
   await notifyRole('Accountant', {
     message: `Fee payment verified by counselor for ${student?.name} - ₹${tx.amount}. Please verify.`,
     type: 'payment_verified',
@@ -243,7 +246,6 @@ exports.accountantVerifyFeePayment = asyncHandler(async (req, res) => {
   await payment.save();
 
   const student = await Student.findById(req.params.studentId);
-  // Notify counselor of result
   const counselorUser = await User.findOne({ counselorId: student?.counselor, isActive: true });
   if (counselorUser) {
     await notify(counselorUser._id, {
@@ -253,7 +255,6 @@ exports.accountantVerifyFeePayment = asyncHandler(async (req, res) => {
       studentId: req.params.studentId,
     });
   }
-  // Notify center
   const centerUser = await User.findOne({ centerId: student?.center, role: 'Center', isActive: true });
   if (centerUser) {
     await notify(centerUser._id, {
@@ -276,8 +277,8 @@ exports.deleteTransaction = asyncHandler(async (req, res) => {
   const idx = payment.transactions.findIndex(t => String(t._id) === req.params.txId);
   if (idx === -1) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
 
-  // Block deleting verified transactions
-  if (payment.transactions[idx].verificationStatus === 'verified') {
+  // Only Admin can delete verified transactions; others are blocked
+  if (payment.transactions[idx].verificationStatus === 'verified' && req.user.role !== 'Admin') {
     const e = new Error('Cannot delete a verified payment'); e.status = 403; throw e;
   }
 

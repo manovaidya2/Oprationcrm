@@ -87,13 +87,21 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
     verificationStatus: tx.verificationStatus || 'pending',
     paidToAccount: tx.paidToAccount || '',
   });
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const screenshotRef = useRef();
   const [saving, setSaving] = useState(false);
 
   async function save() {
     if (!f.amount || Number(f.amount) <= 0) return toast.error('Enter valid amount');
     setSaving(true);
     try {
-      await paymentsApi.updateTransaction(studentId, tx._id, { ...f, amount: Number(f.amount) });
+      // Use FormData so file upload works alongside other fields
+      const fd = new FormData();
+      Object.entries(f).forEach(([key, val]) => {
+        if (val !== undefined && val !== null && val !== '') fd.append(key, val);
+      });
+      if (screenshotFile) fd.append('paymentScreenshot', screenshotFile);
+      await paymentsApi.updateTransactionForm(studentId, tx._id, fd);
       toast.success('Transaction updated');
       onDone();
     } catch(e) { toast.error(e.message); }
@@ -166,10 +174,10 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
           {payAccounts.length > 0 && (
             <div>
               <Label>Paid To Account</Label>
-              <Select value={f.paidToAccount||''} onValueChange={v=>setF(p=>({...p,paidToAccount:v}))}>
+              <Select value={f.paidToAccount||'__none__'} onValueChange={v=>setF(p=>({...p,paidToAccount:v==='__none__'?'':v}))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Select account…"/></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">— None —</SelectItem>
+                  <SelectItem value="__none__">— None —</SelectItem>
                   {payAccounts.map(acc=>(
                     <SelectItem key={acc._id} value={acc._id}>{acc.label} ({acc.mode})</SelectItem>
                   ))}
@@ -180,6 +188,35 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
           <div>
             <Label>Note</Label>
             <Input value={f.note} onChange={e=>setF(p=>({...p,note:e.target.value}))}/>
+          </div>
+
+          {/* Payment Screenshot */}
+          <div>
+            <Label>Payment Screenshot</Label>
+            {tx.paymentScreenshot && !screenshotFile && (
+              <div className="mb-2">
+                <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+                  <Download className="h-3 w-3"/>View Current Screenshot
+                </a>
+              </div>
+            )}
+            <input
+              ref={screenshotRef}
+              type="file"
+              accept="image/*,.pdf"
+              onChange={e => setScreenshotFile(e.target.files[0] || null)}
+              className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-muted"
+            />
+            {screenshotFile && (
+              <div className="flex items-center gap-2 mt-1 text-xs text-emerald-600">
+                <CheckCircle2 className="h-3.5 w-3.5"/>
+                New file selected: {screenshotFile.name}
+                <button onClick={() => { setScreenshotFile(null); if(screenshotRef.current) screenshotRef.current.value=''; }}
+                  className="text-red-400 hover:text-red-600 ml-1">✕</button>
+              </div>
+            )}
+            <p className="text-xs text-slate-400 mt-1">Upload a new screenshot to replace the existing one.</p>
           </div>
         </div>
         <DialogFooter>
