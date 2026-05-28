@@ -258,6 +258,7 @@ const APP_STATUS = {
   Sent_To_University: {label:'In Process',         color:'bg-slate-100 text-slate-500 border border-slate-200'},
   Rejected:           {label:'Rejected',           color:'bg-red-50 text-red-600 border border-red-200'},
   Enrolled:           {label:'✓ Enrolled',         color:'bg-emerald-50 text-emerald-700 border border-emerald-200'},
+  Cancelled:          {label:'Cancelled',           color:'bg-slate-100 text-slate-500 border border-slate-300'},
 };
 const DOC_STATUS = {
   Requested:{label:'Requested',color:'bg-blue-50 text-blue-700 border border-blue-200'},
@@ -278,6 +279,125 @@ const SBadge = ({status,map}) => {
   const s=(map||APP_STATUS)[status]||{label:status,color:'bg-slate-100 text-slate-600 border border-slate-200'};
   return <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${s.color}`}>{s.label}</span>;
 };
+
+// ── Cancelled Application Banner with Settlement Request ──────
+function CancelledBanner({ student, onSettlementRequested }) {
+  const [requesting, setRequesting] = useState(false);
+  const [note,       setNote]       = useState('');
+  const [noteOpen,   setNoteOpen]   = useState(false);
+
+  async function handleRequest() {
+    setRequesting(true);
+    try {
+      await studentsApi.requestSettlement(student._id, note);
+      toast.success('Settlement request sent');
+      setNoteOpen(false);
+      setNote('');
+      onSettlementRequested();
+    } catch(e) {
+      toast.error(e.message || 'Failed to send request');
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  return (
+    <div className="bg-slate-100 border border-slate-300 rounded-xl px-4 py-4 space-y-3">
+      {/* Title row */}
+      <div className="flex items-center gap-2">
+        <span className="text-lg">🚫</span>
+        <div>
+          <p className="text-sm font-bold text-slate-700">Application Cancelled</p>
+          {student.rejectionReason && (
+            <p className="text-xs text-slate-500 mt-0.5">Reason: {student.rejectionReason}</p>
+          )}
+        </div>
+      </div>
+
+      {/* Settlement status */}
+      {(() => {
+        const hist = student.statusHistory || [];
+        const isSettled   = student.amountSettled;
+        const isForwarded = student.settlementForwardedToAccountant || hist.some(h => h.status === 'Settlement_Forwarded');
+        const isRequested = student.settlementRequested              || hist.some(h => h.status === 'Settlement_Requested');
+
+        if (isSettled) return (
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5">
+            <span className="text-base">✅</span>
+            <div>
+              <p className="text-sm font-semibold text-emerald-700">Amount Settled</p>
+              <p className="text-xs text-emerald-600">Refund/adjustment has been processed</p>
+            </div>
+          </div>
+        );
+        if (isForwarded) return (
+          <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2.5">
+            <span className="text-base">📋</span>
+            <div>
+              <p className="text-sm font-semibold text-indigo-700">In Process</p>
+              <p className="text-xs text-indigo-600">Refund/adjustment is being processed</p>
+            </div>
+          </div>
+        );
+        if (isRequested) return (
+          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5">
+            <span className="text-base">⏳</span>
+            <div>
+              <p className="text-sm font-semibold text-blue-700">Settlement Requested</p>
+              <p className="text-xs text-blue-600">Counselor has been notified </p>
+            </div>
+          </div>
+        );
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700">
+              <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>
+              If fees were paid, request settlement so the counselor can review and forward  for refund/adjustment.
+            </div>
+
+            {noteOpen ? (
+              <div className="space-y-2">
+                <textarea
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  placeholder="Add a note for the accountant (optional) — e.g. amount paid, bank details…"
+                  rows={2}
+                  className="w-full text-xs border border-slate-300 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400 resize-none bg-white"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setNoteOpen(false); setNote(''); }}
+                  className="px-3 py-1.5 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRequest}
+                  disabled={requesting}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {requesting && <Loader2 className="h-3 w-3 animate-spin"/>}
+                  Send Request to Counselor
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setNoteOpen(true)}
+              className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors"
+            >
+              <IndianRupee className="h-3.5 w-3.5"/>
+              Request Amount Settlement
+            </button>
+          )}
+          </div>
+        );
+      })()}
+
+      <p className="text-xs text-slate-400">All other actions are disabled.</p>
+    </div>
+  );
+}
 
 // Default documents checklist
 const DEFAULT_DOCS = [
@@ -740,6 +860,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 
 // ── FEE SECTION ──────────────────────────────────────────────
 function FeeSection({ studentId, appStatus }) {
+  const isCancelled = appStatus === 'Cancelled';
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
   const [feeOpen,setFeeOpen]=useState(false); const [txOpen,setTxOpen]=useState(false);
   const [editTx,setEditTx]=useState(null);
@@ -760,7 +881,8 @@ function FeeSection({ studentId, appStatus }) {
   const load=useCallback(async()=>{ try{setLoading(true);setData(await paymentsApi.get(studentId));} catch{} finally{setLoading(false);} },[studentId]);
   useEffect(()=>{load();},[load]);
 
-  const canSetFee = ['Draft', 'Changes_Requested'].includes(appStatus);
+  const canSetFee = !isCancelled && ['Draft', 'Changes_Requested'].includes(appStatus);
+  const canAddPayment = !isCancelled;
 
   async function saveFee(){
     if(!ff.totalFee) return toast.error('Total fee required');
@@ -885,13 +1007,20 @@ function FeeSection({ studentId, appStatus }) {
             </div>
             <div className="flex gap-2">
               {canSetFee && <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:data.totalFee,discount:data.discount,notes:data.notes||''});setFeeOpen(true);}} className="border-slate-200 text-slate-600">Edit Fee</Button>}
-              <Button size="sm" onClick={()=>setTxOpen(true)} className="bg-indigo-600 hover:bg-indigo-700">
-                <PlusCircle className="h-3.5 w-3.5 mr-1.5"/>Add Payment
-              </Button>
+              {canAddPayment && (
+                <Button size="sm" onClick={()=>setTxOpen(true)} className="bg-indigo-600 hover:bg-indigo-700">
+                  <PlusCircle className="h-3.5 w-3.5 mr-1.5"/>Add Payment
+                </Button>
+              )}
             </div>
           </div>
 
-          {!canSetFee && <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>Fee structure locked. Only Admin/Counselor can modify fees at this stage.</div>}
+          {isCancelled && (
+            <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
+              <span className="text-base">🚫</span> This application is cancelled. Fee records are read-only.
+            </div>
+          )}
+          {!isCancelled && !canSetFee && <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>Fee structure locked. Only Admin/Counselor can modify fees at this stage.</div>}
         </>
       ) : (
         <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
@@ -901,7 +1030,9 @@ function FeeSection({ studentId, appStatus }) {
           <p className="text-sm font-medium text-slate-600 mb-1">No fee structure set up</p>
           <p className="text-xs text-slate-400 mb-4">Set up fees to track payments</p>
           {canSetFee ? <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}} className="bg-indigo-600 hover:bg-indigo-700">Set Up Fees</Button>
-            : <p className="text-xs text-slate-400">Fee will be set during application submission.</p>}
+            : isCancelled
+              ? <p className="text-xs text-slate-400">Application cancelled — fees cannot be modified.</p>
+              : <p className="text-xs text-slate-400">Fee will be set during application submission.</p>}
         </div>
       )}
 
@@ -925,8 +1056,8 @@ function FeeSection({ studentId, appStatus }) {
                   {tx.verificationStatus==='rejected'&&<span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200 font-medium">✗ Rejected{tx.verificationNote?`: ${tx.verificationNote}`:''}</span>}
                 </div>
                 <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                  {tx.verificationStatus === 'verified' ? (
-                    <span className="text-slate-300" title="Verified — cannot edit">🔒</span>
+                  {isCancelled || tx.verificationStatus === 'verified' ? (
+                    <span className="text-slate-300" title={isCancelled ? 'Application cancelled' : 'Verified — cannot edit'}>🔒</span>
                   ) : (
                     <>
                       <button onClick={()=>setEditTx({...tx,paidAt:tx.paidAt?new Date(tx.paidAt).toISOString().split('T')[0]:''})} className="text-slate-300 hover:text-indigo-500 transition-colors p-1" title="Edit"><Pencil className="h-3.5 w-3.5"/></button>
@@ -988,7 +1119,7 @@ function FeeSection({ studentId, appStatus }) {
 }
 
 // ── DOCS SECTION ─────────────────────────────────────────────
-function DocsSection({ studentId, isEnrolled }) {
+function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1125,13 +1256,19 @@ function DocsSection({ studentId, isEnrolled }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{docs.length} document{docs.length!==1?'s':''}</p>
-        {isEnrolled&&(
+        {isEnrolled && !isCancelled &&(
           <Button size="sm" onClick={()=>setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs">
             <Plus className="h-3.5 w-3.5 mr-1.5"/>Request Document
           </Button>
         )}
       </div>
-      {!isEnrolled&&(
+      {isCancelled &&(
+        <div className="flex items-center gap-2.5 text-sm text-slate-600 bg-slate-100 border border-slate-300 rounded-xl px-4 py-3">
+          <span className="text-base">🚫</span>
+          This application is cancelled. Document requests are not allowed.
+        </div>
+      )}
+      {!isCancelled && !isEnrolled&&(
         <div className="flex items-center gap-2.5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
           <AlertTriangle className="h-4 w-4 flex-shrink-0"/>
           Document requests available after enrollment.
@@ -1551,8 +1688,9 @@ function StudentDetail({ student, onBack, onRefresh }) {
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
 
-  const canEdit=!s.coreLocked;
-  const canSubmit=['Draft','Changes_Requested'].includes(s.applicationStatus);
+  const isCancelled = s.applicationStatus === 'Cancelled';
+  const canEdit   = !s.coreLocked && !isCancelled;
+  const canSubmit = !isCancelled && ['Draft','Changes_Requested'].includes(s.applicationStatus);
   const st=APP_STATUS[s.applicationStatus]||{label:s.applicationStatus,color:'bg-slate-100 text-slate-600'};
 
   return (
@@ -1596,6 +1734,12 @@ function StudentDetail({ student, onBack, onRefresh }) {
         <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 text-sm text-orange-700">
           <b className="font-semibold">Rejected by University</b>{s.rejectionReason ? `: ${s.rejectionReason}` : ''}
         </div>
+      )}
+      {isCancelled && (
+        <CancelledBanner
+          student={s}
+          onSettlementRequested={() => setS(p => ({ ...p, settlementRequested: true }))}
+        />
       )}
       {s.applicationStatus==='Rejected' && s.amountSettled && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-700 flex items-center gap-2">
@@ -1727,7 +1871,7 @@ function StudentDetail({ student, onBack, onRefresh }) {
               </div>
             </div>
           )}
-          <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'}/>
+          <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'} isCancelled={isCancelled}/>
         </TabsContent>
         <TabsContent value="payments" className="mt-4"><PaymentsSection studentId={s._id}/></TabsContent>
       </Tabs>
@@ -2012,6 +2156,7 @@ export default function CenterPortalPage() {
           { label:'In Process',     value: (statusCounts['Counselor_Approved']||0)+(statusCounts['Accountant_Pending']||0)+(statusCounts['Accountant_Rejected']||0)+(statusCounts['Sent_To_University']||0)+(statusCounts['University_Rejected']||0), color:'text-slate-600', bg:'bg-slate-50 border-slate-200', dot:'bg-slate-400' },
           { label:'Enrolled',       value: statusCounts['Enrolled']||0, color:'text-emerald-600', bg:'bg-emerald-50 border-emerald-200', dot:'bg-emerald-400' },
           { label:'Rejected',       value: statusCounts['Rejected']||0, color:'text-red-500', bg:'bg-red-50 border-red-200', dot:'bg-red-400' },
+          { label:'Cancelled',      value: statusCounts['Cancelled']||0, color:'text-slate-500', bg:'bg-slate-100 border-slate-300', dot:'bg-slate-400' },
         ].map(({ label, value, color, bg, dot })=>(
           <div key={label} className={`rounded-xl border p-4 ${bg}`}>
             <div className="flex items-start justify-between">

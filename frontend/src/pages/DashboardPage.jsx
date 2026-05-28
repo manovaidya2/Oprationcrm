@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
-import { Loader2, GraduationCap, Building2, UserCog, IndianRupee, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, BookOpen, Package, Truck, ChevronRight, Users, ChevronDown, ChevronUp, BarChart3, Filter } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Loader2, GraduationCap, Building2, UserCog, IndianRupee, TrendingUp, Clock, CheckCircle2, XCircle, AlertCircle, BookOpen, Package, Truck, ChevronRight, Users, ChevronDown, ChevronUp, BarChart3, Filter, Ban } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/context/AuthContext';
-import { dashApi } from '@/lib/api';
+import { dashApi, studentsApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 const fmt   = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
@@ -12,12 +12,14 @@ const STATUS_LABELS = {
   Draft: 'Draft', Submitted: 'Under Review', Changes_Requested: 'Changes Needed',
   Counselor_Approved: 'Counselor Approved', Rejected: 'Rejected',
   Accountant_Pending: 'Fee Pending', Sent_To_University: 'At University', Enrolled: 'Enrolled',
+  Cancelled: 'Cancelled',
 };
 const STATUS_COLORS = {
   Draft: 'bg-gray-100 text-gray-700', Submitted: 'bg-blue-100 text-blue-700',
   Changes_Requested: 'bg-amber-100 text-amber-700', Counselor_Approved: 'bg-indigo-100 text-indigo-700',
   Rejected: 'bg-red-100 text-red-700', Accountant_Pending: 'bg-amber-100 text-amber-700',
   Sent_To_University: 'bg-purple-100 text-purple-700', Enrolled: 'bg-emerald-100 text-emerald-700',
+  Cancelled: 'bg-slate-100 text-slate-600',
 };
 
 function StatCard({ icon: Icon, label, value, color = 'text-foreground', sub }) {
@@ -36,6 +38,207 @@ function StatCard({ icon: Icon, label, value, color = 'text-foreground', sub }) 
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ── Cancel Application Modal ──────────────────────────────────
+function CancelModal({ student, onConfirm, onClose, loading }) {
+  const [reason, setReason] = useState('');
+  if (!student) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
+            <Ban className="h-5 w-5 text-red-600" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-bold text-slate-800">Cancel Application</h2>
+            <p className="text-xs text-muted-foreground truncate">
+              {student.name} — <span className={`font-medium ${STATUS_COLORS[student.applicationStatus]?.split(' ')[1] || 'text-slate-600'}`}>
+                {STATUS_LABELS[student.applicationStatus] || student.applicationStatus}
+              </span>
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-4 space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
+            This will <strong>permanently cancel</strong> the application regardless of its current stage. This action cannot be undone.
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">
+              Cancellation Reason <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              placeholder="Enter reason for cancellation…"
+              rows={3}
+              className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-red-400 resize-none"
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={loading}
+            className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
+          >
+            Keep Application
+          </button>
+          <button
+            onClick={() => onConfirm(reason)}
+            disabled={loading}
+            className="px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            Confirm Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Admin Student Search + Cancel ─────────────────────────────
+function AdminCancelSection() {
+  const [search,      setSearch]      = useState('');
+  const [students,    setStudents]    = useState([]);
+  const [fetching,    setFetching]    = useState(false);
+  const [modalData,   setModalData]   = useState(null); // { student }
+  const [cancelling,  setCancelling]  = useState(false);
+
+  const doSearch = useCallback(async () => {
+    if (!search.trim()) return;
+    setFetching(true);
+    try {
+      const data = await studentsApi.getAll({ search: search.trim(), limit: 20 });
+      setStudents(data.students || data || []);
+    } catch {
+      toast.error('Failed to search students');
+    } finally {
+      setFetching(false);
+    }
+  }, [search]);
+
+  const handleKeyDown = e => { if (e.key === 'Enter') doSearch(); };
+
+  const handleConfirmCancel = async (reason) => {
+    if (!modalData) return;
+    setCancelling(true);
+    try {
+      await studentsApi.cancelApplication(modalData._id, reason);
+      toast.success(`Application for ${modalData.name} cancelled successfully`);
+      setModalData(null);
+      // Refresh results
+      setStudents(prev =>
+        prev.map(s => s._id === modalData._id ? { ...s, applicationStatus: 'Cancelled' } : s)
+      );
+    } catch (err) {
+      toast.error(err.message || 'Failed to cancel application');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Ban className="h-4 w-4 text-red-500" />
+            Cancel Student Application
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Search any student by name, enrollment number, or phone and cancel their application at any stage.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Search bar */}
+          <div className="flex gap-2">
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search by name, enrollment no., phone…"
+              className="flex-1 text-sm border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-red-400"
+            />
+            <button
+              onClick={doSearch}
+              disabled={fetching || !search.trim()}
+              className="px-4 py-2 text-sm font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {fetching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Search'}
+            </button>
+          </div>
+
+          {/* Results */}
+          {students.length > 0 && (
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+              {students.map(s => {
+                const isCancelled = s.applicationStatus === 'Cancelled';
+                return (
+                  <div key={s._id} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm text-slate-800">{s.name}</span>
+                        {s.enrollmentNumber && (
+                          <span className="text-xs font-mono text-muted-foreground bg-slate-100 px-1.5 py-0.5 rounded">
+                            {s.enrollmentNumber}
+                          </span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[s.applicationStatus] || 'bg-gray-100 text-gray-600'}`}>
+                          {STATUS_LABELS[s.applicationStatus] || s.applicationStatus}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5 flex gap-3">
+                        {s.phone && <span>{s.phone}</span>}
+                        {s.center?.name && <span>{s.center.name}</span>}
+                        {s.courseName && <span>{s.courseName}</span>}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => !isCancelled && setModalData(s)}
+                      disabled={isCancelled}
+                      className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors
+                        ${isCancelled
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          : 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
+                        }`}
+                    >
+                      <Ban className="h-3.5 w-3.5" />
+                      {isCancelled ? 'Cancelled' : 'Cancel'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {students.length === 0 && search && !fetching && (
+            <p className="text-sm text-muted-foreground text-center py-4">No students found. Try a different search.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Cancel confirmation modal */}
+      <CancelModal
+        student={modalData}
+        onConfirm={handleConfirmCancel}
+        onClose={() => !cancelling && setModalData(null)}
+        loading={cancelling}
+      />
+    </>
   );
 }
 
@@ -148,7 +351,6 @@ function CenterFeesTable({ centers }) {
             className="text-xs border border-slate-200 rounded-lg px-3 py-1.5 w-40 focus:outline-none focus:border-indigo-400"
           />
         </div>
-        {/* Summary row */}
         <div className="flex gap-3 flex-wrap mt-2">
           {[
             { label:'Total Fees',  value: totals.fees, color:'text-slate-700'   },
@@ -163,7 +365,6 @@ function CenterFeesTable({ centers }) {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {/* Header row */}
         <div className="grid grid-cols-12 text-xs font-bold text-muted-foreground uppercase tracking-wider px-4 py-2 border-b border-slate-100 bg-slate-50">
           <button className="col-span-4 text-left flex items-center gap-1" onClick={() => toggle('name')}>Center <SortIcon k="name"/></button>
           <button className="col-span-2 text-right flex items-center justify-end gap-1" onClick={() => toggle('total')}>Total <SortIcon k="total"/></button>
@@ -200,7 +401,6 @@ function CenterFeesTable({ centers }) {
                     <span className="text-xs text-muted-foreground w-7 text-right">{pct}%</span>
                   </div>
                 </div>
-                {/* Expanded detail */}
                 {isExp && (
                   <div className="bg-slate-50 border-t border-slate-100 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
@@ -214,7 +414,6 @@ function CenterFeesTable({ centers }) {
                         <div className="text-xs text-muted-foreground">{label}</div>
                       </div>
                     ))}
-                    {/* Mini progress bar */}
                     <div className="col-span-2 sm:col-span-4 mt-1">
                       <div className="flex justify-between text-xs text-muted-foreground mb-1">
                         <span>Fee Collection Progress</span>
@@ -244,7 +443,6 @@ function BankWiseSection({ data, allPayments }) {
 
   const fmtD = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
-  // Match strictly by ObjectId string
   function getTxns(accId) {
     const rows = [];
     (allPayments || []).forEach(p => {
@@ -295,7 +493,6 @@ function BankWiseSection({ data, allPayments }) {
 
   return (
     <>
-      {/* Account Cards — same style as Settings page */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
@@ -339,7 +536,6 @@ function BankWiseSection({ data, allPayments }) {
         </CardContent>
       </Card>
 
-      {/* Transaction Modal */}
       {modal && (() => {
         const txns = getTxns(modal.id);
         const total = txns.reduce((s,t) => s + Number(t.amount||0), 0);
@@ -350,8 +546,6 @@ function BankWiseSection({ data, allPayments }) {
             <div className="absolute inset-0 bg-black/40"/>
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
               onClick={e => e.stopPropagation()}>
-
-              {/* Header */}
               <div className="px-5 py-4 border-b border-slate-100 flex-shrink-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
@@ -371,8 +565,6 @@ function BankWiseSection({ data, allPayments }) {
                   </div>
                   <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none mt-0.5">✕</button>
                 </div>
-
-                {/* Date filter + CSV */}
                 <div className="mt-3 flex flex-wrap items-end gap-2">
                   <div>
                     <div className="text-xs text-slate-500 mb-1">From</div>
@@ -395,8 +587,6 @@ function BankWiseSection({ data, allPayments }) {
                     ↓ Download CSV
                   </button>
                 </div>
-
-                {/* Summary */}
                 <div className="mt-3 flex gap-2">
                   <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
                     <div className="text-xs text-indigo-500">Total Collected</div>
@@ -408,8 +598,6 @@ function BankWiseSection({ data, allPayments }) {
                   </div>
                 </div>
               </div>
-
-              {/* Transactions list */}
               <div className="overflow-y-auto flex-1 px-5 py-3 space-y-2">
                 {txns.length === 0 ? (
                   <div className="text-center text-muted-foreground py-12">
@@ -614,6 +802,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Cancel Application — Admin only */}
+      {role === 'Admin' && <AdminCancelSection />}
 
       {/* Application Pipeline */}
       {stats?.statusBreakdown?.length > 0 && (

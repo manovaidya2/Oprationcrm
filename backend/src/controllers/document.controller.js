@@ -77,6 +77,9 @@ exports.create = asyncHandler(async (req, res) => {
   const student = await Student.findById(studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
 
+  if (req.user.role === 'Center' && student.applicationStatus === 'Cancelled') {
+    const e = new Error('This application has been cancelled. No document requests are allowed.'); e.status = 403; throw e;
+  }
   if (req.user.role === 'Center' && student.applicationStatus !== 'Enrolled') {
     const e = new Error('Document requests only after enrollment'); e.status = 400; throw e;
   }

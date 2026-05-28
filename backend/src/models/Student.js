@@ -61,10 +61,15 @@ const studentSchema = new mongoose.Schema({
   changesRequested:   { type: String, trim: true },
   rejectedVia:        { type: String, enum: ['university', 'accountant', ''], default: '' }, // tracks rejection source for history
 
-  // Amount settlement after rejection
-  amountSettled:      { type: Boolean, default: false },
-  amountSettledAt:    { type: Date },
-  amountSettledBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  // Amount settlement after rejection or cancellation
+  settlementRequested:              { type: Boolean, default: false },  // center requested → counselor notified
+  settlementRequestedAt:            { type: Date },
+  settlementForwardedToAccountant:  { type: Boolean, default: false },  // counselor forwarded → accountant notified
+  settlementForwardedAt:            { type: Date },
+  settlementForwardedBy:            { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  amountSettled:                    { type: Boolean, default: false },
+  amountSettledAt:                  { type: Date },
+  amountSettledBy:                  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
   // Documents attached at submission time (Aadhaar, 10th marksheet etc.)
   submissionDocs: [{

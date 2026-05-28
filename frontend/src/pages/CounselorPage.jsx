@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, RotateCcw, Loader2, Send, Eye, Search,
   Building2, GraduationCap, FileText, ChevronRight, Users, Paperclip, RefreshCw, Download,
+  IndianRupee, AlertTriangle,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,6 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { studentsApi, docsApi, centersApi, paymentsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
-import { IndianRupee } from 'lucide-react';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -572,6 +572,81 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
 }
 
 // ── Empty State ───────────────────────────────────────────────
+function SettlementRequestCard({ student: s, saving, onForward }) {
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note,     setNote]     = useState('');
+
+  return (
+    <Card className="border-amber-200 bg-amber-50/30">
+      <CardContent className="p-4 space-y-3">
+        {/* Student info */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-slate-800">{s.name}</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 border border-slate-300 font-medium">🚫 Cancelled</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">⏳ Settlement Requested</span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-3">
+              {s.center?.name && <span>{s.center.name}</span>}
+              {s.courseName   && <span>{s.courseName}</span>}
+              {s.phone        && <span>{s.phone}</span>}
+            </div>
+            {s.rejectionReason && (
+              <div className="mt-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600">
+                <span className="font-semibold">Cancellation reason:</span> {s.rejectionReason}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Forward action */}
+        {!noteOpen ? (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={() => setNoteOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs"
+            >
+              <Send className="h-3.5 w-3.5 mr-1.5"/>Forward to Accountant
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2 bg-white border border-slate-200 rounded-xl p-3">
+            <p className="text-xs font-semibold text-slate-600">Add a note for the accountant (optional)</p>
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="e.g. Verified — please process refund of ₹15,000…"
+              rows={2}
+              className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:border-indigo-400 resize-none"
+            />
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => { setNoteOpen(false); setNote(''); }}
+                className="h-8 text-xs border-slate-200"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={saving}
+                onClick={() => onForward(s, note)}
+                className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs"
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin"/>}
+                <Send className="h-3.5 w-3.5 mr-1.5"/>Confirm Forward
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function EmptyState({ icon: Icon = FileText, message }) {
   return (
     <div className="text-center py-14 border-2 border-dashed border-slate-200 rounded-2xl">
@@ -638,6 +713,7 @@ export default function CounselorPage() {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [payAccounts, setPayAccounts] = useState({}); // id → account object
+  const [settlementQueue, setSettlementQueue] = useState([]); // cancelled + settlementRequested
 
   const [studentModal, setStudentModal] = useState(null);
   const [centerModal, setCenterModal] = useState(null);
@@ -655,6 +731,18 @@ export default function CounselorPage() {
         paymentAccountsApi.list().catch(()=>[]),
       ]);
       setAllStudents(ss); setDocs(d); setCenters(c); setUniversities(unis);
+      // Settlement queue: Cancelled students where center has requested settlement but counselor hasn't forwarded yet
+      // Check both the settlementRequested field AND statusHistory as a fallback
+      // (in case Student.js model was not yet updated and the field wasn't saved)
+      setSettlementQueue(ss.filter(s => {
+        if (s.applicationStatus !== 'Cancelled') return false;
+        if (s.amountSettled) return false;
+        if (s.settlementForwardedToAccountant) return false;
+        // Primary check: field on document
+        if (s.settlementRequested) return true;
+        // Fallback: check statusHistory for 'Settlement_Requested' entry
+        return (s.statusHistory || []).some(h => h.status === 'Settlement_Requested');
+      }));
       const accMap = {};
       accs.forEach(a => { accMap[String(a._id)] = a; });
       setPayAccounts(accMap);
@@ -711,6 +799,16 @@ export default function CounselorPage() {
   async function forwardDoc(d) {
     try { await docsApi.forward(d._id); toast.success('Forwarded to accountant'); load(); }
     catch(e) { toast.error(e.message); }
+  }
+
+  async function handleForwardSettlement(student, note) {
+    setSaving(true);
+    try {
+      await studentsApi.forwardSettlement(student._id, note);
+      toast.success(`Settlement forwarded to accountant for ${student.name}`);
+      load();
+    } catch(e) { toast.error(e.message); }
+    finally { setSaving(false); }
   }
 
   async function forwardDocToCenter(d) {
@@ -820,15 +918,16 @@ export default function CounselorPage() {
       <Tabs defaultValue="review">
         <TabsList className="flex flex-wrap gap-0.5 bg-slate-100 p-1 rounded-xl h-auto">
           {[
-            { val:'review',    label:'Review',        count: pending.length,       dot:'bg-blue-500' },
-            { val:'acctreject',label:'Acct Rejected',  count: acctRejected.length,  dot:'bg-red-500'  },
-            { val:'docs',      label:'Doc Requests',   count: newDocs.length,       dot:'bg-indigo-500'},
-            { val:'feepay',    label:'Fee Payments',   count: feePayments.length,   dot:'bg-orange-500'},
-            { val:'payment',   label:'Doc Payments',   count: paymentPending.length,dot:'bg-emerald-500'},
-            { val:'dispatch',  label:'From Dispatch',  count: fromDisp.length,      dot:'bg-violet-500'},
-            { val:'delipend',  label:'Delivery Pending', count: deliveryPending.length, dot:'bg-rose-500'},
-            { val:'students',  label:'All Students',   count: allStudents.length,   dot:'' },
-            { val:'centers',   label:'Centers',        count: centers.length,       dot:'' },
+            { val:'review',    label:'Review',           count: pending.length,          dot:'bg-blue-500' },
+            { val:'acctreject',label:'Acct Rejected',     count: acctRejected.length,     dot:'bg-red-500'  },
+            { val:'docs',      label:'Doc Requests',      count: newDocs.length,          dot:'bg-indigo-500'},
+            { val:'feepay',    label:'Fee Payments',      count: feePayments.length,      dot:'bg-orange-500'},
+            { val:'payment',   label:'Doc Payments',      count: paymentPending.length,   dot:'bg-emerald-500'},
+            { val:'dispatch',  label:'From Dispatch',     count: fromDisp.length,         dot:'bg-violet-500'},
+            { val:'delipend',  label:'Delivery Pending',  count: deliveryPending.length,  dot:'bg-rose-500'},
+            { val:'settlement',label:'Settlement',        count: settlementQueue.length,  dot:'bg-amber-500'},
+            { val:'students',  label:'All Students',      count: allStudents.length,      dot:'' },
+            { val:'centers',   label:'Centers',           count: centers.length,          dot:'' },
           ].map(({ val, label, count, dot }) => (
             <TabsTrigger key={val} value={val}
               className="rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-2 px-3 flex items-center gap-1.5">
@@ -1047,6 +1146,27 @@ export default function CounselorPage() {
     </DocCard>
   ))}
 </TabsContent>
+
+        {/* ── Settlement Requests Tab ────────────────────── */}
+        <TabsContent value="settlement" className="space-y-3 mt-4">
+          <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5"/>
+            <p className="text-sm text-amber-700">
+              Centers have requested settlement for these cancelled applications. Review each case and forward to accountant if the refund/adjustment should be processed.
+            </p>
+          </div>
+          {settlementQueue.length === 0
+            ? <EmptyState icon={CheckCircle2} message="No pending settlement requests"/>
+            : settlementQueue.map(s => (
+              <SettlementRequestCard
+                key={s._id}
+                student={s}
+                saving={saving}
+                onForward={handleForwardSettlement}
+              />
+            ))
+          }
+        </TabsContent>
 
         {/* ── All Students Tab ───────────────────────────── */}
         <TabsContent value="students" className="space-y-3 mt-4">

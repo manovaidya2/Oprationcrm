@@ -355,10 +355,15 @@ export default function AccountantPage() {
         s.applicationStatus === 'University_Rejected' ||
         (s.applicationStatus === 'Accountant_Rejected' && s.rejectedVia === 'university')
       ));
-      // Amount Settle tab: All Rejected students (settled and unsettled both)
-      setAmountSettleQueue(allS.filter(s =>
-        s.applicationStatus === 'Rejected'
-      ));
+      // Amount Settle tab: Rejected students + Cancelled students forwarded by counselor to accountant
+      setAmountSettleQueue(allS.filter(s => {
+        if (s.applicationStatus === 'Rejected') return true;
+        if (s.applicationStatus !== 'Cancelled') return false;
+        // Primary check
+        if (s.settlementForwardedToAccountant) return true;
+        // Fallback: check statusHistory for 'Settlement_Forwarded' entry
+        return (s.statusHistory || []).some(h => h.status === 'Settlement_Forwarded');
+      }));
       setDocs(allD.filter(d => ['Forwarded','Fee_Pending'].includes(d.status)));
       setScanDocs(allD.filter(d => d.status === 'Accountant_Received'));
       setPayDocs(allD.filter(d => d.status === 'Payment_Submitted'));
@@ -721,25 +726,27 @@ export default function AccountantPage() {
             <div className="h-5 w-5 rounded-full bg-emerald-200 flex items-center justify-center flex-shrink-0 mt-0.5">
               <span className="text-emerald-700 text-xs font-bold">₹</span>
             </div>
-            <p className="text-sm text-emerald-700">These applications were rejected by university and counselor has sent them to center. Mark amount as settled once refund/adjustment is processed.</p>
+            <p className="text-sm text-emerald-700">Rejected applications from university path and cancelled applications where center has requested settlement. Mark amount as settled once refund/adjustment is processed.</p>
           </div>
           {filtAmountSettle.length === 0
             ? <div className="text-center py-10 text-muted-foreground">No rejected applications</div>
             : filtAmountSettle.map(s => (
-              <Card key={s._id} className={s.amountSettled ? 'border-emerald-300 bg-emerald-50/30' : 'border-red-200'}>
+              <Card key={s._id} className={s.amountSettled ? 'border-emerald-300 bg-emerald-50/30' : s.applicationStatus === 'Cancelled' ? 'border-slate-300 bg-slate-50' : 'border-red-200'}>
                 <CardContent className="p-4 flex items-start justify-between gap-3">
                   <div className="flex-1 cursor-pointer" onClick={() => setDetailStudent(s)}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">{s.name}</span>
                       {s.amountSettled
                         ? <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300 font-semibold">✅ Amount Settled</span>
-                        : <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">Rejected — Pending Settlement</span>
+                        : s.applicationStatus === 'Cancelled'
+                          ? <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 border border-slate-300">🚫 Cancelled — Forwarded by Counselor</span>
+                          : <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">Rejected — Pending Settlement</span>
                       }
                     </div>
                     <div className="text-sm text-muted-foreground mt-0.5">{s.center?.name} · {s.courseName} · {s.university?.name || s.universityName}</div>
                     {s.rejectionReason && (
-                      <div className="mt-1.5 text-xs bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-red-700">
-                        <span className="font-semibold">Rejection Reason:</span> {s.rejectionReason}
+                      <div className={`mt-1.5 text-xs rounded-lg px-3 py-2 ${s.applicationStatus === 'Cancelled' ? 'bg-slate-100 border border-slate-200 text-slate-600' : 'bg-red-50 border border-red-100 text-red-700'}`}>
+                        <span className="font-semibold">{s.applicationStatus === 'Cancelled' ? 'Cancellation Reason:' : 'Rejection Reason:'}</span> {s.rejectionReason}
                       </div>
                     )}
                   </div>

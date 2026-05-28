@@ -22,6 +22,11 @@ exports.upsertFee = asyncHandler(async (req, res) => {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
+  // Cancelled applications are fully locked — no changes allowed
+  if (student.applicationStatus === 'Cancelled' && req.user.role === 'Center') {
+    const e = new Error('This application has been cancelled. No changes are allowed.'); e.status = 403; throw e;
+  }
+
   // Center can only set fees in Draft or Changes_Requested state
   if (req.user.role === 'Center' && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
     const e = new Error('Fee structure cannot be changed after submission. Contact Admin/Counselor.'); e.status = 403; throw e;
@@ -53,6 +58,11 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+
+  // Cancelled applications are fully locked — no new payments allowed
+  if (student.applicationStatus === 'Cancelled' && req.user.role === 'Center') {
+    const e = new Error('This application has been cancelled. No payments can be added.'); e.status = 403; throw e;
   }
 
   let payment = await Payment.findOne({ student: req.params.studentId });

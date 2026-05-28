@@ -17,16 +17,25 @@ const STATUS_COLORS = {
   Rejected: 'bg-red-100 text-red-700', Accountant_Pending: 'bg-amber-100 text-amber-700',
   Sent_To_University: 'bg-purple-100 text-purple-700', Enrolled: 'bg-emerald-100 text-emerald-700',
   University_Rejected: 'bg-orange-100 text-orange-700',
+  Cancelled: 'bg-slate-100 text-slate-600',
 };
 const STATUS_LABELS = {
   Draft: 'Draft', Submitted: 'Submitted', Changes_Requested: 'Changes Needed',
   Counselor_Approved: 'Approved', Rejected: 'Rejected', Accountant_Pending: 'Fee Pending',
   Sent_To_University: 'At University', Enrolled: 'Enrolled', University_Rejected: 'Uni Rejected',
+  Cancelled: 'Cancelled',
 };
 const ALL_STATUSES = Object.keys(STATUS_LABELS);
 
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 const fmtAmt  = n => n != null && n !== '' ? Number(n).toString() : '';
+
+// Get the date when application was first submitted from statusHistory
+function getSubmittedDate(student) {
+  const hist = student.statusHistory || [];
+  const entry = hist.find(h => h.status === 'Submitted');
+  return entry?.at ? fmtDate(entry.at) : '';
+}
 
 export default function StudentsPage() {
   const navigate = useNavigate();
@@ -44,7 +53,7 @@ export default function StudentsPage() {
   const [centerF,   setCenterF]   = useState('all');
 
   // Selection
-  const [selected, setSelected] = useState(new Set()); // Set of student _ids
+  const [selected, setSelected] = useState(new Set());
 
   // CSV dialog state
   const [csvOpen,    setCsvOpen]    = useState(false);
@@ -70,7 +79,6 @@ export default function StudentsPage() {
         counselorsApi.getAll(),
       ]);
       setStudents(s); setCenters(c); setCounselors(co);
-      // Reset selection when list changes
       setSelected(new Set());
     } catch { toast.error('Failed to load students'); }
     finally { setLoading(false); }
@@ -79,8 +87,8 @@ export default function StudentsPage() {
   useEffect(() => { load(); }, [load]);
 
   // ── Selection helpers ──────────────────────────────────────
-  const allSelected   = students.length > 0 && students.every(s => selected.has(s._id));
-  const someSelected  = selected.size > 0;
+  const allSelected  = students.length > 0 && students.every(s => selected.has(s._id));
+  const someSelected = selected.size > 0;
 
   function toggleAll() {
     if (allSelected) setSelected(new Set());
@@ -101,7 +109,6 @@ export default function StudentsPage() {
 
     setCsvLoading(true);
     try {
-      // Fetch payment + docs for each student in parallel
       const enriched = await Promise.all(toExport.map(async s => {
         let pay = null, docs = [];
         try { pay  = await paymentsApi.get(s._id); }  catch {}
@@ -109,12 +116,11 @@ export default function StudentsPage() {
         return { s, pay, docs };
       }));
 
-      // Apply date filter — keep student if any verified tx falls in range
       const filtered = enriched.filter(({ pay }) => {
         if (!dateFrom && !dateTo) return true;
         const txs = pay?.transactions || [];
         const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
-        if (verifiedTxs.length === 0) return !dateFrom && !dateTo; // no verified tx — only include if no date filter
+        if (verifiedTxs.length === 0) return false;
         return verifiedTxs.some(t => {
           const d = new Date(t.verifiedAt);
           if (dateFrom && d < new Date(dateFrom)) return false;
@@ -129,6 +135,7 @@ export default function StudentsPage() {
         // Student basic
         'Name', 'Father Name', 'Mother Name', 'DOB', 'Gender', 'Phone', 'Email', 'Aadhaar', 'Address',
         'Course', 'Session', 'University', 'Center', 'Counselor', 'Status', 'Enrollment No',
+        'Submitted Date',                                        // ← new column
         '10th %', '10th Year', '10th Board', '12th %', '12th Year', '12th Board',
         // Fees
         'Total Fee', 'Discount', 'Net Fee', 'Total Paid', 'Balance Due',
@@ -138,9 +145,8 @@ export default function StudentsPage() {
         'Tx3 Amount', 'Tx3 Mode', 'Tx3 UTR', 'Tx3 Paid Date', 'Tx3 Verified Date', 'Tx3 Status',
         'Tx4 Amount', 'Tx4 Mode', 'Tx4 UTR', 'Tx4 Paid Date', 'Tx4 Verified Date', 'Tx4 Status',
         'Tx5 Amount', 'Tx5 Mode', 'Tx5 UTR', 'Tx5 Paid Date', 'Tx5 Verified Date', 'Tx5 Status',
-        // Last verified payment date
         'Last Payment Verified Date',
-        // Documents (up to 5 doc requests)
+        // Documents (up to 3)
         'Doc1 Name', 'Doc1 Status', 'Doc1 Charge', 'Doc1 Paid',
         'Doc2 Name', 'Doc2 Status', 'Doc2 Charge', 'Doc2 Paid',
         'Doc3 Name', 'Doc3 Status', 'Doc3 Charge', 'Doc3 Paid',
@@ -148,35 +154,32 @@ export default function StudentsPage() {
 
       const rows = filtered.map(({ s, pay, docs }) => {
         const txs = pay?.transactions || [];
-        // Last verified date
         const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
         const lastVerifiedDate = verifiedTxs.length > 0
           ? fmtDate(verifiedTxs.sort((a,b) => new Date(b.verifiedAt) - new Date(a.verifiedAt))[0].verifiedAt)
           : '';
 
-        // Tx columns (up to 5)
         const txCols = [];
         for (let i = 0; i < 5; i++) {
           const t = txs[i];
           txCols.push(
-            t ? fmtAmt(t.amount)    : '',
-            t ? t.mode || ''        : '',
-            t ? t.utrRef || ''      : '',
-            t ? fmtDate(t.paidAt)   : '',
+            t ? fmtAmt(t.amount)      : '',
+            t ? t.mode || ''          : '',
+            t ? t.utrRef || ''        : '',
+            t ? fmtDate(t.paidAt)     : '',
             t ? fmtDate(t.verifiedAt) : '',
             t ? (t.verificationStatus || '') : '',
           );
         }
 
-        // Doc columns (up to 3)
         const docCols = [];
         for (let i = 0; i < 3; i++) {
           const d = docs[i];
           docCols.push(
-            d ? d.name || ''                    : '',
+            d ? d.name || ''                       : '',
             d ? (d.status || '').replace(/_/g,' ') : '',
-            d ? fmtAmt(d.chargeFee)             : '',
-            d ? fmtAmt(d.totalPaid)             : '',
+            d ? fmtAmt(d.chargeFee)                : '',
+            d ? fmtAmt(d.totalPaid)                : '',
           );
         }
 
@@ -189,6 +192,7 @@ export default function StudentsPage() {
           s.center?.name || '', s.counselor?.name || '',
           STATUS_LABELS[s.applicationStatus] || s.applicationStatus || '',
           s.enrollmentNumber || '',
+          getSubmittedDate(s),                                   // ← new value
           s.tenth_percent || '', s.tenth_year || '', s.tenth_board || '',
           s.twelfth_percent || '', s.twelfth_year || '', s.twelfth_board || '',
           // Fee
@@ -208,7 +212,7 @@ export default function StudentsPage() {
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
       a.href     = url;
-      const suffix = centerF !== 'all' ? `_${centers.find(c=>c._id===centerF)?.name||'center'}` : '';
+      const suffix     = centerF !== 'all' ? `_${centers.find(c=>c._id===centerF)?.name||'center'}` : '';
       const dateSuffix = dateFrom || dateTo ? `_${dateFrom||''}to${dateTo||''}` : '';
       a.download = `students${suffix}${dateSuffix}.csv`;
       a.click();
@@ -306,7 +310,6 @@ export default function StudentsPage() {
               className={`transition-colors cursor-pointer ${selected.has(s._id) ? 'border-indigo-400 bg-indigo-50/30' : 'hover:border-primary/50'}`}>
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
-                  {/* Checkbox */}
                   <button
                     onClick={e => { e.stopPropagation(); toggleOne(s._id); }}
                     className="flex-shrink-0 text-slate-300 hover:text-indigo-500 transition-colors"
@@ -315,7 +318,6 @@ export default function StudentsPage() {
                       ? <CheckSquare className="h-4 w-4 text-indigo-600"/>
                       : <Square className="h-4 w-4"/>}
                   </button>
-                  {/* Row content */}
                   <div className="flex-1 min-w-0 flex items-center justify-between gap-3"
                     onClick={() => navigate(`/students/${s._id}`)}>
                     <div className="flex-1 min-w-0">
@@ -351,7 +353,6 @@ export default function StudentsPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-1">
-            {/* Which students */}
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm space-y-1">
               <div className="font-medium text-slate-700">Students to export:</div>
               <div className="text-slate-500">
@@ -359,15 +360,10 @@ export default function StudentsPage() {
                   ? <span className="text-indigo-600 font-semibold">{selected.size} selected student{selected.size > 1 ? 's' : ''}</span>
                   : <span>All <b>{students.length}</b> students (current filters)</span>}
               </div>
-              {centerF !== 'all' && (
-                <div className="text-xs text-slate-400">Center: {centers.find(c=>c._id===centerF)?.name}</div>
-              )}
-              {statusF !== 'all' && (
-                <div className="text-xs text-slate-400">Status: {STATUS_LABELS[statusF]}</div>
-              )}
+              {centerF !== 'all' && <div className="text-xs text-slate-400">Center: {centers.find(c=>c._id===centerF)?.name}</div>}
+              {statusF !== 'all' && <div className="text-xs text-slate-400">Status: {STATUS_LABELS[statusF]}</div>}
             </div>
 
-            {/* Date filter */}
             <div>
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                 Filter by Payment Verified Date <span className="text-slate-400 font-normal normal-case">(optional)</span>
@@ -390,10 +386,10 @@ export default function StudentsPage() {
               )}
             </div>
 
-            {/* What's included */}
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5 text-xs text-emerald-700 space-y-1">
               <div className="font-semibold">CSV includes:</div>
               <div>✓ Student details (name, DOB, phone, address, marks…)</div>
+              <div>✓ Submitted Date (when application was first submitted)</div>
               <div>✓ Fee summary (total, paid, due, discount)</div>
               <div>✓ All payment transactions (amount, mode, UTR, dates)</div>
               <div>✓ Last payment verified date</div>

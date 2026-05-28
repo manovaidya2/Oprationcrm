@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Loader2, Lock, Edit2, IndianRupee, FileText, CreditCard,
   History, PlusCircle, Plus, Trash2, Download, Send, CheckCircle2, XCircle,
-  RotateCcw, AlertTriangle, Clock, Activity, Paperclip,
+  RotateCcw, AlertTriangle, Clock, Activity, Paperclip, Shield,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const toDateInput = d => d ? new Date(d).toISOString().split('T')[0] : '';
 
 function PaidToBox({ tx, accMap=[] }) {
   if (!tx?.paidToAccount && !tx?.paidToAccountLabel) return null;
@@ -49,29 +50,12 @@ function PaidToBox({ tx, accMap=[] }) {
   );
 }
 
-function PaymentInfo({ tx, accMap=[] }) {
-  if (!tx) return null;
-  const isUPI = tx.mode === 'UPI', isBank = tx.mode === 'Bank Transfer';
-  return (
-    <div className="space-y-0.5 text-xs text-muted-foreground">
-      {tx.mode && <span className="inline-block bg-muted px-1.5 py-0.5 rounded font-medium mr-1">{tx.mode}</span>}
-      {isUPI  && tx.upiId        && <div>UPI ID: <b>{tx.upiId}</b></div>}
-      {tx.utrRef                  && <div>UTR: <b className="font-mono">{tx.utrRef}</b></div>}
-      {isBank && tx.bankName      && <div>Bank: <b>{tx.bankName}</b></div>}
-      {isBank && tx.accountHolder && <div>Account Holder: <b>{tx.accountHolder}</b></div>}
-      {isBank && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
-      {isBank && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
-      {tx.note && <div>Note: {tx.note}</div>}
-      <PaidToBox tx={tx} accMap={accMap}/>
-    </div>
-  );
-}
-
 const STATUS_COLORS = {
   Draft:'bg-gray-100 text-gray-700', Submitted:'bg-blue-100 text-blue-700',
   Changes_Requested:'bg-amber-100 text-amber-700', Counselor_Approved:'bg-indigo-100 text-indigo-700',
   Rejected:'bg-red-100 text-red-700', Accountant_Pending:'bg-amber-100 text-amber-700',
   Sent_To_University:'bg-purple-100 text-purple-700', Enrolled:'bg-emerald-100 text-emerald-700',
+  Cancelled:'bg-slate-100 text-slate-600',
 };
 
 const DOC_STATUS_COLORS = {
@@ -81,6 +65,133 @@ const DOC_STATUS_COLORS = {
   Payment_Submitted:'bg-blue-100 text-blue-700', Payment_Verified:'bg-green-100 text-green-700',
   Dispatched:'bg-teal-100 text-teal-700', Delivered:'bg-emerald-100 text-emerald-700',
 };
+
+const ALL_APP_STATUSES = [
+  'Draft','Submitted','Changes_Requested','Counselor_Approved',
+  'Accountant_Pending','Sent_To_University','Enrolled','Rejected','Cancelled',
+];
+
+// ── Admin Transaction Edit Dialog ──────────────────────────────
+function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
+  const [f, setF] = useState({
+    amount: tx.amount || '',
+    mode: tx.mode || '',
+    upiId: tx.upiId || '',
+    utrRef: tx.utrRef || '',
+    bankName: tx.bankName || '',
+    accountHolder: tx.accountHolder || '',
+    accountNumber: tx.accountNumber || '',
+    ifscCode: tx.ifscCode || '',
+    note: tx.note || '',
+    paidAt: toDateInput(tx.paidAt),
+    verificationStatus: tx.verificationStatus || 'pending',
+    paidToAccount: tx.paidToAccount || '',
+  });
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!f.amount || Number(f.amount) <= 0) return toast.error('Enter valid amount');
+    setSaving(true);
+    try {
+      await paymentsApi.updateTransaction(studentId, tx._id, { ...f, amount: Number(f.amount) });
+      toast.success('Transaction updated');
+      onDone();
+    } catch(e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-4 w-4 text-indigo-600"/>Admin — Edit Payment Transaction
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Amount (₹) *</Label>
+              <Input type="number" value={f.amount} onChange={e=>setF(p=>({...p,amount:e.target.value}))}/>
+            </div>
+            <div>
+              <Label>Paid Date</Label>
+              <Input type="date" value={f.paidAt} onChange={e=>setF(p=>({...p,paidAt:e.target.value}))}/>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Mode</Label>
+              <Select value={f.mode} onValueChange={v=>setF(p=>({...p,mode:v}))}>
+                <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UPI">UPI</SelectItem>
+                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="Cash">Cash</SelectItem>
+                  <SelectItem value="Cheque">Cheque</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Verification Status</Label>
+              <Select value={f.verificationStatus} onValueChange={v=>setF(p=>({...p,verificationStatus:v}))}>
+                <SelectTrigger><SelectValue/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="pending_counselor">Pending Counselor</SelectItem>
+                  <SelectItem value="verified">Verified</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>UTR / Reference Number</Label>
+            <Input value={f.utrRef} onChange={e=>setF(p=>({...p,utrRef:e.target.value}))} placeholder="Transaction reference"/>
+          </div>
+          {f.mode === 'UPI' && (
+            <div>
+              <Label>UPI ID</Label>
+              <Input value={f.upiId} onChange={e=>setF(p=>({...p,upiId:e.target.value}))} placeholder="name@upi"/>
+            </div>
+          )}
+          {f.mode === 'Bank Transfer' && (
+            <div className="grid grid-cols-2 gap-2">
+              <div><Label className="text-xs">Bank Name</Label><Input value={f.bankName} onChange={e=>setF(p=>({...p,bankName:e.target.value}))}/></div>
+              <div><Label className="text-xs">Account Holder</Label><Input value={f.accountHolder} onChange={e=>setF(p=>({...p,accountHolder:e.target.value}))}/></div>
+              <div><Label className="text-xs">Account Number</Label><Input value={f.accountNumber} onChange={e=>setF(p=>({...p,accountNumber:e.target.value}))}/></div>
+              <div><Label className="text-xs">IFSC</Label><Input value={f.ifscCode} onChange={e=>setF(p=>({...p,ifscCode:e.target.value}))}/></div>
+            </div>
+          )}
+          {payAccounts.length > 0 && (
+            <div>
+              <Label>Paid To Account</Label>
+              <Select value={f.paidToAccount||''} onValueChange={v=>setF(p=>({...p,paidToAccount:v}))}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select account…"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">— None —</SelectItem>
+                  {payAccounts.map(acc=>(
+                    <SelectItem key={acc._id} value={acc._id}>{acc.label} ({acc.mode})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div>
+            <Label>Note</Label>
+            <Input value={f.note} onChange={e=>setF(p=>({...p,note:e.target.value}))}/>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">
+            {saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Changes
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export default function StudentDetailPage() {
   const { id } = useParams();
@@ -94,7 +205,7 @@ export default function StudentDetailPage() {
 
   const [editOpen,   setEditOpen]   = useState(false);
   const [form,       setForm]       = useState({});
-  const [actionOpen, setActionOpen] = useState(null); // 'approve'|'reject'|'changes'
+  const [actionOpen, setActionOpen] = useState(null);
   const [note,       setNote]       = useState('');
   const [saving,     setSaving]     = useState(false);
 
@@ -103,9 +214,13 @@ export default function StudentDetailPage() {
   const [tf, setTf] = useState({...EMPTY_TF});
   const [payAccounts, setPayAccounts] = useState([]);
 
+  // Admin tx edit
+  const [editTx, setEditTx] = useState(null); // transaction object being edited
+
   useEffect(() => {
     paymentAccountsApi.list().then(setPayAccounts).catch(()=>{});
   }, []);
+
   const [feeOpen, setFeeOpen] = useState(false);
   const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
 
@@ -132,8 +247,10 @@ export default function StudentDetailPage() {
 
   async function saveEdit() {
     setSaving(true);
-    try { const u = await studentsApi.update(id, form); setStudent(u); toast.success('Updated'); setEditOpen(false); load(); }
-    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+    try {
+      const u = await studentsApi.update(id, form);
+      setStudent(u); toast.success('Updated'); setEditOpen(false); load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function doAction(action) {
@@ -150,19 +267,23 @@ export default function StudentDetailPage() {
   async function saveFee() {
     if (!ff.totalFee) return toast.error('Total fee required');
     setSaving(true);
-    try { await paymentsApi.upsertFee(id, { totalFee:Number(ff.totalFee), discount:Number(ff.discount)||0, notes:ff.notes }); toast.success('Fee saved'); setFeeOpen(false); load(); }
-    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+    try {
+      await paymentsApi.upsertFee(id, { totalFee:Number(ff.totalFee), discount:Number(ff.discount)||0, notes:ff.notes });
+      toast.success('Fee saved'); setFeeOpen(false); load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function addTx() {
     if (!tf.amount||Number(tf.amount)<=0) return toast.error('Enter valid amount');
     setSaving(true);
-    try { await paymentsApi.addTransaction(id, {...tf, amount:Number(tf.amount)}); toast.success('Payment recorded'); setTxOpen(false); setTf({...EMPTY_TF}); load(); }
-    catch(e) { toast.error(e.message); } finally { setSaving(false); }
+    try {
+      await paymentsApi.addTransaction(id, {...tf, amount:Number(tf.amount)});
+      toast.success('Payment recorded'); setTxOpen(false); setTf({...EMPTY_TF}); load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function delTx(txId) {
-    if (!confirm('Delete transaction?')) return;
+    if (!confirm('Delete this transaction? This cannot be undone.')) return;
     try { await paymentsApi.deleteTransaction(id, txId); toast.success('Deleted'); load(); }
     catch(e) { toast.error(e.message); }
   }
@@ -192,12 +313,11 @@ export default function StudentDetailPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
   if (!student) return <div className="text-center py-16 text-muted-foreground">Student not found</div>;
 
-  const canEdit = !student.coreLocked || user?.role==='Admin';
+  const canEdit = !student.coreLocked || user?.role === 'Admin';
   const isCounselor = user?.role === 'Counselor';
   const isAdmin = user?.role === 'Admin';
   const st = STATUS_COLORS[student.applicationStatus] || 'bg-gray-100 text-gray-700';
 
-  // Merged payments for timeline
   const allPayments = [];
   payment?.transactions?.forEach(t => allPayments.push({...t, source:'Fee'}));
   docs.forEach(d => d.payments?.forEach(p => allPayments.push({...p, source:`Doc: ${d.name}`})));
@@ -212,13 +332,33 @@ export default function StudentDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold">{student.name}</h1>
             {student.coreLocked && <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"><Lock className="h-3 w-3"/>Core Locked</span>}
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st}`}>{student.applicationStatus?.replace('_',' ')}</span>
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st}`}>{student.applicationStatus?.replace(/_/g,' ')}</span>
             {student.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{student.enrollmentNumber}</span>}
           </div>
           <div className="text-sm text-muted-foreground">{student.center?.name} · {student.counselor?.name}</div>
         </div>
         <div className="flex gap-2 flex-shrink-0">
-          {canEdit && <Button variant="outline" size="sm" onClick={() => { setForm({name:student.name,phone:student.phone||'',email:student.email||'',fatherName:student.fatherName||'',motherName:student.motherName||'',dob:student.dob?student.dob.split('T')[0]:'',gender:student.gender||'',address:student.address||'',aadharNumber:student.aadharNumber||'',courseName:student.courseName||'',courseYear:student.courseYear||'',university:student.university||''}); setEditOpen(true); }}><Edit2 className="h-3.5 w-3.5 mr-1"/>Edit</Button>}
+          {canEdit && (
+            <Button variant="outline" size="sm" onClick={() => {
+              setForm({
+                name: student.name, phone: student.phone||'', email: student.email||'',
+                fatherName: student.fatherName||'', motherName: student.motherName||'',
+                dob: toDateInput(student.dob), gender: student.gender||'',
+                address: student.address||'', aadharNumber: student.aadharNumber||'',
+                courseName: student.courseName||'', courseYear: student.courseYear||'',
+                university: student.university?._id || student.university || '',
+                tenth_percent: student.tenth_percent||'', tenth_year: student.tenth_year||'',
+                tenth_board: student.tenth_board||'',
+                twelfth_percent: student.twelfth_percent||'', twelfth_year: student.twelfth_year||'',
+                twelfth_board: student.twelfth_board||'',
+                // Admin-only fields
+                enrollmentNumber: student.enrollmentNumber||'',
+              });
+              setEditOpen(true);
+            }}>
+              <Edit2 className="h-3.5 w-3.5 mr-1"/>Edit
+            </Button>
+          )}
           {(isCounselor||isAdmin) && student.applicationStatus==='Submitted' && (
             <>
               <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={()=>{setActionOpen('approve');setNote('');}}>Approve</Button>
@@ -242,6 +382,12 @@ export default function StudentDetailPage() {
           <div><b>Rejected:</b> {student.rejectionReason}</div>
         </div>
       )}
+      {student.applicationStatus==='Cancelled' && (
+        <div className="bg-slate-100 border border-slate-300 rounded-lg px-4 py-3 text-sm text-slate-700 flex items-start gap-2">
+          <XCircle className="h-4 w-4 mt-0.5 flex-shrink-0"/>
+          <div><b>Cancelled</b>{student.rejectionReason ? `: ${student.rejectionReason}` : ''}</div>
+        </div>
+      )}
 
       <Tabs defaultValue="info">
         <TabsList>
@@ -251,7 +397,7 @@ export default function StudentDetailPage() {
           <TabsTrigger value="payments">Payments</TabsTrigger>
         </TabsList>
 
-        {/* Info Tab */}
+        {/* ── Info Tab ── */}
         <TabsContent value="info" className="mt-4 space-y-4">
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[['Name', student.name], ['Phone', student.phone], ['Email', student.email],
@@ -260,12 +406,12 @@ export default function StudentDetailPage() {
               ['Course', student.courseName], ['Session', student.courseYear],
               ['University', student.university?.name || student.universityName || student.university],
               ['Address', student.address],
-              ['10th %',   student.tenth_percent   ? `${student.tenth_percent}%`   : null],
-              ['10th Year',student.tenth_year      || null],
-              ['10th Board',student.tenth_board    || null],
-              ['12th %',   student.twelfth_percent ? `${student.twelfth_percent}%` : null],
-              ['12th Year',student.twelfth_year    || null],
-              ['12th Board',student.twelfth_board  || null],
+              ['10th %',    student.tenth_percent    ? `${student.tenth_percent}%`    : null],
+              ['10th Year', student.tenth_year       || null],
+              ['10th Board',student.tenth_board      || null],
+              ['12th %',    student.twelfth_percent  ? `${student.twelfth_percent}%`  : null],
+              ['12th Year', student.twelfth_year     || null],
+              ['12th Board',student.twelfth_board    || null],
             ].filter(([,v])=>v).map(([l,v])=>(
               <div key={l} className="bg-muted/30 rounded-lg px-3 py-2">
                 <div className="text-xs text-muted-foreground">{l}</div>
@@ -279,8 +425,6 @@ export default function StudentDetailPage() {
               <div className="text-lg font-mono font-bold text-emerald-700 mt-0.5">{student.enrollmentNumber}</div>
             </div>
           )}
-
-          {/* Submission Documents uploaded by Center */}
           <div className="border rounded-lg p-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
               <Paperclip className="h-3.5 w-3.5"/> Submitted Documents ({student.submissionDocs?.length || 0})
@@ -296,9 +440,7 @@ export default function StudentDetailPage() {
                     </div>
                     {d.fileUrl
                       ? <a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer"
-                          className="text-xs text-blue-600 underline shrink-0 ml-2 hover:text-blue-800">
-                          View / Download
-                        </a>
+                          className="text-xs text-blue-600 underline shrink-0 ml-2 hover:text-blue-800">View / Download</a>
                       : <span className="text-xs text-muted-foreground shrink-0 ml-2">No file uploaded</span>
                     }
                   </div>
@@ -310,7 +452,7 @@ export default function StudentDetailPage() {
           </div>
         </TabsContent>
 
-        {/* Fees Tab */}
+        {/* ── Fees Tab ── */}
         <TabsContent value="fees" className="mt-4 space-y-4">
           {payment ? (
             <>
@@ -322,7 +464,7 @@ export default function StudentDetailPage() {
               <div className={`flex items-center justify-between rounded-lg border p-3 ${payment.dueAmount>0?'border-amber-300 bg-amber-50':'border-emerald-300 bg-emerald-50'}`}>
                 <div><span className="text-sm font-medium">Balance Due: </span><span className={`text-lg font-bold ${payment.dueAmount>0?'text-amber-700':'text-emerald-700'}`}>{fmt(payment.dueAmount)}</span></div>
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:payment.totalFee,discount:payment.discount,notes:payment.notes||''});setFeeOpen(true);}}>Edit</Button>
+                  <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:payment.totalFee,discount:payment.discount,notes:payment.notes||''});setFeeOpen(true);}}>Edit Fee</Button>
                   <Button size="sm" onClick={()=>setTxOpen(true)}><PlusCircle className="h-3.5 w-3.5 mr-1"/>Add Payment</Button>
                 </div>
               </div>
@@ -335,7 +477,7 @@ export default function StudentDetailPage() {
               <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}}>Set Up Fees</Button>
             </div>
           )}
-          {payment?.transactions?.length>0 && (
+          {payment?.transactions?.length > 0 && (
             <div>
               <h4 className="text-sm font-medium mb-2 flex items-center gap-1"><History className="h-4 w-4"/>Fee Payment History</h4>
               <div className="space-y-1.5">
@@ -349,7 +491,21 @@ export default function StudentDetailPage() {
                         {tx.verificationStatus==='verified'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✓ Verified</span>}
                         {tx.verificationStatus==='rejected'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">✗ Rejected</span>}
                       </div>
-                      <span className="text-xs text-muted-foreground shrink-0">{fmtDt(tx.paidAt)}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs text-muted-foreground">{fmtDt(tx.paidAt)}</span>
+                        {isAdmin && (
+                          <div className="flex gap-1">
+                            <button onClick={()=>setEditTx(tx)}
+                              className="p-1 text-slate-400 hover:text-indigo-600 rounded transition-colors" title="Edit transaction">
+                              <Edit2 className="h-3.5 w-3.5"/>
+                            </button>
+                            <button onClick={()=>delTx(tx._id)}
+                              className="p-1 text-slate-400 hover:text-red-500 rounded transition-colors" title="Delete transaction">
+                              <Trash2 className="h-3.5 w-3.5"/>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                       {tx.mode==='UPI' && tx.upiId      && <div>UPI ID: <b>{tx.upiId}</b></div>}
@@ -360,13 +516,13 @@ export default function StudentDetailPage() {
                       {tx.mode==='Bank Transfer' && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
                       {tx.note && <div>Note: {tx.note}</div>}
                       {tx.paymentScreenshot && (
-  <div className="mt-1.5">
-    <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
-      <Download className="h-3 w-3"/>View Payment Screenshot
-    </a>
-  </div>
-)}
+                        <div className="mt-1.5">
+                          <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+                            <Download className="h-3 w-3"/>View Payment Screenshot
+                          </a>
+                        </div>
+                      )}
                       <PaidToBox tx={tx} accMap={payAccounts}/>
                     </div>
                   </div>
@@ -376,7 +532,7 @@ export default function StudentDetailPage() {
           )}
         </TabsContent>
 
-        {/* Docs Tab */}
+        {/* ── Docs Tab ── */}
         <TabsContent value="docs" className="mt-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">{docs.length} document{docs.length!==1?'s':''}</p>
@@ -406,7 +562,6 @@ export default function StudentDetailPage() {
                         {d.totalPaid>0 && <span className="text-emerald-600">Paid: <b>{fmt(d.totalPaid)}</b></span>}
                       </div>
                     )}
-                    {/* Status history */}
                     {d.statusHistory?.length>0 && (
                       <div className="mt-2 border-t pt-2">
                         <p className="text-xs text-muted-foreground font-medium mb-1">History</p>
@@ -433,7 +588,7 @@ export default function StudentDetailPage() {
           ))}
         </TabsContent>
 
-        {/* Payments Tab - unified */}
+        {/* ── Payments Tab ── */}
         <TabsContent value="payments" className="mt-4 space-y-3">
           <div className="flex items-center justify-between bg-muted/40 rounded-lg px-4 py-3">
             <span className="text-sm font-medium">Total Collected ({allPayments.length} transactions)</span>
@@ -461,13 +616,13 @@ export default function StudentDetailPage() {
                 {p.mode==='Bank Transfer' && p.ifscCode      && <div>IFSC: <b>{p.ifscCode}</b></div>}
                 {p.note && <div>Note: {p.note}</div>}
                 {p.paymentScreenshot && (
-  <div className="mt-1.5">
-    <a href={`${MEDIA}${p.paymentScreenshot}`} target="_blank" rel="noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
-      <Download className="h-3 w-3"/>View Payment Screenshot
-    </a>
-  </div>
-)}
+                  <div className="mt-1.5">
+                    <a href={`${MEDIA}${p.paymentScreenshot}`} target="_blank" rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
+                      <Download className="h-3 w-3"/>View Payment Screenshot
+                    </a>
+                  </div>
+                )}
                 <PaidToBox tx={p} accMap={payAccounts}/>
               </div>
             </div>
@@ -475,34 +630,104 @@ export default function StudentDetailPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit Dialog */}
+      {/* ── Edit Student Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Edit Student{student.coreLocked?' (Core fields locked)':''}</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <div><Label>Full Name {student.coreLocked&&'🔒'}</Label><Input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
-            <div><Label>Phone</Label><Input value={form.phone||''} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/></div>
-            <div><Label>Email</Label><Input value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/></div>
-            <div><Label>Father Name {student.coreLocked&&'🔒'}</Label><Input value={form.fatherName||''} onChange={e=>setForm(p=>({...p,fatherName:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
-            <div><Label>Mother Name</Label><Input value={form.motherName||''} onChange={e=>setForm(p=>({...p,motherName:e.target.value}))}/></div>
-            <div><Label>DOB {student.coreLocked&&'🔒'}</Label><Input type="date" value={form.dob||''} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
-            <div><Label>Gender</Label>
-              <Select value={form.gender||''} onValueChange={v=>setForm(p=>({...p,gender:v}))}>
-                <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
-                <SelectContent>{['Male','Female','Other'].map(g=><SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
-              </Select>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {isAdmin && <Shield className="h-4 w-4 text-indigo-600"/>}
+              Edit Student {isAdmin ? '(Admin — All fields editable)' : student.coreLocked ? '(Core fields locked)' : ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+
+            {/* Basic Info */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Basic Information</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label>Full Name {student.coreLocked && !isAdmin && '🔒'}</Label>
+                  <Input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} disabled={student.coreLocked && !isAdmin}/>
+                </div>
+                <div><Label>Phone</Label><Input value={form.phone||''} onChange={e=>setForm(p=>({...p,phone:e.target.value}))}/></div>
+                <div><Label>Email</Label><Input value={form.email||''} onChange={e=>setForm(p=>({...p,email:e.target.value}))}/></div>
+                <div>
+                  <Label>Father Name {student.coreLocked && !isAdmin && '🔒'}</Label>
+                  <Input value={form.fatherName||''} onChange={e=>setForm(p=>({...p,fatherName:e.target.value}))} disabled={student.coreLocked && !isAdmin}/>
+                </div>
+                <div><Label>Mother Name</Label><Input value={form.motherName||''} onChange={e=>setForm(p=>({...p,motherName:e.target.value}))}/></div>
+                <div>
+                  <Label>DOB {student.coreLocked && !isAdmin && '🔒'}</Label>
+                  <Input type="date" value={form.dob||''} onChange={e=>setForm(p=>({...p,dob:e.target.value}))} disabled={student.coreLocked && !isAdmin}/>
+                </div>
+                <div>
+                  <Label>Gender</Label>
+                  <Select value={form.gender||''} onValueChange={v=>setForm(p=>({...p,gender:v}))}>
+                    <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
+                    <SelectContent>{['Male','Female','Other'].map(g=><SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Aadhar {student.coreLocked && !isAdmin && '🔒'}</Label>
+                  <Input value={form.aadharNumber||''} onChange={e=>setForm(p=>({...p,aadharNumber:e.target.value}))} disabled={student.coreLocked && !isAdmin}/>
+                </div>
+                <div><Label>Course</Label><Input value={form.courseName||''} onChange={e=>setForm(p=>({...p,courseName:e.target.value}))}/></div>
+                <div><Label>Year / Batch</Label><Input value={form.courseYear||''} onChange={e=>setForm(p=>({...p,courseYear:e.target.value}))}/></div>
+                <div className="col-span-2"><Label>Address</Label><Input value={form.address||''} onChange={e=>setForm(p=>({...p,address:e.target.value}))}/></div>
+              </div>
             </div>
-            <div><Label>Aadhar {student.coreLocked&&'🔒'}</Label><Input value={form.aadharNumber||''} onChange={e=>setForm(p=>({...p,aadharNumber:e.target.value}))} disabled={student.coreLocked&&user?.role!=='Admin'}/></div>
-            <div><Label>Course</Label><Input value={form.courseName||''} onChange={e=>setForm(p=>({...p,courseName:e.target.value}))}/></div>
-            <div><Label>Year / Batch</Label><Input value={form.courseYear||''} onChange={e=>setForm(p=>({...p,courseYear:e.target.value}))}/></div>
-            <div className="col-span-2"><Label>Address</Label><Input value={form.address||''} onChange={e=>setForm(p=>({...p,address:e.target.value}))}/></div>
+
+            {/* Academic Marks */}
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Academic Details</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div><Label className="text-xs">10th %</Label><Input value={form.tenth_percent||''} onChange={e=>setForm(p=>({...p,tenth_percent:e.target.value}))} placeholder="e.g. 85.5"/></div>
+                <div><Label className="text-xs">10th Year</Label><Input value={form.tenth_year||''} onChange={e=>setForm(p=>({...p,tenth_year:e.target.value}))} placeholder="e.g. 2020"/></div>
+                <div><Label className="text-xs">10th Board</Label><Input value={form.tenth_board||''} onChange={e=>setForm(p=>({...p,tenth_board:e.target.value}))} placeholder="e.g. CBSE"/></div>
+                <div><Label className="text-xs">12th %</Label><Input value={form.twelfth_percent||''} onChange={e=>setForm(p=>({...p,twelfth_percent:e.target.value}))} placeholder="e.g. 78.2"/></div>
+                <div><Label className="text-xs">12th Year</Label><Input value={form.twelfth_year||''} onChange={e=>setForm(p=>({...p,twelfth_year:e.target.value}))} placeholder="e.g. 2022"/></div>
+                <div><Label className="text-xs">12th Board</Label><Input value={form.twelfth_board||''} onChange={e=>setForm(p=>({...p,twelfth_board:e.target.value}))} placeholder="e.g. UP Board"/></div>
+              </div>
+            </div>
+
+            {/* Admin-only section */}
+            {isAdmin && (
+              <div className="border border-indigo-200 bg-indigo-50/50 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield className="h-3.5 w-3.5"/>Admin Only Fields
+                </p>
+                <div>
+                  <Label>Enrollment Number</Label>
+                  <Input
+                    value={form.enrollmentNumber||''}
+                    onChange={e=>setForm(p=>({...p,enrollmentNumber:e.target.value}))}
+                    placeholder="Enter or update enrollment number"
+                    className="font-mono"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">Updating this will not change applicationStatus — use this to correct enrollment numbers.</p>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setEditOpen(false)}>Cancel</Button>
-            <Button onClick={saveEdit} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button>
+            <Button onClick={saveEdit} disabled={saving}>
+              {saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Admin Tx Edit Dialog */}
+      {editTx && (
+        <AdminTxEditDialog
+          tx={editTx}
+          studentId={id}
+          payAccounts={payAccounts}
+          onDone={() => { setEditTx(null); load(); }}
+          onClose={() => setEditTx(null)}
+        />
+      )}
 
       {/* Review Action Dialog */}
       <Dialog open={!!actionOpen} onOpenChange={()=>setActionOpen(null)}>
@@ -553,7 +778,10 @@ export default function StudentDetailPage() {
               <div><Label>Mode *</Label>
                 <Select value={tf.mode} onValueChange={v=>setTf(p=>({...p,mode:v}))}>
                   <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
-                  <SelectContent><SelectItem value="UPI">UPI</SelectItem><SelectItem value="Bank Transfer">Bank Transfer</SelectItem></SelectContent>
+                  <SelectContent>
+                    <SelectItem value="UPI">UPI</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               <div><Label>Date</Label><Input type="date" value={tf.paidAt} onChange={e=>setTf(p=>({...p,paidAt:e.target.value}))}/></div>
@@ -571,7 +799,7 @@ export default function StudentDetailPage() {
               <div className="space-y-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
                 <p className="text-xs font-semibold text-emerald-700">Bank Transfer Details</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <div><Label className="text-xs">Bank Name *</Label><Input value={tf.bankName} onChange={e=>setTf(p=>({...p,bankName:e.target.value}))} placeholder="e.g. SBI"/></div>
+                  <div><Label className="text-xs">Bank Name *</Label><Input value={tf.bankName} onChange={e=>setTf(p=>({...p,bankName:e.target.value}))}/></div>
                   <div><Label className="text-xs">Account Holder *</Label><Input value={tf.accountHolder} onChange={e=>setTf(p=>({...p,accountHolder:e.target.value}))}/></div>
                   <div><Label className="text-xs">Account Number</Label><Input value={tf.accountNumber} onChange={e=>setTf(p=>({...p,accountNumber:e.target.value}))}/></div>
                   <div><Label className="text-xs">IFSC Code</Label><Input value={tf.ifscCode} onChange={e=>setTf(p=>({...p,ifscCode:e.target.value}))}/></div>

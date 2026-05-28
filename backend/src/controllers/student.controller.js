@@ -29,17 +29,16 @@ async function assertStudentAccess(req, student) {
     }
   }
   if (['Accountant'].includes(role)) {
-    const allowed = ['Counselor_Approved', 'Accountant_Pending', 'Accountant_Approved', 'Sent_To_University', 'University_Rejected', 'Accountant_Rejected', 'Rejected', 'Enrolled'];
+    const allowed = ['Counselor_Approved', 'Accountant_Pending', 'Accountant_Approved', 'Sent_To_University', 'University_Rejected', 'Accountant_Rejected', 'Rejected', 'Enrolled', 'Cancelled'];
     if (!allowed.includes(student.applicationStatus)) {
       const e = new Error('Forbidden'); e.status = 403; throw e;
     }
   }
   if (role === 'University') {
-    // Only enforce isolation if universityId is set (legacy users without universityId can see all)
     if (req.user.universityId && String(student.university) !== String(req.user.universityId)) {
       const e = new Error('Forbidden — student belongs to a different university'); e.status = 403; throw e;
     }
-    if (!['Sent_To_University', 'Enrolled'].includes(student.applicationStatus)) {
+    if (!['Sent_To_University', 'Enrolled','Cancelled'].includes(student.applicationStatus)) {
       const e = new Error('Forbidden'); e.status = 403; throw e;
     }
   }
@@ -62,14 +61,12 @@ exports.list = asyncHandler(async (req, res) => {
       andConditions.push({ counselor: counselorId });
     }
   } else if (role === 'Accountant') {
-    andConditions.push({ applicationStatus: { $in: ['Counselor_Approved','Accountant_Pending','Accountant_Approved','Sent_To_University','University_Rejected','Accountant_Rejected','Rejected','Enrolled'] } });
+    andConditions.push({ applicationStatus: { $in: ['Counselor_Approved','Accountant_Pending','Accountant_Approved','Sent_To_University','University_Rejected','Accountant_Rejected','Rejected','Enrolled','Cancelled'] } });
   } else if (role === 'University') {
-    // HARD ISOLATION: University sees ONLY its own students
-    // If universityId is null (legacy user), show all university-stage students
     if (universityId) {
       andConditions.push({ university: universityId });
     }
-    andConditions.push({ applicationStatus: { $in: ['Sent_To_University','Enrolled'] } });
+    andConditions.push({ applicationStatus: { $in: ['Sent_To_University','Enrolled','Cancelled'] } });
   }
 
   if (req.query.status)       andConditions.push({ applicationStatus: req.query.status });
@@ -163,13 +160,15 @@ exports.update = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   await assertStudentAccess(req, student);
 
-  if (student.coreLocked) {
+  // Admin can edit all fields even if core is locked; others cannot touch locked fields
+  if (student.coreLocked && req.user.role !== 'Admin') {
     ['name','fatherName','motherName','dob','aadharNumber'].forEach(f => delete req.body[f]);
   }
   if (req.user.role === 'Center') { delete req.body.counselor; delete req.body.center; }
   delete req.body.applicationStatus;
   delete req.body.coreLocked;
-  delete req.body.enrollmentNumber;
+  // Only Admin can directly update enrollmentNumber (to correct mistakes)
+  if (req.user.role !== 'Admin') delete req.body.enrollmentNumber;
   if (req.body.gender === '') delete req.body.gender;
 
   if (req.body.universityId && ['Admin','Counselor'].includes(req.user.role)) {
@@ -215,7 +214,6 @@ exports.submit = asyncHandler(async (req, res) => {
     const e = new Error('Application can only be submitted from Draft or Changes_Requested state'); e.status = 400; throw e;
   }
 
-  // Allow universityId to be passed in body as fallback (for existing students being migrated)
   if (!s.university && req.body.universityId) {
     const uni = await University.findById(req.body.universityId);
     if (uni) {
@@ -353,7 +351,6 @@ exports.accountantAction = asyncHandler(async (req, res) => {
   if (action === 'approve') {
     updateFields = { applicationStatus: 'Sent_To_University' };
 
-    // ISOLATED NOTIFICATION: only notify university users of THIS student's university
     const uniId = s.university?._id || s.university;
     if (uniId) {
       const uniUsers = await User.find({ role:'University', universityId: uniId, isActive:true }).select('_id').lean();
@@ -395,10 +392,8 @@ exports.accountantAction = asyncHandler(async (req, res) => {
   await Student.findByIdAndUpdate(req.params.id, updateFields);
   Object.assign(s, updateFields);
 
-  // Push to statusHistory for audit trail
   const historyLabel = action === 'approve' ? 'Sent_To_University' : action === 'reject' ? 'Accountant_Rejected' : 'Accountant_Pending';
   await pushHistory(req.params.id, historyLabel, req.user, note || '');
-
   await audit('accountant_action', 'Student', s._id, req.user, { action, note }, `Accountant ${action} for ${s.name}`);
   res.json(s);
 });
@@ -428,15 +423,12 @@ exports.counselorSendToCenter = asyncHandler(async (req, res) => {
     const e = new Error('Must be Accountant_Rejected status'); e.status = 400; throw e;
   }
   const note = req.body.note || 'Please update your application and resubmit';
-  // If this came via university rejection path, final status is 'Rejected' (no resubmission)
-  // If counselor wants to allow resubmit, use Changes_Requested; default for university rejection is Rejected
   const isUniversityPath = req.body.finalReject === true;
   const newStatus = isUniversityPath ? 'Rejected' : 'Changes_Requested';
   const updateFields = { applicationStatus: newStatus, changesRequested: newStatus === 'Changes_Requested' ? note : undefined };
   if (newStatus === 'Rejected') {
     updateFields.rejectionReason = note;
     updateFields.changesRequested = undefined;
-    // Always mark as university path when finalReject=true (this button only appears for university-rejected students)
     updateFields.rejectedVia = 'university';
   }
 
@@ -454,7 +446,7 @@ exports.counselorSendToCenter = asyncHandler(async (req, res) => {
   res.json(updated);
 });
 
-// POST /api/students/:id/university-reject  — University rejects → back to accountant
+// POST /api/students/:id/university-reject
 exports.universityReject = asyncHandler(async (req, res) => {
   const { reason } = req.body;
   const s = await Student.findById(req.params.id).populate('university','name').populate('center','name');
@@ -472,7 +464,6 @@ exports.universityReject = asyncHandler(async (req, res) => {
     { new: true }
   ).populate('center','name').populate('counselor','name').populate('university','name shortName');
 
-  // Notify all accountants
   await notifyRole('Accountant', {
     message: `University rejected ${s.name}'s application (${s.university?.name||''}): ${reason||'No reason given'}. Please review and forward to counselor.`,
     type: 'application_rejected', studentId: s._id, role: 'Accountant',
@@ -482,7 +473,7 @@ exports.universityReject = asyncHandler(async (req, res) => {
   res.json(updated);
 });
 
-// POST /api/students/:id/accountant-forward-to-counselor  — Accountant sends University_Rejected to counselor
+// POST /api/students/:id/accountant-forward-to-counselor
 exports.accountantForwardToCounselor = asyncHandler(async (req, res) => {
   const { note } = req.body;
   const s = await Student.findById(req.params.id).populate('center','name').populate('university','name');
@@ -495,7 +486,6 @@ exports.accountantForwardToCounselor = asyncHandler(async (req, res) => {
     { new: true }
   ).populate('center','name').populate('counselor','name').populate('university','name shortName');
 
-  // Notify counselor
   let cu = await User.findOne({ counselorId: s.counselor, role:'Counselor', isActive:true });
   if (!cu) {
     const cd = await Counselor.find({ centers: s.center }).lean();
@@ -510,8 +500,9 @@ exports.accountantForwardToCounselor = asyncHandler(async (req, res) => {
   res.json(updated);
 });
 
-// POST /api/students/:id/enrollment  — University assigns enrollment number
-exports.assignEnrollment = asyncHandler(async (req, res) => {  const { enrollmentNumber } = req.body;
+// POST /api/students/:id/enrollment
+exports.assignEnrollment = asyncHandler(async (req, res) => {
+  const { enrollmentNumber } = req.body;
   if (!enrollmentNumber?.trim()) { const e = new Error('Enrollment number required'); e.status = 400; throw e; }
 
   const s = await Student.findById(req.params.id).populate('university','name');
@@ -543,13 +534,147 @@ exports.assignEnrollment = asyncHandler(async (req, res) => {  const { enrollmen
   res.json(s);
 });
 
-// POST /api/students/:id/amount-settle  — Accountant marks amount as settled after rejection
+// POST /api/students/:id/cancel  — Admin only
+exports.cancelApplication = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id)
+    .populate('center', 'name')
+    .populate('counselor', 'name')
+    .populate('university', 'name');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+
+  if (s.applicationStatus === 'Cancelled') {
+    const e = new Error('Application is already cancelled'); e.status = 400; throw e;
+  }
+
+  const reason     = (req.body.reason || '').trim();
+  const prevStatus = s.applicationStatus;
+
+  await Student.findByIdAndUpdate(req.params.id, {
+    applicationStatus: 'Cancelled',
+    rejectionReason: reason,
+  });
+
+  await pushHistory(s._id, 'Cancelled', req.user, reason || `Cancelled by Admin (was: ${prevStatus})`);
+
+  const centerUser = await User.findOne({ centerId: s.center._id || s.center, role: 'Center', isActive: true });
+  if (centerUser) {
+    await notify(centerUser._id, {
+      message: `Application for ${s.name} has been cancelled by Admin.${reason ? ' Reason: ' + reason : ''}`,
+      type: 'application_rejected', role: 'Center', studentId: s._id,
+    });
+  }
+
+  const counselorUser = await User.findOne({ counselorId: s.counselor?._id || s.counselor, role: 'Counselor', isActive: true });
+  if (counselorUser) {
+    await notify(counselorUser._id, {
+      message: `Application for ${s.name} has been cancelled by Admin.${reason ? ' Reason: ' + reason : ''}`,
+      type: 'application_rejected', role: 'Counselor', studentId: s._id,
+    });
+  }
+
+  await audit('cancelled', 'Student', s._id, req.user, { reason, prevStatus }, `${s.name} application cancelled by Admin (was: ${prevStatus})`);
+  res.json({ success: true, message: 'Application cancelled successfully' });
+});
+
+// POST /api/students/:id/request-settlement  — Center only
+exports.requestSettlement = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).populate('center', 'name').populate('counselor', 'name');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+
+  if (s.applicationStatus !== 'Cancelled') {
+    const e = new Error('Settlement can only be requested for cancelled applications'); e.status = 400; throw e;
+  }
+  if (s.amountSettled) {
+    const e = new Error('Amount is already settled'); e.status = 400; throw e;
+  }
+  const alreadyRequested = s.settlementRequested ||
+    (s.statusHistory || []).some(h => h.status === 'Settlement_Requested');
+  if (alreadyRequested) {
+    const e = new Error('Settlement has already been requested'); e.status = 400; throw e;
+  }
+  if (req.user.role === 'Center' && String(s.center._id || s.center) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+
+  const note = (req.body.note || '').trim();
+
+  await Student.findByIdAndUpdate(req.params.id, {
+    settlementRequested: true,
+    settlementRequestedAt: new Date(),
+  });
+
+  const counselorUser = await User.findOne({ counselorId: s.counselor._id || s.counselor, role: 'Counselor', isActive: true });
+  if (counselorUser) {
+    await notify(counselorUser._id, {
+      message: `Settlement requested for cancelled student ${s.name} (${s.center?.name || ''}).${note ? ' Note: ' + note : ''} Please review and forward to accountant if approved.`,
+      type: 'settlement_requested', role: 'Counselor', studentId: s._id,
+    });
+  }
+
+  await pushHistory(s._id, 'Settlement_Requested', req.user, note || 'Settlement requested by center — counselor notified');
+  await audit('settlement_requested', 'Student', s._id, req.user, { note }, `Settlement requested for ${s.name} by center`);
+  res.json({ success: true, message: 'Settlement request sent to counselor successfully' });
+});
+
+// POST /api/students/:id/forward-settlement  — Counselor/Admin only
+exports.forwardSettlement = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).populate('center', 'name').populate('counselor', 'name');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+
+  if (s.applicationStatus !== 'Cancelled') {
+    const e = new Error('Student must be in Cancelled status'); e.status = 400; throw e;
+  }
+
+  const hasRequest = s.settlementRequested ||
+    (s.statusHistory || []).some(h => h.status === 'Settlement_Requested');
+  if (!hasRequest) {
+    const e = new Error('No settlement request found from center'); e.status = 400; throw e;
+  }
+  if (s.amountSettled) {
+    const e = new Error('Amount is already settled'); e.status = 400; throw e;
+  }
+  const alreadyForwarded = s.settlementForwardedToAccountant ||
+    (s.statusHistory || []).some(h => h.status === 'Settlement_Forwarded');
+  if (alreadyForwarded) {
+    const e = new Error('Settlement has already been forwarded to accountant'); e.status = 400; throw e;
+  }
+
+  const note = (req.body.note || '').trim();
+
+  await Student.findByIdAndUpdate(req.params.id, {
+    settlementForwardedToAccountant: true,
+    settlementForwardedAt: new Date(),
+    settlementForwardedBy: req.user._id,
+  });
+
+  const accountants = await User.find({ role: 'Accountant', isActive: true });
+  for (const acc of accountants) {
+    await notify(acc._id, {
+      message: `Settlement forwarded by counselor for cancelled student ${s.name} (${s.center?.name || ''}).${note ? ' Note: ' + note : ''} Please process the refund/adjustment.`,
+      type: 'settlement_forwarded', role: 'Accountant', studentId: s._id,
+    });
+  }
+
+  const centerUser = await User.findOne({ centerId: s.center._id || s.center, role: 'Center', isActive: true });
+  if (centerUser) {
+    await notify(centerUser._id, {
+      message: `Your settlement request for ${s.name} has been approved by counselor and forwarded to accountant for processing.`,
+      type: 'settlement_forwarded', role: 'Center', studentId: s._id,
+    });
+  }
+
+  await pushHistory(s._id, 'Settlement_Forwarded', req.user, note || 'Settlement forwarded to accountant by counselor');
+  await audit('settlement_forwarded', 'Student', s._id, req.user, { note }, `Settlement for ${s.name} forwarded to accountant by counselor`);
+  res.json({ success: true, message: 'Settlement forwarded to accountant successfully' });
+});
+
+// POST /api/students/:id/amount-settle  — Accountant/Admin marks amount as settled
 exports.amountSettle = asyncHandler(async (req, res) => {
   const s = await Student.findById(req.params.id).populate('center','name').populate('university','name');
   if (!s) { const e = new Error('Not found'); e.status = 404; throw e; }
-  // Only allowed for rejected students that came via university path
-  if (s.applicationStatus !== 'Rejected') {
-    const e = new Error('Student must be in Rejected status'); e.status = 400; throw e;
+
+  if (!['Rejected', 'Cancelled'].includes(s.applicationStatus)) {
+    const e = new Error('Student must be in Rejected or Cancelled status'); e.status = 400; throw e;
   }
 
   const updated = await Student.findByIdAndUpdate(req.params.id,
@@ -557,7 +682,6 @@ exports.amountSettle = asyncHandler(async (req, res) => {
     { new: true }
   ).populate('center','name').populate('counselor','name').populate('university','name');
 
-  // Notify center
   const centerUser = await User.findOne({ centerId: s.center, role:'Center', isActive:true });
   if (centerUser) await notify(centerUser._id, {
     message: `Amount settled for ${s.name} — refund/adjustment has been processed by accountant.`,

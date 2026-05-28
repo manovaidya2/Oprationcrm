@@ -211,9 +211,10 @@ function StatCard({ icon: Icon, label, value, sub, color, trend }) {
 
 // ── Main Page ─────────────────────────────────────────────────
 export default function UniversityPage() {
-  const [pending,  setPending]  = useState([]);
-  const [enrolled, setEnrolled] = useState([]);
-  const [docs,     setDocs]     = useState([]);
+  const [pending,   setPending]   = useState([]);
+  const [enrolled,  setEnrolled]  = useState([]);
+  const [cancelled, setCancelled] = useState([]);
+  const [docs,      setDocs]      = useState([]);
   const [loading,  setLoading]  = useState(true);
 
   const [enrOpen,    setEnrOpen]    = useState(false);
@@ -240,6 +241,8 @@ export default function UniversityPage() {
       const [s, d] = await Promise.all([studentsApi.getAll(), docsApi.list({ all: '1' })]);
       setPending(s.filter(x => x.applicationStatus === 'Sent_To_University'));
       setEnrolled(s.filter(x => x.applicationStatus === 'Enrolled'));
+      // Only show cancelled students who were previously enrolled (had enrollment number)
+      setCancelled(s.filter(x => x.applicationStatus === 'Cancelled' && x.enrollmentNumber));
       setDocs(d);
     } catch { toast.error('Failed to load'); } finally { setLoading(false); }
   }, []);
@@ -278,7 +281,7 @@ export default function UniversityPage() {
   }
 
   // ── Derived stats ───────────────────────────────────────────
-  const allStudents   = [...pending, ...enrolled];
+  const allStudents   = [...pending, ...enrolled, ...cancelled];
   const pendingDocs   = docs.filter(d => d.status === 'Sent_To_University');
   const dispatchedDocs= docs.filter(d => DISPATCHED_STATUSES.includes(d.status));
   const totalDocs     = docs.length;
@@ -329,6 +332,7 @@ export default function UniversityPage() {
   const dq = docSearch.toLowerCase();
   const filtPending  = pending.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
   const filtEnrolled = enrolled.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
+  const filtCancelled = cancelled.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
   const filtDocs     = docs.filter(d => !dq || d.name?.toLowerCase().includes(dq) || d.student?.name?.toLowerCase().includes(dq) || d.student?.enrollmentNumber?.toLowerCase().includes(dq) || d.courierInfo?.trackingNo?.toLowerCase().includes(dq));
 
   if (loading) return (
@@ -389,11 +393,11 @@ export default function UniversityPage() {
           color="text-blue-600"
         />
         <StatCard
-          icon={Truck}
-          label="Dispatched"
-          value={dispatchedDocs.length}
-          sub="Sent to dispatch dept"
-          color="text-teal-600"
+          icon={XCircle}
+          label="Cancelled"
+          value={cancelled.length}
+          sub="Applications cancelled by Admin"
+          color="text-slate-500"
         />
       </div>
 
@@ -504,6 +508,7 @@ export default function UniversityPage() {
             {[
               { val:'pending',    label:'Pending Enrollment',  count: pending.length,       dot:'bg-amber-500',  icon: <Clock className="h-3.5 w-3.5"/> },
               { val:'enrolled',   label:'Enrolled',            count: enrolled.length,      dot:'bg-emerald-500',icon: <CheckCircle2 className="h-3.5 w-3.5"/> },
+              { val:'cancelled',  label:'Cancelled',           count: cancelled.length,     dot:'bg-slate-400',  icon: <XCircle className="h-3.5 w-3.5"/> },
               { val:'docreq',     label:'Doc Requests',        count: pendingDocs.length,   dot:'bg-blue-500',   icon: <FileText className="h-3.5 w-3.5"/> },
               { val:'dispatched', label:'Dispatched History',  count: dispatchedDocs.length,dot:'',              icon: <Truck className="h-3.5 w-3.5"/> },
             ].map(({ val, label, count, dot, icon }) => (
@@ -612,6 +617,46 @@ export default function UniversityPage() {
                   );
                 })
             }
+          </TabsContent>
+
+          {/* ── Cancelled Students ────────────────────────── */}
+          <TabsContent value="cancelled" className="space-y-2 mt-4">
+            {filtCancelled.length === 0 ? (
+              <div className="text-center py-12 border border-dashed rounded-lg">
+                <XCircle className="h-8 w-8 mx-auto text-muted-foreground mb-2 opacity-40"/>
+                <p className="text-sm text-muted-foreground">No cancelled students</p>
+              </div>
+            ) : filtCancelled.map(s => (
+              <Card key={s._id} className="border-slate-200 bg-slate-50/50">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-700">{s.name}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 font-medium border border-slate-300">
+                          🚫 Cancelled
+                        </span>
+                        {s.enrollmentNumber && (
+                          <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            {s.enrollmentNumber}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
+                        {s.center?.name   && <span>{s.center.name}</span>}
+                        {s.courseName     && <span>· {s.courseName} {s.courseYear}</span>}
+                        {s.phone          && <span>· {s.phone}</span>}
+                      </div>
+                      {s.rejectionReason && (
+                        <div className="mt-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600">
+                          <span className="font-semibold">Reason:</span> {s.rejectionReason}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </TabsContent>
 
           {/* ── Document Requests ────────────────────────── */}
