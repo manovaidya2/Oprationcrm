@@ -205,12 +205,26 @@ exports.deleteCounselor = asyncHandler(async (req, res) => {
 });
 
 exports.addCenterToCounselor = asyncHandler(async (req, res) => {
-  const c = await Counselor.findByIdAndUpdate(req.params.id, { $addToSet: { centers: req.body.centerId } }, { new: true }).populate('centers', 'name city');
+  const { centerId } = req.body;
+  if (!centerId) { const e = new Error('centerId required'); e.status = 400; throw e; }
+
+  // Remove this center from ALL other counselors first
+  await Counselor.updateMany(
+    { _id: { $ne: req.params.id }, centers: centerId },
+    { $pull: { centers: centerId } }
+  );
+
+  // Add center to the new counselor
+  const c = await Counselor.findByIdAndUpdate(
+    req.params.id,
+    { $addToSet: { centers: centerId } },
+    { new: true }
+  ).populate('centers', 'name city');
   if (!c) { const e = new Error('Counselor not found'); e.status = 404; throw e; }
-  // BUG FIX: Also update Center.assignedCounselor so it shows in the UI
-  if (req.body.centerId) {
-    await Center.findByIdAndUpdate(req.body.centerId, { assignedCounselor: req.params.id });
-  }
+
+  // Update Center.assignedCounselor
+  await Center.findByIdAndUpdate(centerId, { assignedCounselor: req.params.id });
+
   res.json(c);
 });
 
