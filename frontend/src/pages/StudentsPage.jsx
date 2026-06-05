@@ -116,18 +116,18 @@ export default function StudentsPage() {
         return { s, pay, docs };
       }));
 
-      const filtered = enriched.filter(({ pay }) => {
-        if (!dateFrom && !dateTo) return true;
-        const txs = pay?.transactions || [];
-        const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
-        if (verifiedTxs.length === 0) return false;
-        return verifiedTxs.some(t => {
-          const d = new Date(t.verifiedAt);
-          if (dateFrom && d < new Date(dateFrom)) return false;
-          if (dateTo   && d > new Date(dateTo + 'T23:59:59')) return false;
-          return true;
-        });
-      });
+      const filtered = enriched.filter(({ s }) => {
+  if (!dateFrom && !dateTo) return true;
+  const submittedDate = getSubmittedDate(s);
+  if (!submittedDate) return false;
+  const hist = s.statusHistory || [];
+  const entry = hist.find(h => h.status === 'Submitted');
+  if (!entry?.at) return false;
+  const d = new Date(entry.at);
+  if (dateFrom && d < new Date(dateFrom)) return false;
+  if (dateTo   && d > new Date(dateTo + 'T23:59:59')) return false;
+  return true;
+});
 
       if (filtered.length === 0) { toast.error('No students match the date filter'); setCsvLoading(false); return; }
 
@@ -135,7 +135,7 @@ export default function StudentsPage() {
         // Student basic
         'Name', 'Father Name', 'Mother Name', 'DOB', 'Gender', 'Phone', 'Email', 'Aadhaar', 'Address',
         'Course', 'Session', 'University', 'Center', 'Counselor', 'Status', 'Enrollment No',
-        'Submitted Date',                                        // ← new column
+        'Submitted Date', 'Admission Expiry Date',                                       // ← new column
         '10th %', '10th Year', '10th Board', '12th %', '12th Year', '12th Board',
         // Fees
         'Total Fee', 'Discount', 'Net Fee', 'Total Paid', 'Balance Due',
@@ -147,9 +147,9 @@ export default function StudentsPage() {
         'Tx5 Amount', 'Tx5 Mode', 'Tx5 UTR', 'Tx5 Paid Date', 'Tx5 Verified Date', 'Tx5 Status',
         'Last Payment Verified Date',
         // Documents (up to 3)
-        'Doc1 Name', 'Doc1 Status', 'Doc1 Charge', 'Doc1 Paid',
-        'Doc2 Name', 'Doc2 Status', 'Doc2 Charge', 'Doc2 Paid',
-        'Doc3 Name', 'Doc3 Status', 'Doc3 Charge', 'Doc3 Paid',
+        'Doc1 Name', 'Doc1 Status', 'Doc1 Charge', 'Doc1 Paid','Doc1 Requested Date', 'Doc1 Request Expiry',
+        'Doc2 Name', 'Doc2 Status', 'Doc2 Charge', 'Doc2 Paid','Doc2 Requested Date', 'Doc2 Request Expiry',
+        'Doc3 Name', 'Doc3 Status', 'Doc3 Charge', 'Doc3 Paid','Doc3 Requested Date', 'Doc3 Request Expiry',
       ];
 
       const rows = filtered.map(({ s, pay, docs }) => {
@@ -175,11 +175,19 @@ export default function StudentsPage() {
         const docCols = [];
         for (let i = 0; i < 3; i++) {
           const d = docs[i];
+          const docExpiry = (() => {
+            if (!d?.createdAt) return '';
+            const exp = new Date(d.createdAt);
+            exp.setDate(exp.getDate() + 25);
+            return fmtDate(exp);
+          })();
           docCols.push(
             d ? d.name || ''                       : '',
             d ? (d.status || '').replace(/_/g,' ') : '',
             d ? fmtAmt(d.chargeFee)                : '',
             d ? fmtAmt(d.totalPaid)                : '',
+            d ? fmtDate(d.createdAt)               : '',
+            d ? docExpiry                          : '',
           );
         }
 
@@ -192,7 +200,15 @@ export default function StudentsPage() {
           s.center?.name || '', s.counselor?.name || '',
           STATUS_LABELS[s.applicationStatus] || s.applicationStatus || '',
           s.enrollmentNumber || '',
-          getSubmittedDate(s),                                   // ← new value
+          getSubmittedDate(s), 
+          (() => {
+            const hist = s.statusHistory || [];
+            const entry = hist.find(h => h.status === 'Submitted');
+            if (!entry?.at) return '';
+            const exp = new Date(entry.at);
+            exp.setDate(exp.getDate() + 16);
+            return fmtDate(exp);
+          })(),                                  // ← new value
           s.tenth_percent || '', s.tenth_year || '', s.tenth_board || '',
           s.twelfth_percent || '', s.twelfth_year || '', s.twelfth_board || '',
           // Fee
@@ -368,7 +384,7 @@ export default function StudentsPage() {
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
                 Filter by Payment Verified Date <span className="text-slate-400 font-normal normal-case">(optional)</span>
               </Label>
-              <p className="text-xs text-slate-400 mt-0.5 mb-2">Only students whose fee was verified in this date range will be included.</p>
+              <p className="text-xs text-slate-400 mt-0.5 mb-2">Only students whose application was submitted in this date range will be included.</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-slate-500">From</Label>

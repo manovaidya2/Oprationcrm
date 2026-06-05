@@ -859,8 +859,10 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 }
 
 // ── FEE SECTION ──────────────────────────────────────────────
-function FeeSection({ studentId, appStatus }) {
+function FeeSection({ studentId, appStatus, student }) {
+  
   const isCancelled = appStatus === 'Cancelled';
+  const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
   const [feeOpen,setFeeOpen]=useState(false); const [txOpen,setTxOpen]=useState(false);
   const [editTx,setEditTx]=useState(null);
@@ -1042,6 +1044,23 @@ function FeeSection({ studentId, appStatus }) {
             </div>
           )}
           {!isCancelled && !canSetFee && <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>Fee structure locked. Only Admin/Counselor can modify fees at this stage.</div>}
+          {!isCancelled && data && (data.paidAmount === 0 || data.paidAmount == null) && (() => {
+            const expiry = getAdmissionExpiry(studentForExpiry);
+            if (!expiry) return null;
+            const daysLeft = Math.ceil((expiry - new Date()) / (1000 * 60 * 60 * 24));
+            if (daysLeft < 0) return null;
+            return (
+              <div className="flex items-center justify-between gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">⚠️</span>
+                  <div>
+                    <p className="text-sm font-bold text-red-700">Admission will expire if payment not made</p>
+                    <p className="text-xs text-red-500 mt-0.5">Expiry Date: {fmtDt(expiry)} · {daysLeft} day{daysLeft !== 1 ? 's' : ''} left</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </>
       ) : (
         <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
@@ -1335,6 +1354,27 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                 }
               </div>
               {d.note&&<p className="text-xs text-slate-400 italic mb-1.5">{d.note}</p>}
+              {(() => {
+                if (!['Requested','Forwarded','Fee_Approved','Center_Notified'].includes(d.status)) return null;
+                if (!d.chargeFee || d.chargeFee <= 0) return null;
+                if (d.totalPaid >= d.chargeFee) return null;
+                const created = d.createdAt ? new Date(d.createdAt) : null;
+                if (!created) return null;
+                const exp = new Date(created);
+                exp.setDate(exp.getDate() + 25);
+                const daysLeft = Math.ceil((exp - new Date()) / (1000 * 60 * 60 * 24));
+                if (daysLeft < 0) return null;
+                return (
+                  <div className={`mb-1.5 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg w-fit border ${
+                    daysLeft <= 5
+                      ? 'bg-red-50 border-red-200 text-red-600'
+                      : 'bg-amber-50 border-amber-200 text-amber-700'
+                  }`}>
+                    <span>⏳</span>
+                    <span>Please complete payment before {fmtDt(exp)}, request will expire in {daysLeft} day{daysLeft !== 1 ? 's' : ''}</span>
+                  </div>
+                );
+              })()}
               <div className="flex flex-wrap gap-2 mb-1">
                 {d.fileUrl&&<a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 font-medium"><Download className="h-3 w-3"/>View file</a>}
                 {d.scannedUrl && ['Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'].includes(d.status) && (
@@ -1885,7 +1925,7 @@ function StudentDetail({ student, onBack, onRefresh }) {
             <CreditCard className="h-3.5 w-3.5 mr-1.5"/>Payments
           </TabsTrigger>
         </TabsList>
-        <TabsContent value="fees" className="mt-4"><FeeSection studentId={s._id} appStatus={s.applicationStatus}/></TabsContent>
+        <TabsContent value="fees" className="mt-4"><FeeSection studentId={s._id} appStatus={s.applicationStatus} student={s}/></TabsContent>
         <TabsContent value="docs" className="mt-4">
           {s.submissionDocs?.length>0&&(
             <div className="mb-4 bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -2109,6 +2149,32 @@ function StudentDetail({ student, onBack, onRefresh }) {
   );
 }
 
+
+// ── Helpers ───────────────────────────────────────────────────
+function getSubmittedAt(student) {
+  const hist = student.statusHistory || [];
+  const entry = hist.find(h => h.status === 'Submitted');
+  return entry?.at ? new Date(entry.at) : null;
+}
+function getAdmissionExpiry(student) {
+  const at = getSubmittedAt(student);
+  if (!at) return null;
+  const exp = new Date(at);
+  exp.setDate(exp.getDate() + 15);
+  return exp;
+}
+function isPaymentPending(student) {
+  const statuses = ['Submitted','Counselor_Approved','Accountant_Pending','Accountant_Rejected','University_Rejected','Sent_To_University'];
+  if (!statuses.includes(student.applicationStatus)) return false;
+  const expiry = getAdmissionExpiry(student);
+  if (!expiry) return false;
+  if (new Date() > expiry) return false;
+  // Hide if any payment exists (paidAmount on student object if populated, else assume pending)
+  if (student.paidAmount && student.paidAmount > 0) return false;
+  return true;
+}
+
+
 // ── MAIN PAGE ────────────────────────────────────────────────
 export default function CenterPortalPage() {
   const {user}=useAuth(); const centerId=user?.centerId;
@@ -2121,6 +2187,7 @@ export default function CenterPortalPage() {
   const [pwdOpen, setPwdOpen]         = useState(false);
   const [pwdSaving, setPwdSaving]     = useState(false);
   const [pwdForm, setPwdForm]         = useState({ current: '', newPwd: '', confirm: '' });
+  const [paidStudentIds, setPaidStudentIds] = useState(new Set());
 
   async function handleChangePassword() {
     if (!pwdForm.current) return toast.error('Please enter your current password');
@@ -2136,13 +2203,22 @@ export default function CenterPortalPage() {
     finally { setPwdSaving(false); }
   }
 
-  const loadAll=useCallback(async()=>{
+   const loadAll=useCallback(async()=>{
     try{
       setLoading(true);
       const [studs,center,counselors]=await Promise.all([studentsApi.getAll(),centerId?centersApi.getOne(centerId):Promise.resolve(null),counselorsApi.getAll()]);
       setStudents(studs);setCenterInfo(center);
       const linked=counselors.find(c=>c.centers?.some(cx=>String(cx._id||cx)===String(centerId)));
       setDef(linked?._id||counselors[0]?._id);
+      // Check which students have payments
+      const paidIds = new Set();
+      await Promise.all(studs.map(async s => {
+        try {
+          const pay = await paymentsApi.get(s._id);
+          if (pay && pay.paidAmount > 0) paidIds.add(s._id);
+        } catch {}
+      }));
+      setPaidStudentIds(paidIds);
     } catch{toast.error('Problem loading data');} finally{setLoading(false);}
   },[centerId]);
   useEffect(()=>{loadAll();},[loadAll]);
@@ -2277,6 +2353,15 @@ export default function CenterPortalPage() {
                         {s.tenth_percent&&<span>10th: {s.tenth_percent}%</span>}
                         {s.twelfth_percent&&<span>12th: {s.twelfth_percent}%</span>}
                       </div>
+                      {isPaymentPending(s) && !paidStudentIds.has(s._id) && (
+                        <div className="mt-2 flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-700">
+                          <span>⚡</span>
+                          <span>Please complete first payment</span>
+                          <span className="ml-auto text-amber-500 font-normal">
+                            Expires: {fmtDt(getAdmissionExpiry(s))}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 transition-colors flex-shrink-0"/>
