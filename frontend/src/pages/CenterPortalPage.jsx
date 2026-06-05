@@ -1005,14 +1005,35 @@ function FeeSection({ studentId, appStatus }) {
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Balance Due</span>
               <div className={`text-2xl font-bold mt-0.5 ${data.dueAmount>0?'text-amber-700':'text-emerald-700'}`}>{fmt(data.dueAmount)}</div>
             </div>
-            <div className="flex gap-2">
-              {canSetFee && <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:data.totalFee,discount:data.discount,notes:data.notes||''});setFeeOpen(true);}} className="border-slate-200 text-slate-600">Edit Fee</Button>}
-              {canAddPayment && (
-                <Button size="sm" onClick={()=>setTxOpen(true)} className="bg-indigo-600 hover:bg-indigo-700">
-                  <PlusCircle className="h-3.5 w-3.5 mr-1.5"/>Add Payment
-                </Button>
-              )}
-            </div>
+            <div className="flex flex-col items-center">
+            <div className="flex items-center gap-2 flex-wrap justify-center">
+  {canSetFee && <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:data.totalFee,discount:data.discount,notes:data.notes||''});setFeeOpen(true);}} className="border-slate-200 text-slate-600">Edit Fee</Button>}
+  {canAddPayment && (
+    <Button size="sm" onClick={()=>setTxOpen(true)} className="bg-indigo-600 hover:bg-indigo-700">
+      <PlusCircle className="h-3.5 w-3.5 mr-1.5"/>Add Payment
+    </Button>
+  )}
+  {canAddPayment && (
+    
+      
+        <a href="https://eduglobe.ae/payment"
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+      >
+        <CreditCard className="h-3.5 w-3.5" />
+        Pay Online
+      </a>
+      
+    
+  )}
+</div>
+{canAddPayment && (
+    <span className="mt-2 text-xs text-slate-800 text-center">
+      Click on pay online button, then record details on clicking Add Payment button.
+    </span>
+  )}
+  </div>
           </div>
 
           {isCancelled && (
@@ -1087,6 +1108,21 @@ function FeeSection({ studentId, appStatus }) {
       <Dialog open={txOpen} onOpenChange={setTxOpen}>
   <DialogContent className="max-w-lg flex flex-col max-h-[90vh]">
     <DialogHeader><DialogTitle className="text-slate-800">Record Payment</DialogTitle></DialogHeader>
+    {/* Pay Online banner */}
+    <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+      
+        <a href="https://eduglobe.ae/payment"
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap"
+      >
+        <CreditCard className="h-3.5 w-3.5" />
+        Pay Online
+      </a>
+      <p className="text-xs text-indigo-700 font-medium leading-snug">
+        Click this button to pay the amount, then fill in the payment details and upload the screenshot below.
+      </p>
+    </div>
     <div className="overflow-y-auto flex-1 pr-3 pl-2">
       <PaymentFields form={tf} setForm={setTf} showAmount={true} showDate={true}/>
     </div>
