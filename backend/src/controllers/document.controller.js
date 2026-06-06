@@ -201,12 +201,12 @@ exports.accountantAction = asyncHandler(async (req, res) => {
 // University confirms dispatch (sends courier to Dispatch dept)
 exports.universityDispatch = asyncHandler(async (req, res) => {
   const { company, trackingNo, dispatchDate, documentsDesc } = req.body;
-  if (!trackingNo?.trim()) { const e = new Error('Tracking number required'); e.status = 400; throw e; }
+  
   const doc = await loadDoc(req.params.id);
   if (doc.status !== 'Sent_To_University') { const e = new Error('Must be Sent_To_University status'); e.status = 400; throw e; }
 
   // Store university courier info in courierInfo temporarily
-  doc.courierInfo = { company: company||'', trackingNo, dispatchDate: dispatchDate ? new Date(dispatchDate) : new Date(), documentsDesc: documentsDesc||'', sentBy: req.user._id, sentAt: new Date() };
+  doc.courierInfo = { company: company||'', trackingNo: trackingNo || '', dispatchDate: dispatchDate ? new Date(dispatchDate) : new Date(), documentsDesc: documentsDesc||'', sentBy: req.user._id, sentAt: new Date() };
   pushHistory(doc, 'University_Dispatched', req.user, `University sent via ${company||''} - ${trackingNo}`);
   await doc.save();
   await notifyRole('Dispatch', { message: `Courier incoming from University: "${doc.name}" - ${trackingNo}`, type: 'doc_forwarded', documentId: doc._id, role: 'Dispatch' });
@@ -468,7 +468,7 @@ exports.dispatchToCenter = asyncHandler(async (req, res) => {
   if (doc.status !== 'Payment_Verified') { const e = new Error('Payment must be verified first'); e.status = 400; throw e; }
 
   // Overwrite courierInfo with dispatch-to-center details
-  doc.courierInfo = { company: company||'', trackingNo, dispatchDate: dispatchDate ? new Date(dispatchDate) : new Date(), documentsDesc: documentsDesc||doc.name, sentBy: req.user._id, sentAt: new Date() };
+  doc.centerCourierInfo = { company: company||'', trackingNo, dispatchDate: dispatchDate ? new Date(dispatchDate) : new Date(), documentsDesc: documentsDesc||doc.name, sentBy: req.user._id, sentAt: new Date() };
   pushHistory(doc, 'Dispatched', req.user, `Courier: ${company||''} - ${trackingNo}`);
   await doc.save();
 

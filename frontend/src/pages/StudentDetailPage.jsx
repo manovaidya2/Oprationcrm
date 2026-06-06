@@ -592,7 +592,11 @@ export default function StudentDetailPage() {
                     {d.note && <p className="text-xs text-muted-foreground mt-0.5">{d.note}</p>}
                     {d.fileUrl && <a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline mt-1 flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>View file</a>}
                     {d.scannedUrl && <a href={`${MEDIA}${d.scannedUrl}`} target="_blank" rel="noreferrer" className="text-xs text-teal-600 underline mt-1 flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>Scanned copy</a>}
-                    {d.courierInfo?.trackingNo && <div className="text-xs text-muted-foreground mt-1">🚚 {d.courierInfo.company} · {d.courierInfo.trackingNo}</div>}
+                    {d.courierInfo && (d.courierInfo.trackingNo || d.courierInfo.company || d.courierInfo.dispatchDate || d.courierInfo.documentsDesc) && (
+                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
+                        🚚 {[d.courierInfo.company, d.courierInfo.trackingNo, d.courierInfo.dispatchDate ? new Date(d.courierInfo.dispatchDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '', d.courierInfo.documentsDesc].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
                     {(d.chargeFee>0||d.totalPaid>0) && (
                       <div className="flex gap-3 text-xs mt-1.5">
                         {d.chargeFee>0 && <span>Charge: <b>{fmt(d.chargeFee)}</b></span>}

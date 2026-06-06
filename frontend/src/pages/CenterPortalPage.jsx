@@ -1383,9 +1383,12 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   </a>
 )}
               </div>
-              {d.courierInfo?.trackingNo && ['Dispatched','Delivered'].includes(d.status) && (
+              {['Dispatched','Delivered'].includes(d.status) && (d.centerCourierInfo?.trackingNo || d.courierInfo?.trackingNo) && (
   <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-2 w-fit mt-1">
-    🚚 <span className="font-medium">{d.courierInfo.company}</span> · <span className="font-mono">{d.courierInfo.trackingNo}</span> · {fmtDt(d.courierInfo.dispatchDate)}
+    {(() => {
+      const ci = d.centerCourierInfo?.trackingNo ? d.centerCourierInfo : d.courierInfo;
+      return <><span>🚚</span><span className="font-medium">{ci.company}</span> · <span className="font-mono">{ci.trackingNo}</span> · {fmtDt(ci.dispatchDate)}</>;
+    })()}
   </div>
 )}
               {(d.chargeFee>0||d.totalPaid>0)&&(

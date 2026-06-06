@@ -99,7 +99,7 @@ function DocDetailModal({ doc, onClose }) {
           )}
           {doc.courierInfo?.trackingNo && (
             <div className="border border-purple-200 bg-purple-50 rounded-lg p-3">
-              <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">🚚 Courier Details</p>
+              <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide mb-2">🚚 University Courier Details</p>
               {doc.university?.name && (
                 <div className="mb-2 bg-purple-100 rounded px-2 py-1.5 flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">From University:</span>
@@ -110,8 +110,19 @@ function DocDetailModal({ doc, onClose }) {
               <div className="grid grid-cols-2 gap-2">
                 <div><div className="text-xs text-muted-foreground">Company</div><div className="font-medium">{doc.courierInfo.company || '—'}</div></div>
                 <div><div className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="h-3 w-3"/>Tracking No.</div><div className="font-medium font-mono">{doc.courierInfo.trackingNo}</div></div>
-                <div><div className="text-xs text-muted-foreground">Last Updated Date</div><div className="font-medium">{fmtDt(doc.courierInfo.dispatchDate)}</div></div>
+                <div><div className="text-xs text-muted-foreground">Dispatch Date</div><div className="font-medium">{fmtDt(doc.courierInfo.dispatchDate)}</div></div>
                 <div><div className="text-xs text-muted-foreground">Documents</div><div>{doc.courierInfo.documentsDesc || '—'}</div></div>
+              </div>
+            </div>
+          )}
+          {doc.centerCourierInfo?.trackingNo && (
+            <div className="border border-teal-200 bg-teal-50 rounded-lg p-3">
+              <p className="text-xs font-semibold text-teal-700 uppercase tracking-wide mb-2">🚚 Dispatched to Center</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div><div className="text-xs text-muted-foreground">Company</div><div className="font-medium">{doc.centerCourierInfo.company || '—'}</div></div>
+                <div><div className="text-xs text-muted-foreground flex items-center gap-1"><Hash className="h-3 w-3"/>Tracking No.</div><div className="font-medium font-mono">{doc.centerCourierInfo.trackingNo}</div></div>
+                <div><div className="text-xs text-muted-foreground">Dispatch Date</div><div className="font-medium">{fmtDt(doc.centerCourierInfo.dispatchDate)}</div></div>
+                <div><div className="text-xs text-muted-foreground">Documents</div><div>{doc.centerCourierInfo.documentsDesc || '—'}</div></div>
               </div>
             </div>
           )}
@@ -187,10 +198,13 @@ function DocCard({ doc, action, onViewDetail }) {
               {doc.student?.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 ml-2">{doc.student.enrollmentNumber}</span>}
             </div>
             {doc.center?.name && <div className="text-xs text-muted-foreground">Center: {doc.center.name}</div>}
-            {doc.courierInfo?.trackingNo && (
+            {(doc.centerCourierInfo?.trackingNo || doc.courierInfo?.trackingNo) && (
               <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                 <Truck className="h-3 w-3"/>
-                {doc.courierInfo.company} · <span className="font-mono">{doc.courierInfo.trackingNo}</span> · {fmtDt(doc.courierInfo.dispatchDate)}
+                {(() => {
+                  const ci = doc.centerCourierInfo?.trackingNo ? doc.centerCourierInfo : doc.courierInfo;
+                  return <>{ci.company} · <span className="font-mono">{ci.trackingNo}</span> · {fmtDt(ci.dispatchDate)}</>;
+                })()}
               </div>
             )}
             {doc.scannedUrl && (
@@ -591,14 +605,19 @@ export default function DispatchPage() {
                       </div>
                       {d.center?.name && <div className="text-xs text-muted-foreground">Center: {d.center.name}</div>}
                       {d.university?.name && <div className="text-xs font-medium text-purple-700 mt-0.5">🎓 From: {d.university.name}{d.university.shortName ? ` (${d.university.shortName})` : ''}</div>}
-                      {d.courierInfo?.trackingNo && (
+                      {(d.centerCourierInfo?.trackingNo || d.courierInfo?.trackingNo) && (
                         <div className="mt-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-xs space-y-0.5">
-                          <div className="font-medium text-teal-800 flex items-center gap-1"><Truck className="h-3 w-3"/>Courier Details</div>
+                          <div className="font-medium text-teal-800 flex items-center gap-1"><Truck className="h-3 w-3"/>Dispatched to Center</div>
                           <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1">
-                            <div><span className="text-muted-foreground">Company:</span> <b>{d.courierInfo.company}</b></div>
-                            <div><span className="text-muted-foreground">Tracking:</span> <b className="font-mono">{d.courierInfo.trackingNo}</b></div>
-                            <div><span className="text-muted-foreground">Date:</span> {fmtDt(d.courierInfo.dispatchDate)}</div>
-                            {d.courierInfo.documentsDesc && <div><span className="text-muted-foreground">Docs:</span> {d.courierInfo.documentsDesc}</div>}
+                            {(() => {
+                              const ci = d.centerCourierInfo?.trackingNo ? d.centerCourierInfo : d.courierInfo;
+                              return <>
+                                <div><span className="text-muted-foreground">Company:</span> <b>{ci.company}</b></div>
+                                <div><span className="text-muted-foreground">Tracking:</span> <b className="font-mono">{ci.trackingNo}</b></div>
+                                <div><span className="text-muted-foreground">Date:</span> {fmtDt(ci.dispatchDate)}</div>
+                                {ci.documentsDesc && <div><span className="text-muted-foreground">Docs:</span> {ci.documentsDesc}</div>}
+                              </>;
+                            })()}
                           </div>
                         </div>
                       )}

@@ -137,11 +137,13 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
                           <span className="font-medium text-sm">{d.name}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
                         </div>
-                        {d.courierInfo?.trackingNo && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            🚚 {d.courierInfo.company} · {d.courierInfo.trackingNo} · {fmtDt(d.courierInfo.dispatchDate)}
-                          </div>
-                        )}
+                        {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
+  <div className="text-xs text-muted-foreground mt-0.5">
+    🚚 {d.courierInfo.company && <span>{d.courierInfo.company} · </span>}{fmtDt(d.courierInfo.dispatchDate)}
+    {d.courierInfo.trackingNo && <span className="font-mono"> · {d.courierInfo.trackingNo}</span>}
+    {d.courierInfo.documentsDesc ? ` · ${d.courierInfo.documentsDesc}` : ''}
+  </div>
+)}
                       </div>
                     </div>
                   );
@@ -159,11 +161,13 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
               {dispatchedDocs.map(d => (
                 <div key={d._id} className="text-xs space-y-0.5 mb-2 last:mb-0">
                   <div className="font-medium">{d.name}</div>
-                  {d.courierInfo?.trackingNo && (
-                    <div className="text-muted-foreground">
-                      {d.courierInfo.company} · <span className="font-mono">{d.courierInfo.trackingNo}</span> · {fmtDt(d.courierInfo.dispatchDate)}
-                    </div>
-                  )}
+                  {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
+  <div className="text-muted-foreground">
+    {d.courierInfo.company && <span>{d.courierInfo.company} · </span>}{fmtDt(d.courierInfo.dispatchDate)}
+    {d.courierInfo.trackingNo && <span className="font-mono"> · {d.courierInfo.trackingNo}</span>}
+    {d.courierInfo.documentsDesc ? ` · ${d.courierInfo.documentsDesc}` : ''}
+  </div>
+)}
                 </div>
               ))}
             </div>
@@ -268,8 +272,7 @@ export default function UniversityPage() {
   }
 
   async function sendDocToDispatch() {
-    if (!dispForm.trackingNo.trim()) return toast.error('Tracking number required');
-    if (!dispForm.company.trim())    return toast.error('Courier company required');
+    
     setSaving(true);
     try {
       await docsApi.universityDispatch(selDoc._id, {
@@ -727,10 +730,13 @@ export default function UniversityPage() {
     </span>
   )}
 </div>
-                        {d.courierInfo?.trackingNo && (
-                          <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                        {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
+                          <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
                             <Truck className="h-3 w-3"/>
-                            {d.courierInfo.company} · <span className="font-mono">{d.courierInfo.trackingNo}</span> · {fmtDt(d.courierInfo.dispatchDate)}
+                            {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
+                            {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
+                            {d.courierInfo.dispatchDate && <span>{fmtDt(d.courierInfo.dispatchDate)}</span>}
+                            {d.courierInfo.documentsDesc && <span>{d.courierInfo.documentsDesc}</span>}
                           </div>
                         )}
                       </div>
@@ -776,11 +782,11 @@ export default function UniversityPage() {
 </div>
 
                             {/* Courier details box */}
-                            {d.courierInfo?.trackingNo && (
+                            {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
                               <div className="mt-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-0.5">
-                                <div><span className="text-muted-foreground">Company:</span> <b>{d.courierInfo.company}</b></div>
-                                <div><span className="text-muted-foreground">Tracking:</span> <b className="font-mono">{d.courierInfo.trackingNo}</b></div>
-                                <div><span className="text-muted-foreground">Date:</span> {fmtDt(d.courierInfo.dispatchDate)}</div>
+                                {d.courierInfo.company && <div><span className="text-muted-foreground">Company:</span> <b>{d.courierInfo.company}</b></div>}
+                                {d.courierInfo.trackingNo && <div><span className="text-muted-foreground">Tracking:</span> <b className="font-mono">{d.courierInfo.trackingNo}</b></div>}
+                                {d.courierInfo.dispatchDate && <div><span className="text-muted-foreground">Date:</span> {fmtDt(d.courierInfo.dispatchDate)}</div>}
                                 {d.courierInfo.documentsDesc && <div><span className="text-muted-foreground">Docs:</span> {d.courierInfo.documentsDesc}</div>}
                               </div>
                             )}
@@ -872,8 +878,8 @@ export default function UniversityPage() {
           </div>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Courier Company *</Label><Input value={dispForm.company} onChange={e=>setDispForm(p=>({...p,company:e.target.value}))} placeholder="BlueDart, DTDC…"/></div>
-              <div><Label>Tracking No. *</Label><Input value={dispForm.trackingNo} onChange={e=>setDispForm(p=>({...p,trackingNo:e.target.value}))} placeholder="e.g. BD123456"/></div>
+              <div><Label>Courier Company </Label><Input value={dispForm.company} onChange={e=>setDispForm(p=>({...p,company:e.target.value}))} placeholder="BlueDart, DTDC…"/></div>
+              <div><Label>Tracking No. </Label><Input value={dispForm.trackingNo} onChange={e=>setDispForm(p=>({...p,trackingNo:e.target.value}))} placeholder="e.g. BD123456"/></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><Label>Dispatch Date</Label><Input type="date" value={dispForm.dispatchDate} onChange={e=>setDispForm(p=>({...p,dispatchDate:e.target.value}))}/></div>

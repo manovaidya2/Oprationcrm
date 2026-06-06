@@ -88,8 +88,10 @@ const studentDocSchema = new mongoose.Schema({
     default: 'Requested',
   },
 
-  // Courier details when dispatching to center
+  // Courier details from university (permanent — never overwritten)
   courierInfo: courierSchema,
+  // Courier details when dispatching to center
+  centerCourierInfo: courierSchema,
 
   // Full status history
   statusHistory: [historyEntrySchema],

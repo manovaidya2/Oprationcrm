@@ -1139,8 +1139,10 @@ export default function CounselorPage() {
         <span className="text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full flex items-center gap-1">
           📦 Awaiting Receipt
         </span>
-        {d.courierInfo?.trackingNo && (
-          <span className="text-xs text-slate-400 font-mono">{d.courierInfo.company} · {d.courierInfo.trackingNo}</span>
+        {d.courierInfo && (d.courierInfo.trackingNo || d.courierInfo.company || d.courierInfo.dispatchDate) && (
+          <span className="text-xs text-slate-400 font-mono">
+            {[d.courierInfo.company, d.courierInfo.trackingNo, d.courierInfo.dispatchDate ? new Date(d.courierInfo.dispatchDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : ''].filter(Boolean).join(' · ')}
+          </span>
         )}
       </div>
     </DocCard>

@@ -133,26 +133,28 @@ export default function StudentsPage() {
 
       const headers = [
         // Student basic
-        'Name', 'Father Name', 'Mother Name', 'DOB', 'Gender', 'Phone', 'Email', 'Aadhaar', 'Address',
+        'S.No','Name', 'Father Name', 'Mother Name', 'DOB', 'Gender', 'Phone', 'Email', 'Aadhaar', 'Address',
         'Course', 'Session', 'University', 'Center', 'Counselor', 'Status', 'Enrollment No',
         'Submitted Date', 'Admission Expiry Date',                                       // ← new column
         '10th %', '10th Year', '10th Board', '12th %', '12th Year', '12th Board',
         // Fees
         'Total Fee', 'Discount', 'Net Fee', 'Total Paid', 'Balance Due',
         // Transactions (up to 5)
-        'Tx1 Amount', 'Tx1 Mode', 'Tx1 UTR', 'Tx1 Paid Date', 'Tx1 Verified Date', 'Tx1 Status',
-        'Tx2 Amount', 'Tx2 Mode', 'Tx2 UTR', 'Tx2 Paid Date', 'Tx2 Verified Date', 'Tx2 Status',
-        'Tx3 Amount', 'Tx3 Mode', 'Tx3 UTR', 'Tx3 Paid Date', 'Tx3 Verified Date', 'Tx3 Status',
-        'Tx4 Amount', 'Tx4 Mode', 'Tx4 UTR', 'Tx4 Paid Date', 'Tx4 Verified Date', 'Tx4 Status',
-        'Tx5 Amount', 'Tx5 Mode', 'Tx5 UTR', 'Tx5 Paid Date', 'Tx5 Verified Date', 'Tx5 Status',
+        'Tx1 Amount', 'Tx1 Mode', 'Tx1 UTR', 'Tx1 Paid Date', 'Tx1 Verified Date', 'Tx1 Status', 'Tx1 Paid To Account',
+        'Tx2 Amount', 'Tx2 Mode', 'Tx2 UTR', 'Tx2 Paid Date', 'Tx2 Verified Date', 'Tx2 Status', 'Tx2 Paid To Account',
+        'Tx3 Amount', 'Tx3 Mode', 'Tx3 UTR', 'Tx3 Paid Date', 'Tx3 Verified Date', 'Tx3 Status', 'Tx3 Paid To Account',
+        'Tx4 Amount', 'Tx4 Mode', 'Tx4 UTR', 'Tx4 Paid Date', 'Tx4 Verified Date', 'Tx4 Status', 'Tx4 Paid To Account',
+        'Tx5 Amount', 'Tx5 Mode', 'Tx5 UTR', 'Tx5 Paid Date', 'Tx5 Verified Date', 'Tx5 Status', 'Tx5 Paid To Account',
         'Last Payment Verified Date',
         // Documents (up to 3)
-        'Doc1 Name', 'Doc1 Status', 'Doc1 Charge', 'Doc1 Paid','Doc1 Requested Date', 'Doc1 Request Expiry',
-        'Doc2 Name', 'Doc2 Status', 'Doc2 Charge', 'Doc2 Paid','Doc2 Requested Date', 'Doc2 Request Expiry',
-        'Doc3 Name', 'Doc3 Status', 'Doc3 Charge', 'Doc3 Paid','Doc3 Requested Date', 'Doc3 Request Expiry',
+        'Doc1 Name', 'Doc1 Current Status', 'Doc1 Charge', 'Doc1 Paid', 'Doc1 Requested Date', 'Doc1 Request Expiry', 'Doc1 Uni Dispatched Date', 'Doc1 Dispatch Received Date', 'Doc1 Center Dispatched Date', 'Doc1 Center Received Date',
+        'Doc2 Name', 'Doc2 Current Status', 'Doc2 Charge', 'Doc2 Paid', 'Doc2 Requested Date', 'Doc2 Request Expiry', 'Doc2 Uni Dispatched Date', 'Doc2 Dispatch Received Date', 'Doc2 Center Dispatched Date', 'Doc2 Center Received Date',
+        'Doc3 Name', 'Doc3 Current Status', 'Doc3 Charge', 'Doc3 Paid', 'Doc3 Requested Date', 'Doc3 Request Expiry', 'Doc3 Uni Dispatched Date', 'Doc3 Dispatch Received Date', 'Doc3 Center Dispatched Date', 'Doc3 Center Received Date',
+        'Doc4 Name', 'Doc4 Current Status', 'Doc4 Charge', 'Doc4 Paid', 'Doc4 Requested Date', 'Doc4 Request Expiry', 'Doc4 Uni Dispatched Date', 'Doc4 Dispatch Received Date', 'Doc4 Center Dispatched Date', 'Doc4 Center Received Date',
       ];
 
-      const rows = filtered.map(({ s, pay, docs }) => {
+      const rows = filtered.map((item, rowIdx) => {
+        const { s, pay, docs } = item;
         const txs = pay?.transactions || [];
         const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
         const lastVerifiedDate = verifiedTxs.length > 0
@@ -169,11 +171,12 @@ export default function StudentsPage() {
             t ? fmtDate(t.paidAt)     : '',
             t ? fmtDate(t.verifiedAt) : '',
             t ? (t.verificationStatus || '') : '',
+            t ? (t.paidToAccountLabel || '') : '',
           );
         }
 
         const docCols = [];
-        for (let i = 0; i < 3; i++) {
+        for (let i = 0; i < 4; i++) {
           const d = docs[i];
           const docExpiry = (() => {
             if (!d?.createdAt) return '';
@@ -188,10 +191,25 @@ export default function StudentsPage() {
             d ? fmtAmt(d.totalPaid)                : '',
             d ? fmtDate(d.createdAt)               : '',
             d ? docExpiry                          : '',
+            (() => {
+              if (!d) return '';
+              const hist = d.statusHistory || [];
+              const entry = hist.find(h => h.status === 'University_Dispatched');
+              return entry?.at ? fmtDate(entry.at) : fmtDate(d.courierInfo?.dispatchDate);
+            })(),
+            (() => {
+              if (!d) return '';
+              const hist = d.statusHistory || [];
+              const entry = hist.find(h => h.status === 'Dispatch_Received');
+              return entry?.at ? fmtDate(entry.at) : '';
+            })(),
+            d ? fmtDate(d.centerCourierInfo?.dispatchDate || '') : '',
+            d ? fmtDate(d.deliveredAt || (d.status === 'Delivered' ? d.updatedAt : '')) : '',
           );
         }
 
         return [
+          String(rowIdx + 1),
           s.name || '', s.fatherName || '', s.motherName || '',
           fmtDate(s.dob), s.gender || '', s.phone || '', s.email || '',
           s.aadharNumber || '', s.address || '',
