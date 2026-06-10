@@ -255,12 +255,12 @@ export default function DispatchPage() {
     d.student?.enrollmentNumber?.toLowerCase().includes(q) ||
     d.courierInfo?.trackingNo?.toLowerCase().includes(q);
 
-  const incoming    = all.filter(d => d.status === 'University_Dispatched').filter(filter);
+  const incoming    = all.filter(d => ['University_Dispatched', 'Sent_To_University'].includes(d.status)).filter(filter);
   const scanPending = all.filter(d => d.status === 'Dispatch_Received').filter(filter);
 
   // University Records = ALL docs that have courierInfo (came from university)
   // This NEVER removes a doc — stays visible at every stage permanently
-  const uniRecords  = all.filter(d => d.courierInfo?.trackingNo).filter(filter);
+  const uniRecords  = all.filter(d => d.courierInfo?.trackingNo || ['Sent_To_University','University_Dispatched'].includes(d.status)).filter(filter);
 
   const ready       = all.filter(d => d.status === 'Payment_Verified').filter(filter);
   const inProgress  = all.filter(d => ['Counselor_Received','Center_Notified','Payment_Submitted','Scanned'].includes(d.status)).filter(filter);
@@ -388,7 +388,7 @@ export default function DispatchPage() {
             </div>
           ) : uniRecords.map(d => {
             const ci         = d.courierInfo;
-            const isAwaiting = d.status === 'University_Dispatched';
+            const isAwaiting = ['University_Dispatched', 'Sent_To_University'].includes(d.status);
             const isReceived = d.status === 'Dispatch_Received';
             const isScanDone = POST_SCAN_STATUSES.includes(d.status);
             const st         = STATUS_INFO[d.status] || { label: d.status.replace(/_/g,' '), color: 'bg-slate-100 text-slate-600' };

@@ -694,13 +694,9 @@ export default function UniversityPage() {
 </div>
                         {/* {d.chargeFee > 0 && <div className="text-xs mt-0.5">Charge: <b>₹{d.chargeFee?.toLocaleString('en-IN')}</b></div>} */}
                       </div>
-                      <Button size="sm" onClick={() => {
-                        setSelDoc(d);
-                        setDispForm({ company:'', trackingNo:'', dispatchDate:new Date().toISOString().split('T')[0], documentsDesc:d.name });
-                        setDocDispOpen(true);
-                      }}>
-                        <Send className="h-3.5 w-3.5 mr-1"/>Send to Dispatch
-                      </Button>
+                      <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
+                        ⏳ Awaiting Physical Courier
+                      </span>
                     </CardContent>
                   </Card>
                 ))}
@@ -868,8 +864,8 @@ export default function UniversityPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Doc Dispatch Dialog ──────────────────────────────── */}
-      <Dialog open={docDispOpen} onOpenChange={setDocDispOpen}>
+      {/* Doc Dispatch Dialog removed — university no longer sends courier info via panel */}
+      {false && <Dialog open={docDispOpen} onOpenChange={setDocDispOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Send Document to Dispatch</DialogTitle></DialogHeader>
           <div className="bg-muted/30 rounded-lg p-3 text-sm">
@@ -894,7 +890,7 @@ export default function UniversityPage() {
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+      </Dialog>}
 
       {/* ── Student Detail Modal ─────────────────────────────── */}
       {modalStudent && (

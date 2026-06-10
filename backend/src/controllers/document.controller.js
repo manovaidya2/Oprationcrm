@@ -179,8 +179,13 @@ exports.accountantAction = asyncHandler(async (req, res) => {
       }
       if (uniUsers.length === 0) await notifyRole('University', { message: `Document needed: "${doc.name}" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
     } else {
-      await notifyRole('University', { message: `Document needed: "${doc.name}" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
+      await notifyRole('University', { message: `Document needed: \"${doc.name}\" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
     }
+    // Also notify Dispatch — courier will arrive from university directly
+    await notifyRole('Dispatch', {
+      message: `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
+      type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
+    });
   } else if (action === 'reject') {
     pushHistory(doc, 'Fee_Rejected', req.user, note||'Fee rejected by accountant');
     // Notify COUNSELOR — they decide whether to send back to center or re-forward
@@ -217,7 +222,14 @@ exports.universityDispatch = asyncHandler(async (req, res) => {
 // Dispatch confirms receipt from university
 exports.dispatchReceive = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
-  if (doc.status !== 'University_Dispatched') { const e = new Error('Must be University_Dispatched status'); e.status = 400; throw e; }
+  // Now dispatch can confirm receipt from either University_Dispatched OR Sent_To_University
+  if (!['University_Dispatched', 'Sent_To_University'].includes(doc.status)) {
+    const e = new Error('Must be Sent_To_University or University_Dispatched status'); e.status = 400; throw e;
+  }
+  // If coming directly from Sent_To_University, set University_Dispatched first in history
+  if (doc.status === 'Sent_To_University') {
+    pushHistory(doc, 'University_Dispatched', req.user, 'Courier arrived at dispatch — auto-confirmed university dispatch');
+  }
   pushHistory(doc, 'Dispatch_Received', req.user, 'Courier received from university');
   await doc.save();
 
