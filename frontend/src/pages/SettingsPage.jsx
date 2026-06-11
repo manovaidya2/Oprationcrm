@@ -202,7 +202,19 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-1 flex-shrink-0">
+                <div className="flex gap-1 flex-shrink-0 items-center">
+                  <Button size="sm" variant="ghost" className={`h-7 px-2 text-xs font-medium ${acc.isActive ? 'text-green-600 hover:text-green-700' : 'text-gray-400 hover:text-gray-600'}`}
+                    title={acc.isActive ? 'Click to deactivate' : 'Click to activate'}
+                    onClick={async () => {
+                      try {
+                        await paymentAccountsApi.update(acc._id, { isActive: !acc.isActive });
+                        toast.success(acc.isActive ? 'Account deactivated — hidden from centers' : 'Account activated');
+                        load();
+                      } catch(e) { toast.error(e.message); }
+                    }}>
+                    {acc.isActive ? <ToggleRight className="h-4 w-4 mr-1"/> : <ToggleLeft className="h-4 w-4 mr-1"/>}
+                    {acc.isActive ? 'Active' : 'Inactive'}
+                  </Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditAcc(acc); setAccForm({ label:acc.label, mode:acc.mode, upiId:acc.upiId||'', upiName:acc.upiName||'', bankName:acc.bankName||'', accountHolder:acc.accountHolder||'', accountNumber:acc.accountNumber||'', ifscCode:acc.ifscCode||'', branch:acc.branch||'' }); setAccOpen(true); }}>
                     <Pencil className="h-3.5 w-3.5"/>
                   </Button>

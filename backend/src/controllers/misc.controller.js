@@ -374,7 +374,7 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
     });
 
     // Bank/Account wise breakdown — ALL active accounts, with verified transaction totals
-    const allAccounts = await PaymentAccount.find({ isActive: { $ne: false } }).lean();
+    const allAccounts = await PaymentAccount.find().lean();
     const accMap = {};
     allAccounts.forEach(a => { accMap[String(a._id)] = a; });
 
