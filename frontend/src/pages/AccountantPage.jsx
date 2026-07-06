@@ -512,6 +512,7 @@ export default function AccountantPage() {
         } catch {}
       }));
 
+      pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
       setFeePayments(pending);
       setAllFeePayments(allFeePayments);
 
