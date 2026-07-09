@@ -34,6 +34,26 @@ export default function SettingsPage() {
   const [pwd,   setPwd]   = useState('');
 
   // Payment Accounts
+  // Admin own password change
+  const [ownPwdOpen,  setOwnPwdOpen]  = useState(false);
+  const [ownPwdForm,  setOwnPwdForm]  = useState({ current: '', newPwd: '', confirm: '' });
+  const [ownPwdSaving,setOwnPwdSaving]= useState(false);
+
+  async function handleChangeOwnPassword() {
+    if (!ownPwdForm.current) return toast.error('Current password required');
+    if (ownPwdForm.newPwd.length < 6) return toast.error('New password must be at least 6 characters');
+    if (ownPwdForm.newPwd !== ownPwdForm.confirm) return toast.error('Passwords do not match');
+    setOwnPwdSaving(true);
+    try {
+      await authApi.changeOwnPassword(ownPwdForm.current, ownPwdForm.newPwd);
+      toast.success('Password changed successfully!');
+      setOwnPwdOpen(false);
+      setOwnPwdForm({ current: '', newPwd: '', confirm: '' });
+    } catch(e) { toast.error(e.message || 'Failed to change password'); }
+    finally { setOwnPwdSaving(false); }
+  }
+
+  // Payment Accounts
   const [accounts,     setAccounts]     = useState([]);
   const [accOpen,      setAccOpen]      = useState(false);
   const [editAcc,      setEditAcc]      = useState(null);
@@ -117,9 +137,14 @@ export default function SettingsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold flex items-center gap-2"><Shield className="h-5 w-5"/>User Management</h1>
-        <Button size="sm" onClick={() => { setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' }); setCreateOpen(true); }}>
-          <UserPlus className="h-4 w-4 mr-1"/>Create User
-        </Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => { setOwnPwdForm({ current:'', newPwd:'', confirm:'' }); setOwnPwdOpen(true); }}>
+            <Key className="h-4 w-4 mr-1"/>Change My Password
+          </Button>
+          <Button size="sm" onClick={() => { setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' }); setCreateOpen(true); }}>
+            <UserPlus className="h-4 w-4 mr-1"/>Create User
+          </Button>
+        </div>
       </div>
 
       <div className="text-sm text-muted-foreground">{users.length} total users across {ALL_ROLES.length} roles</div>
@@ -227,6 +252,45 @@ export default function SettingsPage() {
           }
         </CardContent>
       </Card>
+
+      {/* Create User Dialog */}
+      {/* ── Admin Change Own Password Dialog ─────────────── */}
+      <Dialog open={ownPwdOpen} onOpenChange={v => { setOwnPwdOpen(v); if (!v) setOwnPwdForm({ current:'', newPwd:'', confirm:'' }); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="h-4 w-4 text-indigo-600"/>Change My Password
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Current Password *</Label>
+              <Input type="password" className="mt-1 h-10" placeholder="Enter current password"
+                value={ownPwdForm.current} onChange={e => setOwnPwdForm(p => ({...p, current: e.target.value}))}/>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">New Password *</Label>
+              <Input type="password" className="mt-1 h-10" placeholder="Min 6 characters"
+                value={ownPwdForm.newPwd} onChange={e => setOwnPwdForm(p => ({...p, newPwd: e.target.value}))}/>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Confirm New Password *</Label>
+              <Input type="password" className="mt-1 h-10" placeholder="Re-enter new password"
+                value={ownPwdForm.confirm} onChange={e => setOwnPwdForm(p => ({...p, confirm: e.target.value}))}/>
+              {ownPwdForm.confirm && ownPwdForm.newPwd !== ownPwdForm.confirm && (
+                <p className="text-xs text-red-500 mt-1">Passwords do not match</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOwnPwdOpen(false)}>Cancel</Button>
+            <Button onClick={handleChangeOwnPassword} disabled={ownPwdSaving} className="bg-indigo-600 hover:bg-indigo-700">
+              {ownPwdSaving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Update Password
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Create User Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
