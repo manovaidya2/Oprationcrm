@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
-  Package, Truck, BookOpen, University,
+  Package, Truck, BookOpen, University, XCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -18,8 +18,9 @@ const NAV_CONFIG = {
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/universities', label: 'Universities', icon: University },
-    { to: '/activity',     label: 'Activity Log', icon: Activity },
-    { to: '/settings',     label: 'Settings',     icon: Settings },
+    { to: '/activity',          label: 'Activity Log',      icon: Activity },
+    { to: '/rejected-payments', label: 'Rejected Payments', icon: XCircle },
+    { to: '/settings',          label: 'Settings',          icon: Settings },
   ],
   Counselor: [
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },

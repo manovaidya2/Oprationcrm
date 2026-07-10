@@ -16,7 +16,8 @@ const UniversityManagePage = lazy(() => import('@/pages/UniversityManagePage'));
 const DispatchPage         = lazy(() => import('@/pages/DispatchPage'));
 const StudentsPage         = lazy(() => import('@/pages/StudentsPage'));
 const CentersPage          = lazy(() => import('@/pages/CentersPage'));
-const SettingsPage         = lazy(() => import('@/pages/SettingsPage'));
+const SettingsPage              = lazy(() => import('@/pages/SettingsPage'));
+const RejectedPaymentsPage      = lazy(() => import('@/pages/RejectedPaymentsPage'));
 const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
@@ -88,6 +89,7 @@ export default function App() {
           <Route path="students"            element={<W><StudentsPage /></W>} />
           <Route path="centers"             element={<W><CentersPage /></W>} />
           <Route path="settings"            element={<W><SettingsPage /></W>} />
+          <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />
           <Route path="*"                   element={<W><NotFoundPage /></W>} />
         </Route>

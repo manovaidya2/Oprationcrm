@@ -100,7 +100,7 @@ router.patch ('/payments/:studentId/transactions/:txId/counsel-reject',  protect
 router.patch ('/payments/:studentId/transactions/:txId/resend',          protect, requireRole('Admin','Center'),    upload.single('paymentScreenshot'), payC.resendTransaction);
 router.patch ('/payments/:studentId/transactions/:txId/account-verify',  protect, requireRole('Admin','Accountant'), payC.accountantVerifyFeePayment);
 router.delete('/payments/:studentId/transactions/:txId',                 protect, requireRole('Admin','Counselor','Center'), payC.deleteTransaction);
-
+router.get   ('/payments-rejected',                                      protect, requireRole('Admin'), payC.getRejectedPayments);
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);

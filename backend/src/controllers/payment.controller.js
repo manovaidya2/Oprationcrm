@@ -271,6 +271,40 @@ exports.accountantVerifyFeePayment = asyncHandler(async (req, res) => {
     .populate('transactions.verifiedBy', 'name role'));
 });
 
+// GET /api/payments-rejected — Admin only: all rejected transactions
+exports.getRejectedPayments = asyncHandler(async (req, res) => {
+  const Student = require('../models/Student');
+  const payments = await Payment.find({
+    'transactions.verificationStatus': 'rejected'
+  }).lean();
+
+  const result = [];
+  for (const pay of payments) {
+    const rejectedTxs = pay.transactions.filter(t => t.verificationStatus === 'rejected');
+    if (rejectedTxs.length === 0) continue;
+    const student = await Student.findById(pay.student)
+      .populate('center', 'name')
+      .populate('counselor', 'name')
+      .lean();
+    if (!student) continue;
+    rejectedTxs.forEach(tx => {
+      result.push({
+        studentId: student._id,
+        studentName: student.name,
+        centerName: student.center?.name || '',
+        counselorName: student.counselor?.name || '',
+        courseName: student.courseName || '',
+        enrollmentNumber: student.enrollmentNumber || '',
+        paymentId: pay._id,
+        tx,
+      });
+    });
+  }
+  // Sort newest first
+  result.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
+  res.json(result);
+});
+
 exports.deleteTransaction = asyncHandler(async (req, res) => {
   const payment = await Payment.findOne({ student: req.params.studentId });
   if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }

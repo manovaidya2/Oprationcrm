@@ -121,8 +121,8 @@ export const paymentsApi = {  get:            (sid)          => request(`/paymen
   counselorForwardPayment:(sid, txId)       => request(`/payments/${sid}/transactions/${txId}/counsel-verify`, { method: 'PATCH' }),
   counselorRejectPayment: (sid, txId, note) => request(`/payments/${sid}/transactions/${txId}/counsel-reject`, { method: 'PATCH', body: JSON.stringify({ note }) }),
   accountantVerifyPayment:(sid, txId, data) => request(`/payments/${sid}/transactions/${txId}/account-verify`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteTransaction:      (sid, txId)       => request(`/payments/${sid}/transactions/${txId}`, { method: 'DELETE' }),
-};
+ deleteTransaction:      (sid, txId)       => request(`/payments/${sid}/transactions/${txId}`, { method: 'DELETE' }),
+  getRejectedPayments:    ()                => request('/payments-rejected'),};
 
 // ── DOCUMENTS ────────────────────────────────────────────────
 export const docsApi = {
