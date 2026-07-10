@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square } from 'lucide-react';
+import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,6 +65,22 @@ export default function StudentsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [form,    setForm]    = useState({ name:'', phone:'', email:'', courseName:'', courseYear:'', center:'', counselor:'' });
   const [saving,  setSaving]  = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteStudent, setDeleteStudent] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  async function handleDelete() {
+    if (!deleteStudent) return;
+    setDeleteLoading(true);
+    try {
+      await studentsApi.delete(deleteStudent._id);
+      toast.success(`${deleteStudent.name} and all related records deleted`);
+      setDeleteOpen(false);
+      setDeleteStudent(null);
+      load();
+    } catch(e) { toast.error(e.message); }
+    finally { setDeleteLoading(false); }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -352,6 +368,15 @@ export default function StudentsPage() {
                       ? <CheckSquare className="h-4 w-4 text-indigo-600"/>
                       : <Square className="h-4 w-4"/>}
                   </button>
+                  {isAdmin && (
+                    <button
+                      onClick={e => { e.stopPropagation(); setDeleteStudent(s); setDeleteOpen(true); }}
+                      className="flex-shrink-0 text-slate-300 hover:text-red-500 transition-colors p-1"
+                      title="Delete student"
+                    >
+                      <Trash2 className="h-4 w-4"/>
+                    </button>
+                  )}
                   <div className="flex-1 min-w-0 flex items-center justify-between gap-3"
                     onClick={() => navigate(`/students/${s._id}`)}>
                     <div className="flex-1 min-w-0">
@@ -434,6 +459,43 @@ export default function StudentsPage() {
             <Button variant="outline" onClick={() => setCsvOpen(false)}>Cancel</Button>
             <Button onClick={doExportCSV} disabled={csvLoading} className="bg-indigo-600 hover:bg-indigo-700">
               {csvLoading ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin"/>Preparing…</> : <><Download className="h-4 w-4 mr-1.5"/>Download CSV</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Student Dialog */}
+      {/* ── Delete Confirm Dialog ─────────────────────────── */}
+      <Dialog open={deleteOpen} onOpenChange={v => { setDeleteOpen(v); if (!v) setDeleteStudent(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash2 className="h-4 w-4"/>Delete Student Record
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-sm font-bold text-red-700">{deleteStudent?.name}</p>
+              {deleteStudent?.phone && <p className="text-xs text-red-500 mt-0.5">{deleteStudent.phone}</p>}
+              {deleteStudent?.courseName && <p className="text-xs text-red-500">{deleteStudent.courseName} {deleteStudent.courseYear}</p>}
+              {deleteStudent?.center?.name && <p className="text-xs text-red-500">Center: {deleteStudent.center.name}</p>}
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 space-y-1.5">
+              <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">Following will be permanently deleted:</p>
+              <div className="space-y-1 text-xs text-slate-600">
+                <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-red-400 flex-shrink-0"/>Student profile & application data</div>
+                <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-red-400 flex-shrink-0"/>All fee payment records & transactions</div>
+                <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-red-400 flex-shrink-0"/>All document requests & payments</div>
+                <div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-red-400 flex-shrink-0"/>Status history & audit trail</div>
+              </div>
+            </div>
+            <p className="text-xs text-red-600 font-semibold">⚠ This action cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button onClick={handleDelete} disabled={deleteLoading} className="bg-red-600 hover:bg-red-700">
+              {deleteLoading && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              <Trash2 className="h-4 w-4 mr-1"/>Delete Permanently
             </Button>
           </DialogFooter>
         </DialogContent>

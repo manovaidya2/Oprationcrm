@@ -695,7 +695,19 @@ exports.amountSettle = asyncHandler(async (req, res) => {
 
 // DELETE /api/students/:id  — Admin only
 exports.remove = asyncHandler(async (req, res) => {
-  await Student.findByIdAndDelete(req.params.id);
-  await Payment.deleteOne({ student: req.params.id });
+  const StudentDocument = require('../models/StudentDocument');
+  const Notification    = require('../models/Notification');
+  const id = req.params.id;
+
+  const student = await Student.findById(id).lean();
+  const studentName = student?.name || id;
+
+  // Delete all related records
+  await Student.findByIdAndDelete(id);
+  await Payment.deleteOne({ student: id });
+  await StudentDocument.deleteMany({ student: id });
+  await Notification.deleteMany({ studentId: id });
+
+  await audit('student_deleted', 'Student', id, req.user, { studentName }, `Student "${studentName}" permanently deleted with all related records by Admin`);
   res.status(204).end();
 });
