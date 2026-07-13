@@ -135,6 +135,7 @@ exports.changeOwnPassword = asyncHandler(async (req, res) => {
     const e = new Error('Current password is incorrect'); e.status = 401; throw e;
   }
   user.password = newPassword;
+  if (user.role === 'Center') user.createdPassword = newPassword;
   await user.save();
   res.json({ ok: true, message: 'Password changed successfully' });
 });
