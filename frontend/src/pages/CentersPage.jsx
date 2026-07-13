@@ -187,7 +187,7 @@ function CenterStudentsModal({ center, onClose }) {
 }
 
 // ── Center detail card expand ────────────────────────────────
-function CenterCard({ center, isAdmin, onEdit, onDelete, onCreateLogin, onAssignCounselor, onViewStudents, onRefresh }) {
+function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
   const [expanded,    setExpanded]    = useState(false);
   const [uploadOpen,  setUploadOpen]  = useState(false);
   const [uploadName,  setUploadName]  = useState('');
@@ -371,6 +371,42 @@ function CenterCard({ center, isAdmin, onEdit, onDelete, onCreateLogin, onAssign
               </div>
             )}
 
+            <div className="border rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                  <Key className="h-3.5 w-3.5"/> Center Logins ({loginUsers.length})
+                </div>
+                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                  onClick={e => { e.stopPropagation(); onCreateLogin(center); }}>
+                  <Plus className="h-3 w-3"/> Create Login
+                </Button>
+              </div>
+              {loginUsers.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">No login created for this center yet</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {loginUsers.map(u => (
+                    <div key={u._id || u.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] bg-muted/30 rounded-lg px-3 py-2 text-sm">
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Login Email</div>
+                        <div className="font-mono font-semibold truncate">{u.email}</div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-muted-foreground">Password</div>
+                        <div className="font-mono font-semibold truncate">{u.createdPassword || 'Not saved'}</div>
+                      </div>
+                      <div className="flex items-end">
+                        <Button size="sm" variant="outline" className="h-8 text-xs"
+                          onClick={e => { e.stopPropagation(); onResetLogin(u); }}>
+                          Reset
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Verification Documents — always shown */}
             <div className="border rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
@@ -525,6 +561,7 @@ export default function CentersPage() {
 
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
+  const [centerUsers,setCenterUsers]= useState([]);
   const [loading,    setLoading]    = useState(true);
 
   // Form state
@@ -543,6 +580,8 @@ export default function CentersPage() {
   const [loginOpen,    setLoginOpen]    = useState(false);
   const [loginTarget,  setLoginTarget]  = useState(null);
   const [loginForm,    setLoginForm]    = useState({ name:'', email:'', password:'' });
+  const [resetTarget,  setResetTarget]  = useState(null);
+  const [resetPwd,     setResetPwd]     = useState('');
 
   // Assign counselor
   const [assignOpen,    setAssignOpen]    = useState(null);
@@ -552,8 +591,8 @@ export default function CentersPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [c, co] = await Promise.all([centersApi.getAll(), counselorsApi.getAll()]);
-      setCenters(c); setCounselors(co);
+      const [c, co, users] = await Promise.all([centersApi.getAll(), counselorsApi.getAll(), authApi.listUsers('Center').catch(()=>[])]);
+      setCenters(c); setCounselors(co); setCenterUsers(users);
     } catch { toast.error('Failed to load'); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -646,6 +685,19 @@ export default function CentersPage() {
     try {
       await authApi.createUser({ ...loginForm, role: 'Center', centerId: loginTarget._id });
       toast.success('Login created'); setLoginOpen(false); setLoginForm({ name:'', email:'', password:'' });
+      load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function resetLoginPassword() {
+    if (!resetTarget) return;
+    if (resetPwd.length < 6) return toast.error('Password min 6 characters');
+    setSaving(true);
+    try {
+      await authApi.resetPassword(resetTarget._id || resetTarget.id, resetPwd);
+      toast.success('Password reset');
+      setResetTarget(null); setResetPwd('');
+      load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -684,9 +736,11 @@ export default function CentersPage() {
         <div className="space-y-3">
           {centers.map(c => (
             <CenterCard key={c._id} center={c} isAdmin={isAdmin}
+              loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
               onEdit={openEdit}
               onDelete={deleteCenter}
               onCreateLogin={c => { setLoginTarget(c); setLoginForm({ name: c.fullName||'', email:'', password:'' }); setLoginOpen(true); }}
+              onResetLogin={u => { setResetTarget(u); setResetPwd(''); }}
               onAssignCounselor={c => { setAssignOpen(c); setSelCounselor(''); }}
               onViewStudents={setViewCenter}
               onRefresh={load}
@@ -986,6 +1040,30 @@ export default function CentersPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setLoginOpen(false)}>Cancel</Button>
             <Button onClick={createLogin} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Create Login</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!resetTarget} onOpenChange={() => { setResetTarget(null); setResetPwd(''); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="h-4 w-4"/>Reset Center Login
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-muted/30 rounded-lg px-3 py-2 text-sm">
+              <div className="text-xs text-muted-foreground">Login Email</div>
+              <div className="font-mono font-semibold">{resetTarget?.email}</div>
+            </div>
+            <div>
+              <Label>New Password *</Label>
+              <Input type="password" value={resetPwd} onChange={e => setResetPwd(e.target.value)} placeholder="Min 6 characters"/>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setResetTarget(null); setResetPwd(''); }}>Cancel</Button>
+            <Button onClick={resetLoginPassword} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Reset Password</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

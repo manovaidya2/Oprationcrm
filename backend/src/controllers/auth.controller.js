@@ -54,6 +54,13 @@ exports.createUser = asyncHandler(async (req, res) => {
     if (!centerId) { const e = new Error('centerId required for Center role'); e.status = 400; throw e; }
     const center = await Center.findById(centerId);
     if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+    if (req.user.role === 'Counselor') {
+      const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+      const canCreateForCenter = (counselor?.centers || []).some(id => String(id) === String(center._id));
+      if (!canCreateForCenter) {
+        const e = new Error('You can create login only for your assigned centers'); e.status = 403; throw e;
+      }
+    }
     resolvedCenterId = center._id;
   }
 
@@ -69,6 +76,8 @@ exports.createUser = asyncHandler(async (req, res) => {
     counselorId, centerId: resolvedCenterId,
     universityId: resolvedUniversityId,
     avatarColor: avatarColor || '#6366f1',
+    createdPassword: password,
+    createdBy: req.user._id,
   });
 
   res.status(201).json({ user: sanitize(user) });
@@ -78,10 +87,16 @@ exports.createUser = asyncHandler(async (req, res) => {
 exports.listUsers = asyncHandler(async (req, res) => {
   const filter = {};
   // Counselor only sees active Center users; Admin sees all (active + inactive)
-  if (req.user.role === 'Counselor') { filter.role = 'Center'; filter.isActive = true; }
-  if (req.query.role) filter.role = req.query.role;
+  if (req.user.role === 'Counselor') {
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    filter.role = 'Center';
+    filter.isActive = true;
+    filter.centerId = { $in: counselor?.centers || [] };
+  } else if (req.query.role) {
+    filter.role = req.query.role;
+  }
 
-  const users = await User.find(filter).select('-password')
+  const users = await User.find(filter).select('-password +createdPassword')
     .populate('counselorId centerId universityId').sort('-createdAt');
   res.json(users);
 });
@@ -92,7 +107,18 @@ exports.resetPassword = asyncHandler(async (req, res) => {
   if (!password || password.length < 6) { const e = new Error('Password min 6 chars'); e.status = 400; throw e; }
   const user = await User.findById(req.params.id);
   if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  if (req.user.role === 'Counselor') {
+    if (user.role !== 'Center') {
+      const e = new Error('Counselors can reset only Center logins'); e.status = 403; throw e;
+    }
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const canReset = (counselor?.centers || []).some(id => String(id) === String(user.centerId));
+    if (!canReset) {
+      const e = new Error('You can reset login only for your assigned centers'); e.status = 403; throw e;
+    }
+  }
   user.password = password;
+  user.createdPassword = password;
   await user.save();
   res.json({ ok: true });
 });

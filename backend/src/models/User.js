@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   name:      { type: String, required: true, trim: true },
   email:     { type: String, required: true, unique: true, lowercase: true, trim: true },
   password:  { type: String, required: true, select: false },
+  createdPassword: { type: String, select: false },
   role: {
     type: String,
     enum: ['Admin', 'Counselor', 'Center', 'Accountant', 'University', 'Dispatch'],
@@ -18,6 +19,7 @@ const userSchema = new mongoose.Schema({
   universityId: { type: mongoose.Schema.Types.ObjectId, ref: 'University' },
   avatarColor: { type: String, default: '#6366f1' },
   isActive:    { type: Boolean, default: true },
+  createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 
 userSchema.pre('save', async function (next) {
