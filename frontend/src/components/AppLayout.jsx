@@ -17,6 +17,7 @@ const NAV_CONFIG = {
     { to: '/',             label: 'Dashboard',    icon: LayoutDashboard },
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
+    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
     { to: '/universities', label: 'Universities', icon: University },
     { to: '/activity',          label: 'Activity Log',      icon: Activity },
     { to: '/rejected-payments', label: 'Rejected Payments', icon: XCircle },
@@ -26,6 +27,7 @@ const NAV_CONFIG = {
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
+    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
     { to: '/settings',  label: 'Settings',     icon: Settings },
   ],
   Center: [
@@ -34,12 +36,14 @@ const NAV_CONFIG = {
   Accountant: [
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
+    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
   ],
   University: [
     { to: '/university', label: 'Student Records', icon: BookOpen },
   ],
   Dispatch: [
     { to: '/dispatch', label: 'Documents', icon: Package },
+    { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
   ],
 };
 

@@ -14,6 +14,7 @@ const AccountantPage       = lazy(() => import('@/pages/AccountantPage'));
 const UniversityPage       = lazy(() => import('@/pages/UniversityPage'));
 const UniversityManagePage = lazy(() => import('@/pages/UniversityManagePage'));
 const DispatchPage         = lazy(() => import('@/pages/DispatchPage'));
+const DocumentInventoryPage= lazy(() => import('@/pages/DocumentInventoryPage'));
 const StudentsPage         = lazy(() => import('@/pages/StudentsPage'));
 const CentersPage          = lazy(() => import('@/pages/CentersPage'));
 const SettingsPage              = lazy(() => import('@/pages/SettingsPage'));
@@ -41,10 +42,10 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/'],
-  Accountant: ['/accountant', '/students', '/students/'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory'],
   University: ['/university', '/students/'],
-  Dispatch:   ['/dispatch', '/students/'],
-  Counselor:  ['/counselor', '/students', '/centers', '/settings', '/dashboard'],
+  Dispatch:   ['/dispatch', '/students/', '/document-inventory'],
+  Counselor:  ['/counselor', '/students', '/centers', '/settings', '/dashboard', '/document-inventory'],
 };
 
 function ProtectedRoute({ children }) {
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="universities"        element={<W><UniversityManagePage /></W>} />
           {/* Dispatch */}
           <Route path="dispatch"            element={<W><DispatchPage /></W>} />
+          <Route path="document-inventory"  element={<W><DocumentInventoryPage /></W>} />
           {/* Admin / Counselor shared */}
           <Route path="students"            element={<W><StudentsPage /></W>} />
           <Route path="centers"             element={<W><CentersPage /></W>} />

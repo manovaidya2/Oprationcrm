@@ -169,18 +169,8 @@ exports.accountantAction = asyncHandler(async (req, res) => {
   if (action === 'approve') {
     pushHistory(doc, 'Fee_Approved', req.user, note||'');
     doc.status = 'Sent_To_University';
-    doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date() });
-    // ISOLATED: notify only university users belonging to this document's university
-    const uniId = doc.university;
-    if (uniId) {
-      const uniUsers = await User.find({ role:'University', universityId: uniId, isActive:true }).select('_id').lean();
-      for (const u of uniUsers) {
-        await notify(u._id, { message: `Document needed: "${doc.name}" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
-      }
-      if (uniUsers.length === 0) await notifyRole('University', { message: `Document needed: "${doc.name}" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
-    } else {
-      await notifyRole('University', { message: `Document needed: \"${doc.name}\" for ${doc.student?.name}`, type: 'doc_fee_approved', documentId: doc._id, studentId: doc.student?._id, role: 'University' });
-    }
+    doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: 'Requested from dispatch inventory - external courier expected' });
+    // University portal is skipped for document requests; Dispatch owns receipt.
     // Also notify Dispatch — courier will arrive from university directly
     await notifyRole('Dispatch', {
       message: `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
@@ -530,6 +520,125 @@ exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
   }
 
   await audit('doc_delivered', 'StudentDocument', doc._id, req.user, {}, `Delivered: ${doc.name}`);
+  res.json(doc);
+});
+
+async function assertInventoryStudentAccess(req, student) {
+  if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  if (req.user.role === 'Counselor' && String(student.counselor?._id || student.counselor) !== String(req.user.counselorId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (req.user.role === 'Center' && String(student.center?._id || student.center) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+}
+
+exports.inventoryList = asyncHandler(async (req, res) => {
+  const filter = { applicationStatus: 'Enrolled', enrollmentNumber: { $exists: true, $ne: '' } };
+  if (req.user.role === 'Counselor') filter.counselor = req.user.counselorId;
+  if (req.user.role === 'Center') filter.center = req.user.centerId;
+
+  const students = await Student.find(filter)
+    .populate('center', 'name city')
+    .populate('counselor', 'name')
+    .populate('university', 'name shortName')
+    .sort('-updatedAt')
+    .lean();
+
+  const studentIds = students.map(s => s._id);
+  const docs = await StudentDoc.find({ student: { $in: studentIds } })
+    .populate('student', 'name enrollmentNumber courseName')
+    .populate('center', 'name')
+    .populate('university', 'name shortName')
+    .sort('name')
+    .lean();
+
+  const docsByStudent = docs.reduce((acc, doc) => {
+    const sid = String(doc.student?._id || doc.student);
+    if (!acc[sid]) acc[sid] = [];
+    acc[sid].push(doc);
+    return acc;
+  }, {});
+
+  res.json(students.map(student => ({
+    student,
+    docs: docsByStudent[String(student._id)] || [],
+  })));
+});
+
+exports.inventoryAddDoc = asyncHandler(async (req, res) => {
+  const { name, names, received } = req.body;
+  const rawNames = Array.isArray(names) ? names : String(name || '').split('\n');
+  const docNames = rawNames.map(n => String(n || '').trim()).filter(Boolean);
+  if (docNames.length === 0) { const e = new Error('Document name required'); e.status = 400; throw e; }
+
+  const student = await Student.findById(req.params.studentId);
+  await assertInventoryStudentAccess(req, student);
+
+  const created = [];
+  for (const docName of docNames) {
+    let doc = await StudentDoc.findOne({ student: student._id, name: new RegExp(`^${docName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+    if (!doc) {
+      doc = new StudentDoc({
+        student: student._id,
+        center: student.center,
+        counselor: student.counselor,
+        university: student.university,
+        name: docName,
+        uploadedBy: req.user._id,
+        status: received ? 'Dispatch_Received' : 'Sent_To_University',
+        statusHistory: [{
+          status: received ? 'Dispatch_Received' : 'Sent_To_University',
+          changedBy: req.user._id,
+          at: new Date(),
+          note: received ? 'Added to inventory as received from university' : 'Added to inventory and requested',
+        }],
+      });
+    } else if (received && !['Dispatch_Received','Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'].includes(doc.status)) {
+      pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university');
+    }
+    await doc.save();
+    created.push(doc);
+  }
+  res.status(201).json(created);
+});
+
+exports.inventoryReceiveDoc = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  await assertInventoryStudentAccess(req, doc.student);
+  if (!['Admin','Dispatch'].includes(req.user.role)) {
+    const e = new Error('Only Dispatch/Admin can mark documents received'); e.status = 403; throw e;
+  }
+  if (!['Sent_To_University','University_Dispatched','Requested'].includes(doc.status)) {
+    return res.json(doc);
+  }
+  if (!doc.courierInfo) {
+    doc.courierInfo = {
+      company: req.body.company || 'External Courier',
+      trackingNo: req.body.trackingNo || '',
+      dispatchDate: req.body.dispatchDate ? new Date(req.body.dispatchDate) : new Date(),
+      documentsDesc: req.body.documentsDesc || doc.name,
+      sentBy: req.user._id,
+      sentAt: new Date(),
+    };
+  }
+  pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university');
+  await doc.save();
+  res.json(doc);
+});
+
+exports.inventoryRequestDoc = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  await assertInventoryStudentAccess(req, doc.student);
+  if (['Dispatch_Received','Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'].includes(doc.status)) {
+    return res.json(doc);
+  }
+  pushHistory(doc, 'Sent_To_University', req.user, 'Document requested from university/external courier');
+  await doc.save();
+  await notifyRole('Dispatch', {
+    message: `Inventory request: "${doc.name}" - Student: ${doc.student?.name}. Mark received when it arrives.`,
+    type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
+  });
   res.json(doc);
 });
 

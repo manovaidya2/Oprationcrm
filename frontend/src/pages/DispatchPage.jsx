@@ -46,7 +46,8 @@ const fmtDt  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',mo
 const fmtFull= d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
 
 const STATUS_INFO = {
-  University_Dispatched: { label:'Incoming from University',  color:'bg-purple-100 text-purple-700' },
+  Sent_To_University:    { label:'Requested / Awaiting Receipt', color:'bg-amber-100 text-amber-700' },
+  University_Dispatched: { label:'Incoming Courier',         color:'bg-purple-100 text-purple-700' },
   Dispatch_Received:     { label:'Receipt Confirmed',         color:'bg-blue-100 text-blue-700' },
   Scanned:               { label:'Scanned',                   color:'bg-indigo-100 text-indigo-700' },
   Accountant_Received:   { label:'With Accountant',           color:'bg-orange-100 text-orange-700' },
@@ -315,7 +316,7 @@ export default function DispatchPage() {
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-xs text-blue-700">
         <span className="font-medium">Flow: </span>
-        University Dispatches → Confirm Receipt → Upload Scan → Counselor Reviews →
+        Document Request → Confirm Receipt → Upload Scan → Counselor Reviews →
         Center Pays → Accountant Verifies → Dispatch to Center
       </div>
 
@@ -348,7 +349,7 @@ export default function DispatchPage() {
       <Tabs defaultValue="uni">
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
-            { val:'uni',      label:'University Records', count: uniRecords.length,  dot:'bg-purple-500', icon: <GraduationCap className="h-3.5 w-3.5"/> },
+            { val:'uni',      label:'Inventory Records', count: uniRecords.length,  dot:'bg-purple-500', icon: <GraduationCap className="h-3.5 w-3.5"/> },
             { val:'incoming', label:'Incoming',           count: incoming.length,    dot:'bg-blue-500',   icon: null },
             { val:'scan',     label:'Upload Scan',        count: scanPending.length, dot:'bg-amber-500',  icon: null },
             { val:'ready',    label:'Ready to Dispatch',  count: ready.length,       dot:'bg-emerald-500',icon: null },
@@ -374,7 +375,7 @@ export default function DispatchPage() {
               <GraduationCap className="h-3 w-3 text-purple-700"/>
             </div>
             <p className="text-xs text-purple-700">
-              Permanent record of all documents received from university — stays visible at every stage.
+              Permanent record of requested and received documents — stays visible at every stage.
             </p>
           </div>
 
@@ -383,8 +384,8 @@ export default function DispatchPage() {
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-3">
                 <GraduationCap className="h-6 w-6 text-slate-400"/>
               </div>
-              <p className="text-sm font-medium text-slate-500">No university records yet</p>
-              <p className="text-xs text-slate-400 mt-1">Documents dispatched by university will appear here</p>
+              <p className="text-sm font-medium text-slate-500">No inventory records yet</p>
+              <p className="text-xs text-slate-400 mt-1">Requested documents will appear here</p>
             </div>
           ) : uniRecords.map(d => {
             const ci         = d.courierInfo;
