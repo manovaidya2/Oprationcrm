@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Plus, Edit2, Trash2, Loader2, Building2, User, Key,
   UserPlus, ChevronDown, ChevronUp, MapPin, Phone,
-  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip,
+  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip, Search, X,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -562,6 +562,7 @@ export default function CentersPage() {
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
   const [centerUsers,setCenterUsers]= useState([]);
+  const [centerSearch,setCenterSearch]= useState('');
   const [loading,    setLoading]    = useState(true);
 
   // Form state
@@ -710,6 +711,21 @@ export default function CentersPage() {
   }
 
   const set = (field, val) => setForm(p => ({ ...p, [field]: val }));
+  const centerQuery = centerSearch.toLowerCase().trim();
+  const filteredCenters = centers.filter(c => {
+    if (!centerQuery) return true;
+    return [
+      c.name,
+      c.organisationName,
+      c.fullName,
+      c.emailId,
+      c.city,
+      c.state,
+      c.contactNumber,
+      c.organisationType,
+      c.assignedCounselor?.name,
+    ].some(v => String(v || '').toLowerCase().includes(centerQuery));
+  });
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
 
@@ -717,7 +733,7 @@ export default function CentersPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Centers ({centers.length})</h1>
+          <h1 className="text-xl font-semibold">Centers ({centerQuery ? `${filteredCenters.length}/${centers.length}` : centers.length})</h1>
           <p className="text-sm text-muted-foreground">Manage admission centers and their details</p>
         </div>
         <div className="flex gap-2">
@@ -727,14 +743,39 @@ export default function CentersPage() {
         </div>
       </div>
 
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+        <Input
+          value={centerSearch}
+          onChange={e => setCenterSearch(e.target.value)}
+          placeholder="Search centers by name, city, email, phone, counselor..."
+          className="pl-9 pr-9"
+        />
+        {centerSearch && (
+          <button
+            type="button"
+            onClick={() => setCenterSearch('')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            aria-label="Clear search"
+          >
+            <X className="h-4 w-4"/>
+          </button>
+        )}
+      </div>
+
       {centers.length === 0 ? (
         <div className="text-center py-16 border border-dashed rounded-lg">
           <Building2 className="h-10 w-10 mx-auto text-muted-foreground mb-3"/>
           <p className="text-muted-foreground">No centers yet</p>
         </div>
+      ) : filteredCenters.length === 0 ? (
+        <div className="text-center py-16 border border-dashed rounded-lg">
+          <Search className="h-10 w-10 mx-auto text-muted-foreground mb-3"/>
+          <p className="text-muted-foreground">No centers matching "{centerSearch}"</p>
+        </div>
       ) : (
         <div className="space-y-3">
-          {centers.map(c => (
+          {filteredCenters.map(c => (
             <CenterCard key={c._id} center={c} isAdmin={isAdmin}
               loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
               onEdit={openEdit}
