@@ -69,7 +69,7 @@ const INVENTORY_DOC_NAMES = [
 
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
-  const filter = { origin: { $ne: 'Inventory' } };
+  const filter = req.user.role === 'University' ? {} : { origin: { $ne: 'Inventory' } };
   if (req.query.studentId) filter.student = req.query.studentId;
 
   const { role, centerId, counselorId, universityId } = req.user;
@@ -669,6 +669,16 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
       pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university');
     }
     await doc.save();
+    if (!received && doc.university) {
+      const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
+      await notify(uniUsers.map(u => u._id), {
+        message: `Document requested by Dispatch: "${doc.name}" - Student: ${student.name}`,
+        type: 'doc_forwarded',
+        documentId: doc._id,
+        studentId: student._id,
+        role: 'University',
+      });
+    }
     created.push(doc);
   }
   res.status(201).json(created);
@@ -710,6 +720,16 @@ exports.inventoryRequestDoc = asyncHandler(async (req, res) => {
     message: `Inventory request: "${doc.name}" - Student: ${doc.student?.name}. Mark received when it arrives.`,
     type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
   });
+  if (doc.university) {
+    const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
+    await notify(uniUsers.map(u => u._id), {
+      message: `Document requested by Dispatch: "${doc.name}" - Student: ${doc.student?.name}`,
+      type: 'doc_forwarded',
+      documentId: doc._id,
+      studentId: doc.student?._id,
+      role: 'University',
+    });
+  }
   res.json(doc);
 });
 

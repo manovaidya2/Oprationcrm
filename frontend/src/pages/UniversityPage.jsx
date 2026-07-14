@@ -238,6 +238,7 @@ export default function UniversityPage() {
   const [saving,  setSaving]  = useState(false);
   const [search,  setSearch]  = useState('');
   const [docSearch, setDocSearch] = useState('');
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -328,6 +329,41 @@ export default function UniversityPage() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length} ${label} students`);
+  }
+
+  function toggleDocSelection(docId) {
+    const id = String(docId);
+    setSelectedDocIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  }
+
+  function downloadDocRequestsCSV() {
+    const pendingList = filtDocs.filter(d => d.status === 'Sent_To_University');
+    const selected = pendingList.filter(d => selectedDocIds.includes(String(d._id)));
+    const list = selected.length ? selected : pendingList;
+    if (!list.length) return toast.error('No requested documents to export');
+    const grouped = new Map();
+    list.forEach(doc => {
+      const sid = String(doc.student?._id || doc.student?.enrollmentNumber || doc.student?.name || doc._id);
+      if (!grouped.has(sid)) grouped.set(sid, { student: doc.student || {}, docs: [] });
+      grouped.get(sid).docs.push(doc.name);
+    });
+    const rows = [...grouped.values()].map(({ student, docs }) => ({
+      'Student Name': student.name || '',
+      'Enrollment Number': student.enrollmentNumber || '',
+      'Course': student.courseName || '',
+      'Requested Documents': docs.join(' | '),
+    }));
+    const headers = Object.keys(rows[0]);
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [headers.map(escape).join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `university_doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} students`);
   }
 
   // Search filters
@@ -665,11 +701,21 @@ export default function UniversityPage() {
           {/* ── Document Requests ────────────────────────── */}
           <TabsContent value="docreq" className="space-y-3 mt-4">
             {/* Doc search */}
-            <div className="relative">
+            <div className="flex flex-wrap gap-2">
+              <div className="relative flex-1 min-w-[260px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
               <Input className="pl-9 pr-9" placeholder="Search documents…"
                 value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
               {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
+              </div>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={downloadDocRequestsCSV}
+                disabled={filtDocs.filter(d => d.status === 'Sent_To_University').length === 0}
+              >
+                <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'Requests'}
+              </Button>
             </div>
 
             {/* Group: Pending Action */}
@@ -682,7 +728,14 @@ export default function UniversityPage() {
                 {filtDocs.filter(d => d.status === 'Sent_To_University').map(d => (
                   <Card key={d._id} className="border-amber-200 mb-2">
                     <CardContent className="p-4 flex items-center justify-between gap-3">
-                      <div>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedDocIds.includes(String(d._id))}
+                          onChange={() => toggleDocSelection(d._id)}
+                          className="mt-1 h-4 w-4 accent-purple-600"
+                        />
+                        <div>
                         <div className="font-medium">{d.name}</div>
                        <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
   Student: <b>{d.student?.name}</b>
@@ -693,6 +746,7 @@ export default function UniversityPage() {
   )}
 </div>
                         {/* {d.chargeFee > 0 && <div className="text-xs mt-0.5">Charge: <b>₹{d.chargeFee?.toLocaleString('en-IN')}</b></div>} */}
+                        </div>
                       </div>
                       <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
                         ⏳ Awaiting Physical Courier

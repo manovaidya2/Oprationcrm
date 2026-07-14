@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CheckCircle2, ChevronDown, ChevronRight, Clock, FileText, Loader2, PackageCheck, Plus, Search, Send, X,
+  CheckCircle2, ChevronDown, ChevronRight, Clock, Download, FileText, Loader2, PackageCheck, Plus, Search, Send, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -35,6 +35,7 @@ export default function DocumentInventoryPage() {
   const [received, setReceived] = useState(false);
   const [saving, setSaving] = useState(false);
   const [openStudentId, setOpenStudentId] = useState('');
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -62,6 +63,49 @@ export default function DocumentInventoryPage() {
       ...requestedDocs.map(d => d.name),
     ].some(v => String(v || '').toLowerCase().includes(q));
   }), [rows, q]);
+
+  const universityRequestedDocs = useMemo(() => rows.flatMap(({ student, docs }) => (
+    docs
+      .filter(d => d.origin === 'Inventory' && ['Sent_To_University', 'University_Dispatched'].includes(d.status) && !d.catalog)
+      .map(d => ({ student, doc: d }))
+  )), [rows]);
+
+  const selectedRequestedDocs = useMemo(() => universityRequestedDocs.filter(x => selectedDocIds.includes(String(x.doc._id))), [universityRequestedDocs, selectedDocIds]);
+
+  function toggleDocSelection(docId) {
+    const id = String(docId);
+    setSelectedDocIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
+  }
+
+  function downloadRequestedCsv() {
+    const list = selectedRequestedDocs.length ? selectedRequestedDocs : universityRequestedDocs;
+    if (!list.length) return toast.error('No requested documents to export');
+    const grouped = new Map();
+    list.forEach(({ student, doc }) => {
+      const key = String(student._id);
+      if (!grouped.has(key)) grouped.set(key, { student, docs: [] });
+      grouped.get(key).docs.push(doc.name);
+    });
+    const rows = [...grouped.values()].map(({ student, docs }) => ({
+      'Student Name': student.name || '',
+      'Enrollment Number': student.enrollmentNumber || '',
+      'Center': student.center?.name || '',
+      'University': student.university?.name || '',
+      'Course': student.courseName || '',
+      'Requested Documents': docs.join(' | '),
+    }));
+    const headers = Object.keys(rows[0]);
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [headers.map(escape).join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `document_requests_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} students`);
+  }
 
   async function addDocs() {
     const list = names.split('\n').map(v => v.trim()).filter(Boolean);
@@ -125,6 +169,11 @@ export default function DocumentInventoryPage() {
           </h1>
           <p className="text-sm text-muted-foreground">Enrolled students and university document receipt tracking</p>
         </div>
+        {['Admin', 'Dispatch', 'University'].includes(user?.role) && (
+          <Button variant="outline" onClick={downloadRequestedCsv} disabled={universityRequestedDocs.length === 0} className="gap-2">
+            <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'All Requests'}
+          </Button>
+        )}
       </div>
 
       <div className="relative">
@@ -181,13 +230,24 @@ export default function DocumentInventoryPage() {
                     const state = docState(doc);
                     const Icon = state.icon;
                     const isReceived = RECEIVED_STATUSES.has(doc.status);
+                    const isRequestedForUniversity = doc.origin === 'Inventory' && ['Sent_To_University', 'University_Dispatched'].includes(doc.status) && !doc.catalog;
                     return (
                       <div key={doc._id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex items-start gap-2">
+                          {isRequestedForUniversity && (
+                            <input
+                              type="checkbox"
+                              checked={selectedDocIds.includes(String(doc._id))}
+                              onChange={() => toggleDocSelection(doc._id)}
+                              className="mt-1 h-4 w-4 accent-indigo-600"
+                            />
+                          )}
+                          <div>
                           <div className="font-medium truncate">{doc.name}</div>
                           <span className={`inline-flex items-center gap-1 text-xs border rounded-full px-2 py-0.5 mt-1 ${state.tone}`}>
                             <Icon className="h-3 w-3"/>{state.label}
                           </span>
+                          </div>
                         </div>
                         <div className="flex gap-2">
                           {!isReceived && canReceive && (
