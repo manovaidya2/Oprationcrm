@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 const ROLE_HOME = {
   Admin: '/', Counselor: '/counselor', Center: '/center',
   Accountant: '/accountant', University: '/university', Dispatch: '/dispatch',
+  PaymentCoordinator: '/payment-coordinator',
 };
 
 const DEMO_ACCOUNTS = [
@@ -13,6 +14,7 @@ const DEMO_ACCOUNTS = [
   { label: 'Counselor',   email: 'aarav@edu.io',        color: '#6366f1' },
   { label: 'Center',      email: 'mumbai@center.io',    color: '#06b6d4' },
   { label: 'Accountant',  email: 'accountant@edu.io',   color: '#f59e0b' },
+  { label: 'Pay Coord',    email: 'paymentcoordinator@edu.io', color: '#14b8a6' },
   { label: 'University',  email: 'university@edu.io',   color: '#8b5cf6' },
   { label: 'Dispatch',    email: 'dispatch@edu.io',     color: '#10b981' },
 ];

@@ -34,6 +34,16 @@ const transactionSchema = new mongoose.Schema({
   paidToAccountLabel:{ type: String, trim: true }, // denormalized label for quick display
 }, { timestamps: true });
 
+const installmentSchema = new mongoose.Schema({
+  installmentNumber: { type: Number, required: true, min: 1 },
+  paymentDate:       { type: Date, required: true },
+  amount:            { type: Number, default: 0, min: 0 },
+  reasonOrRequirement: { type: String, trim: true },
+  paidAmount:        { type: Number, default: 0 },
+  status:            { type: String, enum: ['Pending', 'Partially_Paid', 'Paid', 'Overdue'], default: 'Pending' },
+  paidAt:            { type: Date },
+}, { timestamps: true });
+
 const paymentSchema = new mongoose.Schema({
   student:  { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true, unique: true },
   center:   { type: mongoose.Schema.Types.ObjectId, ref: 'Center',  required: true },
@@ -48,6 +58,9 @@ const paymentSchema = new mongoose.Schema({
   // All transactions (fee + document)
   transactions: [transactionSchema],
 
+  // Planned fee installments for payment follow-up.
+  installments: [installmentSchema],
+
   notes: { type: String, trim: true },
 }, { timestamps: true });
 
@@ -58,6 +71,34 @@ paymentSchema.pre('save', function (next) {
     .filter(t => t.type === 'Fee')
     .reduce((s, t) => s + (t.amount || 0), 0);
   this.dueAmount  = Math.max(0, this.netFee - this.paidAmount);
+  let remainingPaid = this.paidAmount || 0;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const ordered = [...(this.installments || [])].sort((a, b) => {
+    const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);
+    return byDate || (a.installmentNumber || 0) - (b.installmentNumber || 0);
+  });
+  ordered.forEach(inst => {
+    const amount = Number(inst.amount || 0);
+    const applied = amount > 0 ? Math.min(amount, remainingPaid) : 0;
+    inst.paidAmount = applied;
+    if (amount > 0) remainingPaid = Math.max(0, remainingPaid - applied);
+    const dueDate = inst.paymentDate ? new Date(inst.paymentDate) : null;
+    if (dueDate) dueDate.setHours(0, 0, 0, 0);
+    if (amount > 0 && applied >= amount) {
+      inst.status = 'Paid';
+      if (!inst.paidAt) inst.paidAt = new Date();
+    } else if (amount > 0 && applied > 0) {
+      inst.status = 'Partially_Paid';
+      inst.paidAt = undefined;
+    } else if (dueDate && dueDate < today) {
+      inst.status = 'Overdue';
+      inst.paidAt = undefined;
+    } else {
+      inst.status = 'Pending';
+      inst.paidAt = undefined;
+    }
+  });
   next();
 });
 

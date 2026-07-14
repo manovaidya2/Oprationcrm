@@ -20,7 +20,7 @@ const chatC   = require('../controllers/chat.controller');
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
 const userCreateSchema= z.object({
   name: z.string().min(1), email: z.string().email(), password: z.string().min(6),
-  role: z.enum(['Admin','Counselor','Center','Accountant','University','Dispatch']),
+  role: z.enum(['Admin','Counselor','Center','Accountant','University','Dispatch','PaymentCoordinator']),
   centerId:     z.string().optional(),
   universityId: z.string().optional(),
   avatarColor:  z.string().optional(),
@@ -103,6 +103,8 @@ router.post('/students/:id/counselor-reforward',    protect, requireRole('Admin'
 router.post('/students/:id/counselor-send-to-center', protect, requireRole('Admin','Counselor'), studentC.counselorSendToCenter);
 
 // ── PAYMENTS ─────────────────────────────────────────────────
+router.get   ('/payment-installments',                          protect, requireRole('Admin','PaymentCoordinator'), payC.installmentTimeline);
+router.post  ('/payment-installments/:paymentId/installments/:installmentId/pay', protect, requireRole('Admin','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.markInstallmentPaid);
 router.get   ('/payments/:studentId',                          protect, payC.get);
 router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Counselor','Center'), payC.upsertFee);
 router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','Center','Accountant'), upload.single('paymentScreenshot'), payC.addTransaction);

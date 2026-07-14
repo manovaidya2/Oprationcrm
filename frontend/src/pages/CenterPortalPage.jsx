@@ -23,6 +23,74 @@ const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const MODES = ['UPI', 'Bank Transfer'];
 
+const blankInstallment = (n = 1) => ({ installmentNumber: n, paymentDate: '', amount: '', reasonOrRequirement: '' });
+
+function cleanInstallments(rows = []) {
+  return rows
+    .map(r => ({
+      installmentNumber: Number(r.installmentNumber || 0),
+      paymentDate: r.paymentDate || '',
+      amount: r.amount === '' || r.amount == null ? 0 : Number(r.amount),
+      reasonOrRequirement: r.reasonOrRequirement || '',
+    }))
+    .filter(r => r.installmentNumber > 0 && r.paymentDate);
+}
+
+function validateInstallments(rows = []) {
+  const activeRows = rows.filter(r => r.installmentNumber || r.paymentDate || r.amount || r.reasonOrRequirement);
+  for (const row of activeRows) {
+    if (!row.installmentNumber || Number(row.installmentNumber) <= 0) return 'Installment number required';
+    if (!row.paymentDate) return `Payment date required for installment #${row.installmentNumber}`;
+  }
+  return '';
+}
+
+function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
+  const update = (idx, key, value) => setRows(prev => prev.map((row, i) => i === idx ? { ...row, [key]: value } : row));
+  const add = () => setRows(prev => [...prev, blankInstallment((Number(prev.at(-1)?.installmentNumber) || prev.length || 0) + 1)]);
+  const remove = idx => setRows(prev => prev.length <= 1 ? [blankInstallment(1)] : prev.filter((_, i) => i !== idx));
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <Label className="text-xs font-semibold text-slate-600">Installment Timeline</Label>
+          <p className="text-xs text-slate-400">Installment number and payment date are mandatory.</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={add} className="border-slate-200">
+          <Plus className="h-3.5 w-3.5 mr-1" />Add
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {rows.map((row, idx) => (
+          <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <div className={compact ? 'grid gap-2 sm:grid-cols-4' : 'grid gap-2 sm:grid-cols-[110px_1fr_1fr_1.5fr_auto]'}>
+              <div>
+                <Label className="text-[11px] text-slate-500">No. *</Label>
+                <Input type="number" min="1" value={row.installmentNumber || ''} onChange={e => update(idx, 'installmentNumber', e.target.value)} className="mt-1 h-9 border-slate-200" />
+              </div>
+              <div>
+                <Label className="text-[11px] text-slate-500">Date *</Label>
+                <Input type="date" value={row.paymentDate || ''} onChange={e => update(idx, 'paymentDate', e.target.value)} className="mt-1 h-9 border-slate-200" />
+              </div>
+              <div>
+                <Label className="text-[11px] text-slate-500">Fees</Label>
+                <Input type="number" value={row.amount || ''} onChange={e => update(idx, 'amount', e.target.value)} placeholder="0" className="mt-1 h-9 border-slate-200" />
+              </div>
+              <div>
+                <Label className="text-[11px] text-slate-500">Reason / Requirement</Label>
+                <Input value={row.reasonOrRequirement || ''} onChange={e => update(idx, 'reasonOrRequirement', e.target.value)} placeholder="Call note, requirement..." className="mt-1 h-9 border-slate-200" />
+              </div>
+              <button type="button" onClick={() => remove(idx)} className="self-end rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-500" title="Remove installment">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Payment Form Fields Component ─────────────────────────────
 function PaymentFields({ form, setForm, showAmount = true, showDate = true, showScreenshot = 'required' }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -497,6 +565,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
   }, [centerId]);
 
   const [fee, setFee] = useState({ totalFee:'', discount:'', notes:'' });
+  const [feeInstallments, setFeeInstallments] = useState([blankInstallment(1)]);
   const setF = (k, v) => setFee(p => ({ ...p, [k]: v }));
 
   const [docList, setDocList] = useState(
@@ -521,12 +590,17 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
     if (!form.courseName.trim()) return toast.error('Course name required');
     if (!form.universityId)      return toast.error('Please select a university');
     if (!defCounselor)           return toast.error('No counselor assigned. Contact admin.');
+    if (fee.totalFee && Number(fee.totalFee) > 0) {
+      const err = validateInstallments(feeInstallments);
+      if (err) return toast.error(err);
+    }
     setSaving(true);
     try {
       const student = await studentsApi.create({ ...form, counselor: defCounselor });
       if (fee.totalFee && Number(fee.totalFee) > 0) {
         await paymentsApi.upsertFee(student._id, {
           totalFee: Number(fee.totalFee), discount: Number(fee.discount)||0, notes: fee.notes,
+          installments: cleanInstallments(feeInstallments),
         });
       }
       const checkedDocs = docList.filter(d => d.checked);
@@ -747,6 +821,10 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
               <Textarea rows={2} value={fee.notes} onChange={e => setF('notes',e.target.value)}
                 placeholder="Any payment terms, installment details, etc." className="mt-1 border-slate-200 text-sm resize-none"/>
             </div>
+
+            <div className="mt-4">
+              <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} />
+            </div>
           </FieldGroup>
 
           <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
@@ -870,6 +948,7 @@ function FeeSection({ studentId, appStatus, student }) {
   const [saving,setSaving]=useState(false);
   const [accMap,setAccMap]=useState({});
   const [ff,setFf]=useState({totalFee:'',discount:'',notes:''});
+  const [ffInstallments,setFfInstallments]=useState([blankInstallment(1)]);
   const EMPTY_TF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'', paymentScreenshot: null};
   const [tf,setTf]=useState({...EMPTY_TF});
 
@@ -889,8 +968,10 @@ function FeeSection({ studentId, appStatus, student }) {
 
   async function saveFee(){
     if(!ff.totalFee) return toast.error('Total fee required');
+    const err = validateInstallments(ffInstallments);
+    if(err) return toast.error(err);
     setSaving(true);
-    try{ await paymentsApi.upsertFee(studentId,{totalFee:Number(ff.totalFee),discount:Number(ff.discount)||0,notes:ff.notes}); toast.success('Fee saved'); setFeeOpen(false); load(); }
+    try{ await paymentsApi.upsertFee(studentId,{totalFee:Number(ff.totalFee),discount:Number(ff.discount)||0,notes:ff.notes,installments:cleanInstallments(ffInstallments)}); toast.success('Fee saved'); setFeeOpen(false); load(); }
     catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
 
@@ -1010,7 +1091,7 @@ function FeeSection({ studentId, appStatus, student }) {
             </div>
             <div className="flex flex-col items-center">
             <div className="flex items-center gap-2 flex-wrap justify-center">
-  {canSetFee && <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:data.totalFee,discount:data.discount,notes:data.notes||''});setFeeOpen(true);}} className="border-slate-200 text-slate-600">Edit Fee</Button>}
+  {canSetFee && <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:data.totalFee,discount:data.discount,notes:data.notes||''});setFfInstallments((data.installments||[]).length ? data.installments.map(i=>({installmentNumber:i.installmentNumber,paymentDate:i.paymentDate?String(i.paymentDate).split('T')[0]:'',amount:i.amount||'',reasonOrRequirement:i.reasonOrRequirement||''})) : [blankInstallment(1)]);setFeeOpen(true);}} className="border-slate-200 text-slate-600">Edit Fee</Button>}
   {canAddPayment && (
     <Button size="sm" onClick={()=>setTxOpen(true)} className="bg-indigo-600 hover:bg-indigo-700">
       <PlusCircle className="h-3.5 w-3.5 mr-1.5"/>Add Payment
@@ -1038,6 +1119,32 @@ function FeeSection({ studentId, appStatus, student }) {
   )}
   </div>
           </div>
+
+          {data?.installments?.length>0 && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <History className="h-3.5 w-3.5"/>Installment Timeline
+              </h4>
+              <div className="space-y-2">
+                {[...data.installments].sort((a,b)=>new Date(a.paymentDate||0)-new Date(b.paymentDate||0)).map(inst=>(
+                  <div key={inst._id || `${inst.installmentNumber}-${inst.paymentDate}`} className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm sm:grid-cols-[90px_1fr_1fr_1fr] sm:items-center">
+                    <div className="font-bold text-slate-700">#{inst.installmentNumber}</div>
+                    <div><span className="text-xs text-slate-400">Date</span><div className="font-semibold">{fmtDt(inst.paymentDate)}</div></div>
+                    <div><span className="text-xs text-slate-400">Fees</span><div className="font-semibold">{fmt(inst.amount)}</div></div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${
+                        inst.status==='Paid'?'bg-emerald-50 text-emerald-700 border-emerald-200':
+                        inst.status==='Overdue'?'bg-red-50 text-red-700 border-red-200':
+                        inst.status==='Partially_Paid'?'bg-amber-50 text-amber-700 border-amber-200':
+                        'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}>{String(inst.status||'Pending').replace(/_/g,' ')}</span>
+                      {inst.reasonOrRequirement&&<span className="text-xs text-slate-500">{inst.reasonOrRequirement}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {isCancelled && (
             <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-100 border border-slate-300 rounded-lg px-3 py-2">
@@ -1070,7 +1177,7 @@ function FeeSection({ studentId, appStatus, student }) {
           </div>
           <p className="text-sm font-medium text-slate-600 mb-1">No fee structure set up</p>
           <p className="text-xs text-slate-400 mb-4">Set up fees to track payments</p>
-          {canSetFee ? <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}} className="bg-indigo-600 hover:bg-indigo-700">Set Up Fees</Button>
+          {canSetFee ? <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFfInstallments([blankInstallment(1)]);setFeeOpen(true);}} className="bg-indigo-600 hover:bg-indigo-700">Set Up Fees</Button>
             : isCancelled
               ? <p className="text-xs text-slate-400">Application cancelled — fees cannot be modified.</p>
               : <p className="text-xs text-slate-400">Fee will be set during application submission.</p>}
@@ -1120,6 +1227,7 @@ function FeeSection({ studentId, appStatus, student }) {
             <div><Label className="text-xs font-semibold text-slate-600">Discount (₹)</Label><Input type="number" value={ff.discount} onChange={e=>setFf(p=>({...p,discount:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             {ff.totalFee&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-sm font-semibold text-emerald-700">Net: {fmt(Number(ff.totalFee)-Number(ff.discount||0))}</div>}
             <div><Label className="text-xs font-semibold text-slate-600">Notes</Label><Textarea rows={2} value={ff.notes} onChange={e=>setFf(p=>({...p,notes:e.target.value}))} className="mt-1 border-slate-200 resize-none"/></div>
+            <InstallmentTimelineEditor rows={ffInstallments} setRows={setFfInstallments} compact />
           </div>
           <DialogFooter><Button variant="outline" onClick={()=>setFeeOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={saveFee} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button></DialogFooter>
         </DialogContent>
@@ -1670,6 +1778,7 @@ function StudentDetail({ student, onBack, onRefresh }) {
   const [feeData,setFeeData] = useState(null);
   const [feeSaving,setFeeSaving] = useState(false);
   const [feeForm,setFeeForm] = useState({totalFee:'',discount:'',notes:''});
+  const [feeInstallments,setFeeInstallments] = useState([blankInstallment(1)]);
 
   const [editDocs,setEditDocs] = useState([]);
   const [customDoc,setCustomDoc] = useState('');
@@ -1702,6 +1811,7 @@ function StudentDetail({ student, onBack, onRefresh }) {
     });
     paymentsApi.get(s._id).then(p=>{
       if(p) setFeeForm({totalFee:p.totalFee||'',discount:p.discount||'',notes:p.notes||''});
+      setFeeInstallments((p?.installments||[]).length ? p.installments.map(i=>({installmentNumber:i.installmentNumber,paymentDate:i.paymentDate?String(i.paymentDate).split('T')[0]:'',amount:i.amount||'',reasonOrRequirement:i.reasonOrRequirement||''})) : [blankInstallment(1)]);
       setFeeData(p);
     }).catch(()=>{});
     const existing = s.submissionDocs||[];
@@ -1732,9 +1842,11 @@ function StudentDetail({ student, onBack, onRefresh }) {
 
   async function saveFee(){
     if(!feeForm.totalFee) return toast.error('Total fee required');
+    const err = validateInstallments(feeInstallments);
+    if(err) return toast.error(err);
     setFeeSaving(true);
     try{
-      await paymentsApi.upsertFee(s._id,{totalFee:Number(feeForm.totalFee),discount:Number(feeForm.discount)||0,notes:feeForm.notes});
+      await paymentsApi.upsertFee(s._id,{totalFee:Number(feeForm.totalFee),discount:Number(feeForm.discount)||0,notes:feeForm.notes,installments:cleanInstallments(feeInstallments)});
       toast.success('Fee updated');
     } catch(e){toast.error(e.message);} finally{setFeeSaving(false);}
   }
@@ -1767,6 +1879,14 @@ function StudentDetail({ student, onBack, onRefresh }) {
     }
     setSaving(true);
     try{
+      const payment = await paymentsApi.get(s._id);
+      if (!payment?.installments?.length) {
+        toast.error('Please add installment timeline in Fees tab before submitting');
+        setSubmitOpen(false);
+        setSaving(false);
+        startEdit('fee');
+        return;
+      }
       await studentsApi.submit(s._id, { universityId: uniId });
       setS(p=>({...p,applicationStatus:'Submitted'}));
       toast.success('Application submitted to counselor!');
@@ -2044,6 +2164,7 @@ function StudentDetail({ student, onBack, onRefresh }) {
                   </div>
                 )}
                 <div><Label className="text-xs font-semibold text-slate-600">Notes</Label><Textarea rows={2} value={feeForm.notes} onChange={e=>setFeeForm(p=>({...p,notes:e.target.value}))} placeholder="Payment terms, installments…" className="mt-1 border-slate-200 resize-none"/></div>
+                <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} compact />
                 <DialogFooter>
                   <Button variant="outline" onClick={()=>setEditOpen(false)} className="border-slate-200">Cancel</Button>
                   <Button onClick={saveFee} disabled={feeSaving} className="bg-indigo-600 hover:bg-indigo-700">{feeSaving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Fee</Button>

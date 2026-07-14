@@ -227,13 +227,28 @@ exports.submit = asyncHandler(async (req, res) => {
   }
 
   if (req.body.feeDetails && s.applicationStatus === 'Draft') {
-    const { totalFee, discount, notes } = req.body.feeDetails;
+    const { totalFee, discount, notes, installments } = req.body.feeDetails;
     let payment = await Payment.findOne({ student: s._id });
     if (!payment) payment = new Payment({ student: s._id, center: s.center });
-    if (!payment.totalFee || payment.totalFee === 0) {
-      payment.totalFee = Number(totalFee)||0; payment.discount = Number(discount)||0; payment.notes = notes||'';
-      await payment.save();
+    if (totalFee !== undefined) payment.totalFee = Number(totalFee) || 0;
+    if (discount !== undefined) payment.discount = Number(discount) || 0;
+    if (notes !== undefined) payment.notes = notes || '';
+    if (Array.isArray(installments)) {
+      payment.installments = installments
+        .map(row => ({
+          installmentNumber: Number(row.installmentNumber || 0),
+          paymentDate: row.paymentDate ? new Date(row.paymentDate) : null,
+          amount: Number(row.amount || 0) || 0,
+          reasonOrRequirement: String(row.reasonOrRequirement || '').trim(),
+        }))
+        .filter(row => row.installmentNumber > 0 && row.paymentDate && !Number.isNaN(row.paymentDate.getTime()));
     }
+    await payment.save();
+  }
+
+  const paymentForSubmit = await Payment.findOne({ student: s._id }).select('installments totalFee').lean();
+  if (!paymentForSubmit || !(paymentForSubmit.installments || []).length) {
+    const e = new Error('Please add installment timeline before submitting the application'); e.status = 400; throw e;
   }
 
   if (req.body.submissionDocs) {
@@ -279,6 +294,15 @@ exports.submit = asyncHandler(async (req, res) => {
     await notify(cu._id, {
       message: `New application: ${s.name} (${s.center?.name||''}) → ${s.university?.name||'University'} — needs review`,
       type: 'student_submitted', role: 'Counselor', studentId: s._id,
+    });
+  }
+  const paymentForCoordinator = await Payment.findOne({ student: s._id }).select('installments').lean();
+  if ((paymentForCoordinator?.installments || []).length > 0) {
+    await notifyRole('PaymentCoordinator', {
+      message: `Installment timeline received for ${s.name} (${s.center?.name || ''})`,
+      type: 'installment_timeline',
+      role: 'PaymentCoordinator',
+      studentId: s._id,
     });
   }
   await audit('application_submitted', 'Student', s._id, req.user, {}, `${s.name} application submitted`);

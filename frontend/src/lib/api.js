@@ -110,6 +110,8 @@ export const paymentsApi = {  get:            (sid)          => request(`/paymen
   addTransaction: (sid, data)    => request(`/payments/${sid}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
   updateTransaction:      (sid, txId, data) => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateTransactionForm:  (sid, txId, fd)   => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: fd }),  // FormData for file upload
+  installmentTimeline:    ()                => request('/payment-installments'),
+  markInstallmentPaid:    (paymentId, installmentId, fd) => uploadRequest(`/payment-installments/${paymentId}/installments/${installmentId}/pay`, 'POST', fd),
   resendTransaction: async (sid, txId, formData) => {
     const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
     const token = localStorage.getItem('crm_token');

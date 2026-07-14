@@ -4,6 +4,22 @@ const Student = require('../models/Student');
 const User    = require('../models/User');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
+function normalizeInstallments(input) {
+  if (!Array.isArray(input)) return undefined;
+  return input
+    .map(row => ({
+      installmentNumber: Number(row.installmentNumber || row.number || 0),
+      paymentDate: row.paymentDate ? new Date(row.paymentDate) : null,
+      amount: Number(row.amount || row.fee || 0) || 0,
+      reasonOrRequirement: String(row.reasonOrRequirement || row.reason || '').trim(),
+    }))
+    .filter(row => row.installmentNumber > 0 && row.paymentDate && !Number.isNaN(row.paymentDate.getTime()))
+    .sort((a, b) => {
+      const byDate = a.paymentDate - b.paymentDate;
+      return byDate || a.installmentNumber - b.installmentNumber;
+    });
+}
+
 exports.get = asyncHandler(async (req, res) => {
   const payment = await Payment.findOne({ student: req.params.studentId })
     .populate('transactions.recordedBy', 'name role')
@@ -38,10 +54,123 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   if (totalFee !== undefined) payment.totalFee = Number(totalFee) || 0;
   if (discount !== undefined) payment.discount  = Number(discount) || 0;
   if (notes    !== undefined) payment.notes     = notes;
+  const installments = normalizeInstallments(req.body.installments);
+  if (installments !== undefined) payment.installments = installments;
   await payment.save();
 
-  await audit('fee_updated', 'Payment', payment._id, req.user, { totalFee, discount }, `Fee updated`);
+  if (student.applicationStatus !== 'Draft' && installments !== undefined) {
+    await notifyRole('PaymentCoordinator', {
+      message: `Installment timeline updated for ${student.name}`,
+      type: 'installment_updated',
+      role: 'PaymentCoordinator',
+      studentId: student._id,
+    });
+  }
+
+  await audit('fee_updated', 'Payment', payment._id, req.user, { totalFee, discount, installments: installments?.length }, `Fee updated`);
   res.json(await Payment.findById(payment._id).populate('transactions.recordedBy', 'name role'));
+});
+
+exports.installmentTimeline = asyncHandler(async (req, res) => {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(now);
+  weekEnd.setDate(weekEnd.getDate() + 7);
+
+  const payments = await Payment.find({ 'installments.0': { $exists: true } })
+    .populate({
+      path: 'student',
+      select: 'name phone email courseName courseYear enrollmentNumber applicationStatus center counselor university',
+      populate: [
+        { path: 'center', select: 'name organisationName city' },
+        { path: 'counselor', select: 'name' },
+        { path: 'university', select: 'name shortName' },
+      ],
+    })
+    .populate('center', 'name organisationName city')
+    .lean();
+
+  const rows = [];
+  for (const payment of payments) {
+    if (!payment.student) continue;
+    for (const inst of payment.installments || []) {
+      const due = inst.paymentDate ? new Date(inst.paymentDate) : null;
+      if (!due || Number.isNaN(due.getTime())) continue;
+      due.setHours(0, 0, 0, 0);
+      const daysLeft = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+      rows.push({
+        paymentId: payment._id,
+        studentId: payment.student._id,
+        studentName: payment.student.name,
+        phone: payment.student.phone || '',
+        email: payment.student.email || '',
+        courseName: payment.student.courseName || '',
+        courseYear: payment.student.courseYear || '',
+        enrollmentNumber: payment.student.enrollmentNumber || '',
+        applicationStatus: payment.student.applicationStatus || '',
+        centerName: payment.student.center?.name || payment.student.center?.organisationName || payment.center?.name || '',
+        counselorName: payment.student.counselor?.name || '',
+        universityName: payment.student.university?.name || payment.student.university?.shortName || '',
+        totalFee: payment.totalFee || 0,
+        netFee: payment.netFee || 0,
+        paidAmount: payment.paidAmount || 0,
+        dueAmount: payment.dueAmount || 0,
+        transactions: (payment.transactions || []).filter(t => t.type === 'Fee'),
+        installment: inst,
+        paymentDate: inst.paymentDate,
+        daysLeft,
+        bucket: inst.status === 'Paid'
+          ? 'paid'
+          : daysLeft < 0
+            ? 'overdue'
+            : daysLeft <= 7
+              ? 'week'
+              : 'upcoming',
+      });
+    }
+  }
+
+  rows.sort((a, b) => {
+    const statusRank = { overdue: 0, week: 1, upcoming: 2, paid: 3 };
+    return (statusRank[a.bucket] - statusRank[b.bucket])
+      || (new Date(a.paymentDate) - new Date(b.paymentDate))
+      || String(a.studentName).localeCompare(String(b.studentName));
+  });
+  res.json(rows);
+});
+
+exports.markInstallmentPaid = asyncHandler(async (req, res) => {
+  const payment = await Payment.findById(req.params.paymentId);
+  if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  const inst = payment.installments.id(req.params.installmentId);
+  if (!inst) { const e = new Error('Installment not found'); e.status = 404; throw e; }
+
+  const amount = Number(req.body.amount || Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0)));
+  if (!amount || amount <= 0) { const e = new Error('Amount must be positive'); e.status = 400; throw e; }
+
+  payment.transactions.push({
+    amount,
+    mode: req.body.mode || 'UPI',
+    upiId: req.body.upiId || '',
+    utrRef: req.body.utrRef || '',
+    bankName: req.body.bankName || '',
+    accountHolder: req.body.accountHolder || '',
+    accountNumber: req.body.accountNumber || '',
+    ifscCode: req.body.ifscCode || '',
+    note: req.body.note || `Installment #${inst.installmentNumber} marked paid by payment coordinator`,
+    paidAt: req.body.paidAt ? new Date(req.body.paidAt) : new Date(),
+    recordedBy: req.user._id,
+    type: 'Fee',
+    verificationStatus: 'verified',
+    verifiedBy: req.user._id,
+    verifiedAt: new Date(),
+    paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
+  });
+  await payment.save();
+  await audit('installment_paid', 'Payment', payment._id, req.user, { installmentId: inst._id, amount }, `Installment payment recorded`);
+  res.json(await Payment.findById(payment._id)
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role'));
 });
 
 // POST /api/payments/:studentId/transactions - add payment

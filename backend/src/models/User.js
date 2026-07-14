@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema({
   createdPassword: { type: String, select: false },
   role: {
     type: String,
-    enum: ['Admin', 'Counselor', 'Center', 'Accountant', 'University', 'Dispatch'],
+    enum: ['Admin', 'Counselor', 'Center', 'Accountant', 'University', 'Dispatch', 'PaymentCoordinator'],
     required: true,
   },
   // Counselor link

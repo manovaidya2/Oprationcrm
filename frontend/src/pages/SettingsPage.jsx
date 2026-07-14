@@ -15,9 +15,20 @@ const ROLE_COLORS = {
   Admin:'bg-red-100 text-red-700', Counselor:'bg-indigo-100 text-indigo-700',
   Center:'bg-sky-100 text-sky-700', Accountant:'bg-amber-100 text-amber-700',
   University:'bg-purple-100 text-purple-700', Dispatch:'bg-teal-100 text-teal-700',
+  PaymentCoordinator:'bg-cyan-100 text-cyan-700',
 };
 
-const ALL_ROLES = ['Admin','Counselor','Center','Accountant','University','Dispatch'];
+const ROLE_OPTIONS = [
+  { value: 'Admin', label: 'Admin' },
+  { value: 'Counselor', label: 'Counselor' },
+  { value: 'Center', label: 'Center' },
+  { value: 'Accountant', label: 'Accountant' },
+  { value: 'PaymentCoordinator', label: 'Payment Coordinator' },
+  { value: 'University', label: 'University' },
+  { value: 'Dispatch', label: 'Dispatch' },
+];
+const ALL_ROLES = ROLE_OPTIONS.map(r => r.value);
+const roleLabel = role => ROLE_OPTIONS.find(r => r.value === role)?.label || role;
 
 export default function SettingsPage() {
   const { user: me } = useAuth();
@@ -156,7 +167,7 @@ export default function SettingsPage() {
           <Card key={role}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[role]}`}>{role}</span>
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_COLORS[role]}`}>{roleLabel(role)}</span>
                 <span className="text-muted-foreground font-normal">({roleUsers.length})</span>
               </CardTitle>
             </CardHeader>
@@ -304,7 +315,7 @@ export default function SettingsPage() {
               <Label>Role *</Label>
               <Select value={form.role} onValueChange={v=>setForm(p=>({...p,role:v,centerId:'',universityId:''}))}>
                 <SelectTrigger><SelectValue placeholder="Select role…"/></SelectTrigger>
-                <SelectContent>{ALL_ROLES.map(r=><SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+                <SelectContent>{ROLE_OPTIONS.map(r=><SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             {form.role === 'Center' && (

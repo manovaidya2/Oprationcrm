@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
+  CalendarClock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -50,6 +51,10 @@ const NAV_CONFIG = {
     { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
+  PaymentCoordinator: [
+    { to: '/payment-coordinator', label: 'Installments', icon: CalendarClock },
+    { to: '/chat', label: 'Team Chat', icon: MessageSquare },
+  ],
 };
 
 const ROLE_COLORS = {
@@ -59,6 +64,7 @@ const ROLE_COLORS = {
   Accountant: 'bg-amber-500',
   University: 'bg-purple-500',
   Dispatch:   'bg-teal-500',
+  PaymentCoordinator: 'bg-cyan-500',
 };
 
 export function AppLayout() {

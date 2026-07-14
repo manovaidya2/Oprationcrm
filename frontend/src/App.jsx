@@ -21,6 +21,7 @@ const SettingsPage              = lazy(() => import('@/pages/SettingsPage'));
 const RejectedPaymentsPage      = lazy(() => import('@/pages/RejectedPaymentsPage'));
 const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
 const ChatPage             = lazy(() => import('@/pages/ChatPage'));
+const PaymentCoordinatorPage = lazy(() => import('@/pages/PaymentCoordinatorPage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -38,6 +39,7 @@ const ROLE_HOME = {
   Accountant: '/accountant',
   University: '/university',
   Dispatch:   '/dispatch',
+  PaymentCoordinator: '/payment-coordinator',
 };
 
 // Routes each role can access
@@ -46,6 +48,7 @@ const ROLE_ALLOWED = {
   Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students/', '/document-inventory', '/chat'],
+  PaymentCoordinator: ['/payment-coordinator', '/students/', '/chat'],
   Counselor:  ['/counselor', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
 };
 
@@ -93,6 +96,7 @@ export default function App() {
           <Route path="centers"             element={<W><CentersPage /></W>} />
           <Route path="settings"            element={<W><SettingsPage /></W>} />
           <Route path="chat"                element={<W><ChatPage /></W>} />
+          <Route path="payment-coordinator" element={<W><PaymentCoordinatorPage /></W>} />
           <Route path="help"                element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />
