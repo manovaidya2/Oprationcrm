@@ -21,13 +21,61 @@ function pushHistory(doc, status, user, note = '') {
   doc.status = status;
 }
 
+const INVENTORY_DOC_NAMES = [
+  'Marksheet – Semester 1',
+  'Marksheet – Semester 2',
+  'Marksheet – Semester 3',
+  'Marksheet – Semester 4',
+  'Marksheet – Semester 5',
+  'Marksheet – Semester 6',
+  'Marksheet – Semester 7',
+  'Marksheet – Semester 8',
+  'Marksheet – Semester 9',
+  'Marksheet – Semester 10',
+  'Consolidated Marksheet',
+  'Final Marksheet',
+  'Degree Certificate',
+  'Provisional Certificate',
+  'Migration Certificate',
+  'Simple Transcript',
+  'WES Transcript',
+  'Bonafide Certificate',
+  'Course Completion Certificate',
+  'Medium of Instruction Certificate',
+  'Enrollment Certificate',
+  'Registration Certificate',
+  'Transfer Certificate',
+  'Character Certificate',
+  'Duplicate Marksheet',
+  'Duplicate Degree',
+  'Other Certificate – Custom',
+  'Entrance Exam Result',
+  'Admission Offer Letter',
+  'Admission Confirmation Letter',
+  'Guide Allotment Letter',
+  'Course Work Completion Certificate',
+  'Coursework Marksheet',
+  'RDC/DRC Letter',
+  'Synopsis Approval Letter',
+  'Progress Report Acknowledgement',
+  'Pre-Thesis Letter',
+  'Thesis Approval Letter',
+  'Plagiarism Certificate',
+  'Viva Examination Notification',
+  'Viva Voce Letter',
+  'Provisional & Migration Certificate',
+  'PhD Notification',
+];
+
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
-  const filter = {};
+  const filter = { origin: { $ne: 'Inventory' } };
   if (req.query.studentId) filter.student = req.query.studentId;
 
   const { role, centerId, counselorId, universityId } = req.user;
-  if (role === 'Center')     filter.center    = centerId;
+  if (role === 'Center') {
+    filter.center = centerId;
+  }
   if (role === 'Counselor')  {
     filter.counselor = counselorId;
     if (!req.query.studentId && !req.query.all) {
@@ -91,6 +139,7 @@ exports.create = asyncHandler(async (req, res) => {
     student: studentId, center: student.center, counselor: student.counselor,
     university: student.university,
     name: name.trim(), type: type||'', note: note||'',
+    origin: 'Request',
     chargeFee: Number(chargeFee)||0,
     uploadedBy: req.user._id, status: 'Requested',
     statusHistory: [{ status: 'Requested', changedBy: req.user._id, at: new Date() }],
@@ -132,6 +181,9 @@ exports.create = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const doc = await StudentDoc.findById(req.params.id);
   if (!doc) { const e = new Error('Not found'); e.status = 404; throw e; }
+  if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   if (req.body.name)      doc.name      = req.body.name;
   if (req.body.type)      doc.type      = req.body.type;
   if (req.body.note)      doc.note      = req.body.note;
@@ -562,7 +614,25 @@ exports.inventoryList = asyncHandler(async (req, res) => {
 
   res.json(students.map(student => ({
     student,
-    docs: docsByStudent[String(student._id)] || [],
+    docs: (() => {
+      const studentDocs = docsByStudent[String(student._id)] || [];
+      const inventoryDocs = studentDocs.filter(d => d.origin === 'Inventory');
+      const byName = {};
+      inventoryDocs.forEach(d => { byName[d.name.toLowerCase()] = d; });
+      const catalogDocs = INVENTORY_DOC_NAMES.map((name, idx) => (
+        byName[name.toLowerCase()] || {
+          _id: `catalog-${student._id}-${idx}`,
+          catalog: true,
+          studentId: student._id,
+          name,
+          status: 'Not_Requested',
+          origin: 'Inventory',
+        }
+      ));
+      const extraDocs = inventoryDocs.filter(d => !INVENTORY_DOC_NAMES.some(name => name.toLowerCase() === d.name.toLowerCase()));
+      return [...catalogDocs, ...extraDocs];
+    })(),
+    requestedDocs: (docsByStudent[String(student._id)] || []).filter(d => d.origin !== 'Inventory'),
   })));
 });
 
@@ -577,7 +647,7 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
 
   const created = [];
   for (const docName of docNames) {
-    let doc = await StudentDoc.findOne({ student: student._id, name: new RegExp(`^${docName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
+    let doc = await StudentDoc.findOne({ student: student._id, origin: 'Inventory', name: new RegExp(`^${docName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
     if (!doc) {
       doc = new StudentDoc({
         student: student._id,
@@ -585,6 +655,7 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
         counselor: student.counselor,
         university: student.university,
         name: docName,
+        origin: 'Inventory',
         uploadedBy: req.user._id,
         status: received ? 'Dispatch_Received' : 'Sent_To_University',
         statusHistory: [{

@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -262,9 +263,13 @@ export default function StudentDetailPage() {
   const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
 
   const [docOpen, setDocOpen] = useState(false);
-  const [docForm, setDocForm] = useState({ name:'', type:'', chargeFee:'', note:'' });
+  const [docForm, setDocForm] = useState({ name:'', chargeFee:'', note:'' });
   const [docFile, setDocFile] = useState(null);
+  const [editDoc, setEditDoc] = useState(null);
+  const [editDocForm, setEditDocForm] = useState({ name:'', chargeFee:'', note:'' });
+  const [editDocFile, setEditDocFile] = useState(null);
   const fileRef = useRef();
+  const editDocFileRef = useRef();
 
   const [fwdDoc, setFwdDoc] = useState(null);
 
@@ -331,12 +336,12 @@ export default function StudentDetailPage() {
     try {
       const fd = new FormData();
       fd.append('studentId', id); fd.append('name', docForm.name);
-      fd.append('type', docForm.type); fd.append('note', docForm.note);
+      fd.append('note', docForm.note);
       fd.append('chargeFee', docForm.chargeFee||0);
       if (docFile) fd.append('file', docFile);
       await docsApi.create(fd);
       toast.success('Document added'); setDocOpen(false);
-      setDocForm({name:'',type:'',chargeFee:'',note:''}); setDocFile(null);
+      setDocForm({name:'',chargeFee:'',note:''}); setDocFile(null);
       if (fileRef.current) fileRef.current.value='';
       load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
@@ -347,12 +352,33 @@ export default function StudentDetailPage() {
     catch(e) { toast.error(e.message); }
   }
 
+  async function saveDocEdit() {
+    if (!editDoc) return;
+    if (!editDocForm.name.trim()) return toast.error('Document name required');
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append('name', editDocForm.name);
+      fd.append('note', editDocForm.note || '');
+      fd.append('chargeFee', editDocForm.chargeFee || 0);
+      if (editDocFile) fd.append('file', editDocFile);
+      await docsApi.update(editDoc._id, fd);
+      toast.success('Document updated');
+      setEditDoc(null);
+      setEditDocForm({ name:'', chargeFee:'', note:'' });
+      setEditDocFile(null);
+      if (editDocFileRef.current) editDocFileRef.current.value = '';
+      load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
   if (!student) return <div className="text-center py-16 text-muted-foreground">Student not found</div>;
 
   const canEdit = !student.coreLocked || user?.role === 'Admin';
   const isCounselor = user?.role === 'Counselor';
   const isAdmin = user?.role === 'Admin';
+  const canManageDocs = isCounselor || isAdmin;
   const st = STATUS_COLORS[student.applicationStatus] || 'bg-gray-100 text-gray-700';
 
   const allPayments = [];
@@ -573,7 +599,7 @@ export default function StudentDetailPage() {
         <TabsContent value="docs" className="mt-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">{docs.length} document{docs.length!==1?'s':''}</p>
-            {(isCounselor||isAdmin) && student.applicationStatus==='Enrolled' && (
+            {canManageDocs && student.applicationStatus==='Enrolled' && (
               <Button size="sm" onClick={()=>setDocOpen(true)}><Plus className="h-4 w-4 mr-1"/>Request Document</Button>
             )}
           </div>
@@ -586,7 +612,6 @@ export default function StudentDetailPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">{d.name}</span>
-                      {d.type && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{d.type}</span>}
                       <span className={`text-xs px-2 py-0.5 rounded-full ${DOC_STATUS_COLORS[d.status]||'bg-gray-100 text-gray-700'}`}>{d.status?.replace(/_/g,' ')}</span>
                     </div>
                     {d.note && <p className="text-xs text-muted-foreground mt-0.5">{d.note}</p>}
@@ -618,10 +643,22 @@ export default function StudentDetailPage() {
                       </div>
                     )}
                   </div>
-                  {(isCounselor||isAdmin) && d.status==='Requested' && (
-                    <Button size="sm" variant="outline" onClick={()=>forwardDoc(d._id)}>
-                      <Send className="h-3.5 w-3.5 mr-1"/>Forward
-                    </Button>
+                  {canManageDocs && (
+                    <div className="flex flex-col gap-2">
+                      <Button size="sm" variant="outline" onClick={() => {
+                        setEditDoc(d);
+                        setEditDocForm({ name: d.name || '', chargeFee: d.chargeFee || '', note: d.note || '' });
+                        setEditDocFile(null);
+                        if (editDocFileRef.current) editDocFileRef.current.value = '';
+                      }}>
+                        <Edit2 className="h-3.5 w-3.5 mr-1"/>Edit
+                      </Button>
+                      {d.status==='Requested' && (
+                        <Button size="sm" variant="outline" onClick={()=>forwardDoc(d._id)}>
+                          <Send className="h-3.5 w-3.5 mr-1"/>Forward
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
               </CardContent>
@@ -896,14 +933,16 @@ export default function StudentDetailPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Request Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label>Document Name *</Label><Input value={docForm.name} onChange={e=>setDocForm(p=>({...p,name:e.target.value}))} placeholder="e.g. Migration Certificate Sem1"/></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Type</Label>
-                <Select value={docForm.type} onValueChange={v=>setDocForm(p=>({...p,type:v}))}>
-                  <SelectTrigger><SelectValue placeholder="Select…"/></SelectTrigger>
-                  <SelectContent>{['Identity','Academic','Medical','Financial','Other'].map(t=><SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label>Document Name *</Label>
+              <Select value={docForm.name} onValueChange={v=>setDocForm(p=>({...p,name:v}))}>
+                <SelectTrigger><SelectValue placeholder="Choose document"/></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
               <div><Label>Charge (₹)</Label><Input type="number" value={docForm.chargeFee} onChange={e=>setDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
             </div>
             <div><Label>Note</Label><Input value={docForm.note} onChange={e=>setDocForm(p=>({...p,note:e.target.value}))}/></div>
@@ -912,6 +951,37 @@ export default function StudentDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={()=>setDocOpen(false)}>Cancel</Button>
             <Button onClick={addDoc} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Request</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editDoc} onOpenChange={() => {
+        setEditDoc(null);
+        setEditDocFile(null);
+        if (editDocFileRef.current) editDocFileRef.current.value = '';
+      }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Document Request</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Document Name *</Label>
+              <Select value={editDocForm.name} onValueChange={v=>setEditDocForm(p=>({...p,name:v}))}>
+                <SelectTrigger><SelectValue placeholder="Choose document"/></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label>Charge (₹)</Label><Input type="number" value={editDocForm.chargeFee} onChange={e=>setEditDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
+            <div><Label>Note</Label><Input value={editDocForm.note} onChange={e=>setEditDocForm(p=>({...p,note:e.target.value}))}/></div>
+            <div>
+              <Label>Replace File</Label>
+              <input ref={editDocFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setEditDocFile(e.target.files[0] || null)} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-muted"/>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setEditDoc(null)}>Cancel</Button>
+            <Button onClick={saveDocEdit} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

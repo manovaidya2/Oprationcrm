@@ -48,6 +48,7 @@ const studentDocSchema = new mongoose.Schema({
   name:      { type: String, required: true, trim: true },  // e.g. "Migration Certificate Sem1"
   type:      { type: String, trim: true },                  // Identity, Academic, Other
   note:      { type: String, trim: true },
+  origin:    { type: String, enum: ['Request', 'Inventory'], default: 'Request' },
 
   // Uploaded file
   fileUrl:   { type: String },

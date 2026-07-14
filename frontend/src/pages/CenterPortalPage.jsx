@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi, authApi } from '@/lib/api';
+import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -1182,7 +1183,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
   const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
-  const [df,setDf]=useState({name:'',type:'',chargeFee:'',note:'',payAmount:''});
+  const [df,setDf]=useState({name:'',chargeFee:'',note:'',payAmount:''});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
 
@@ -1204,7 +1205,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
     try{
       const fd=new FormData();
       fd.append('studentId',studentId); fd.append('name',df.name);
-      fd.append('type',df.type); fd.append('note',df.note);
+      fd.append('note',df.note);
       fd.append('chargeFee',df.chargeFee||0);
       if(df.payAmount&&Number(df.payAmount)>0){
         fd.append('paymentAmount',df.payAmount);
@@ -1222,7 +1223,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       if(docFile) fd.append('file',docFile);
       await docsApi.create(fd);
       toast.success('Document request submitted'); setAddOpen(false);
-      setDf({name:'',type:'',chargeFee:'',note:'',payAmount:''}); setDfPay({...EMPTY_PF});
+      setDf({name:'',chargeFee:'',note:'',payAmount:''}); setDfPay({...EMPTY_PF});
       setDocFile(null); if(fileRef.current) fileRef.current.value='';
       load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1345,7 +1346,6 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap mb-1">
                 <span className="font-semibold text-sm text-slate-800">{d.name}</span>
-                {d.type&&<span className="text-xs bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-md font-medium">{d.type}</span>}
                 {d.chargeFee > 0 && d.totalPaid >= d.chargeFee
                   ? <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">✓ Paid</span>
                   : d.status === 'Center_Notified' && d.chargeFee > 0
@@ -1502,9 +1502,16 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="text-slate-800">Request Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div><Label className="text-xs font-semibold text-slate-600">Document Name *</Label><Input value={df.name} onChange={e=>setDf(p=>({...p,name:e.target.value}))} placeholder="e.g. Migration Certificate Sem1" className="mt-1 border-slate-200 h-10"/></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs font-semibold text-slate-600">Type</Label><Select value={df.type} onValueChange={v=>setDf(p=>({...p,type:v}))}><SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Select…"/></SelectTrigger><SelectContent>{['Identity','Academic','Medical','Financial','Other'].map(t=><SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600">Document Name *</Label>
+              <Select value={df.name} onValueChange={v=>setDf(p=>({...p,name:v}))}>
+                <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose document"/></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
               <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             </div>
             {/* <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={df.note} onChange={e=>setDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div> */}
