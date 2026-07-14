@@ -43,13 +43,17 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const updateUser = useCallback((nextUser) => {
+    setUser(nextUser);
+  }, []);
+
   if (loading) return (
     <div className="flex h-screen items-center justify-center">
       <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
     </div>
   );
 
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, login, logout, updateUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

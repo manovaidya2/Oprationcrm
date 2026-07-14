@@ -11,6 +11,7 @@ function sanitize(u) {
     counselorId: u.counselorId, centerId: u.centerId,
     universityId: u.universityId,
     avatarColor: u.avatarColor,
+    avatarSeed: u.avatarSeed,
   };
 }
 
@@ -138,6 +139,21 @@ exports.changeOwnPassword = asyncHandler(async (req, res) => {
   if (user.role === 'Center') user.createdPassword = newPassword;
   await user.save();
   res.json({ ok: true, message: 'Password changed successfully' });
+});
+
+exports.updateAvatar = asyncHandler(async (req, res) => {
+  const { avatarSeed } = req.body;
+  if (req.user.role === 'Center') {
+    const e = new Error('Center users cannot change avatars'); e.status = 403; throw e;
+  }
+  if (!avatarSeed || !/^[a-z0-9-]{2,40}$/i.test(avatarSeed)) {
+    const e = new Error('Invalid avatar selected'); e.status = 400; throw e;
+  }
+  const user = await User.findById(req.user._id || req.user.id);
+  if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
+  user.avatarSeed = avatarSeed;
+  await user.save();
+  res.json({ user: sanitize(user) });
 });
 
 // PATCH /api/auth/users/:id/toggle  — Admin only — activate/deactivate

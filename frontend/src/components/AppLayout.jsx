@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
-  Package, Truck, BookOpen, University, XCircle,
+  Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ const NAV_CONFIG = {
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/chat',         label: 'Team Chat',    icon: MessageSquare },
     { to: '/universities', label: 'Universities', icon: University },
     { to: '/activity',          label: 'Activity Log',      icon: Activity },
     { to: '/rejected-payments', label: 'Rejected Payments', icon: XCircle },
@@ -28,22 +29,26 @@ const NAV_CONFIG = {
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
-    { to: '/settings',  label: 'Settings',     icon: Settings },
+    { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
   ],
   Center: [
     { to: '/center', label: 'My Students', icon: GraduationCap },
+    { to: '/help',   label: 'Help',        icon: LifeBuoy },
   ],
   Accountant: [
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/chat',       label: 'Team Chat',        icon: MessageSquare },
   ],
   University: [
     { to: '/university', label: 'Student Records', icon: BookOpen },
+    { to: '/chat',       label: 'Team Chat',       icon: MessageSquare },
   ],
   Dispatch: [
     { to: '/dispatch', label: 'Documents', icon: Package },
     { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
+    { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
 };
 
@@ -64,7 +69,10 @@ export function AppLayout() {
   const [notifs, setNotifs] = useState([]);
   const [showNotifs, setShowNotifs] = useState(false);
 
-  const navItems = NAV_CONFIG[user?.role] || [];
+  const baseNavItems = NAV_CONFIG[user?.role] || [];
+  const navItems = user?.role && user.role !== 'Center' && !baseNavItems.some(item => item.to === '/chat')
+    ? [...baseNavItems, { to: '/chat', label: 'Team Chat', icon: MessageSquare }]
+    : baseNavItems;
   const unread = notifs.filter(n => !n.read).length;
 
   useEffect(() => {

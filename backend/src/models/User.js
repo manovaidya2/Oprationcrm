@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema({
   // University link — set when role=University
   universityId: { type: mongoose.Schema.Types.ObjectId, ref: 'University' },
   avatarColor: { type: String, default: '#6366f1' },
+  avatarSeed:  { type: String, trim: true, default: '' },
   isActive:    { type: Boolean, default: true },
   createdBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });

@@ -14,6 +14,7 @@ const docC    = require('../controllers/document.controller');
 const misc    = require('../controllers/misc.controller');
 const uniC    = require('../controllers/university.controller');
 const payAccC = require('../controllers/paymentaccount.controller');
+const chatC   = require('../controllers/chat.controller');
 
 // ── Validation schemas ───────────────────────────────────────
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
@@ -27,6 +28,7 @@ const userCreateSchema= z.object({
 });
 const pwdSchema           = z.object({ password: z.string().min(6) });
 const changePwdSchema     = z.object({ currentPassword: z.string().min(1), newPassword: z.string().min(6) });
+const avatarSchema        = z.object({ avatarSeed: z.string().min(2).max(40) });
 
 // ── AUTH ─────────────────────────────────────────────────────
 router.post('/auth/login',               val(loginSchema), authC.login);
@@ -35,8 +37,18 @@ router.get ('/auth/users',               protect, requireRole('Admin','Counselor
 router.post('/auth/users',               protect, requireRole('Admin','Counselor'), val(userCreateSchema), authC.createUser);
 router.patch('/auth/users/:id/password', protect, requireRole('Admin','Counselor'), val(pwdSchema), authC.resetPassword);
 router.patch('/auth/me/password',        protect, val(changePwdSchema), authC.changeOwnPassword);
+router.patch('/auth/me/avatar',          protect, val(avatarSchema), authC.updateAvatar);
 router.patch('/auth/users/:id/toggle',   protect, requireRole('Admin'), authC.toggleUser);
 router.delete('/auth/users/:id',         protect, requireRole('Admin'), authC.deleteUser);
+// CHAT + HELP TICKETS
+router.get   ('/chat/users',                         protect, chatC.users);
+router.get   ('/chat/conversations',                 protect, chatC.list);
+router.post  ('/chat/conversations',                 protect, chatC.createInternal);
+router.delete('/chat/conversations/:id',             protect, chatC.removeInternal);
+router.post  ('/chat/tickets',                       protect, requireRole('Center'), chatC.createTicket);
+router.get   ('/chat/conversations/:id/messages',    protect, chatC.messages);
+router.post  ('/chat/conversations/:id/messages',    protect, chatC.sendMessage);
+router.patch ('/chat/tickets/:id/status',            protect, chatC.updateTicketStatus);
 
 // ── UNIVERSITIES ──────────────────────────────────────────────
 router.get   ('/universities',          protect, uniC.list);

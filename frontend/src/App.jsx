@@ -20,6 +20,7 @@ const CentersPage          = lazy(() => import('@/pages/CentersPage'));
 const SettingsPage              = lazy(() => import('@/pages/SettingsPage'));
 const RejectedPaymentsPage      = lazy(() => import('@/pages/RejectedPaymentsPage'));
 const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
+const ChatPage             = lazy(() => import('@/pages/ChatPage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -41,11 +42,11 @@ const ROLE_HOME = {
 
 // Routes each role can access
 const ROLE_ALLOWED = {
-  Center:     ['/center', '/students/'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory'],
-  University: ['/university', '/students/'],
-  Dispatch:   ['/dispatch', '/students/', '/document-inventory'],
-  Counselor:  ['/counselor', '/students', '/centers', '/settings', '/dashboard', '/document-inventory'],
+  Center:     ['/center', '/students/', '/help'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/chat'],
+  University: ['/university', '/students/', '/chat'],
+  Dispatch:   ['/dispatch', '/students/', '/document-inventory', '/chat'],
+  Counselor:  ['/counselor', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
 };
 
 function ProtectedRoute({ children }) {
@@ -91,6 +92,8 @@ export default function App() {
           <Route path="students"            element={<W><StudentsPage /></W>} />
           <Route path="centers"             element={<W><CentersPage /></W>} />
           <Route path="settings"            element={<W><SettingsPage /></W>} />
+          <Route path="chat"                element={<W><ChatPage /></W>} />
+          <Route path="help"                element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />
           <Route path="*"                   element={<W><NotFoundPage /></W>} />

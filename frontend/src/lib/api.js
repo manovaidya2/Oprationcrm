@@ -39,6 +39,7 @@ export const authApi = {
   createUser:     (data)     => request('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
   resetPassword:  (id, pwd)  => request(`/auth/users/${id}/password`, { method: 'PATCH', body: JSON.stringify({ password: pwd }) }),
   changeOwnPassword: (currentPassword, newPassword) => request(`/auth/me/password`, { method: 'PATCH', body: JSON.stringify({ currentPassword, newPassword }) }),
+  updateAvatar:   (avatarSeed) => request('/auth/me/avatar', { method: 'PATCH', body: JSON.stringify({ avatarSeed }) }),
   toggleUser:     (id)       => request(`/auth/users/${id}/toggle`, { method: 'PATCH' }),
   deleteUser:     (id)       => request(`/auth/users/${id}`, { method: 'DELETE' }),
 };
@@ -153,6 +154,17 @@ export const documentInventoryApi = {
   addDocs:     (studentId, data) => request(`/document-inventory/${studentId}/docs`, { method: 'POST', body: JSON.stringify(data) }),
   markReceived:(docId, data={})  => request(`/document-inventory/docs/${docId}/receive`, { method: 'PATCH', body: JSON.stringify(data) }),
   requestDoc:  (docId)           => request(`/document-inventory/docs/${docId}/request`, { method: 'PATCH' }),
+};
+
+export const chatApi = {
+  users:         ()             => request('/chat/users'),
+  conversations: (params = {}) => request(`/chat/conversations?${new URLSearchParams(params)}`),
+  createChat:    (data)        => request('/chat/conversations', { method: 'POST', body: JSON.stringify(data) }),
+  deleteChat:    (id)          => request(`/chat/conversations/${id}`, { method: 'DELETE' }),
+  createTicket:  (data)        => request('/chat/tickets', { method: 'POST', body: JSON.stringify(data) }),
+  messages:      (id)          => request(`/chat/conversations/${id}/messages`),
+  sendMessage:   (id, body)    => request(`/chat/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ body }) }),
+  updateTicket:  (id, status)  => request(`/chat/tickets/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 };
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────
