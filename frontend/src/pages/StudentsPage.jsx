@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2 } from 'lucide-react';
+import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -68,6 +68,12 @@ export default function StudentsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferStudent, setTransferStudent] = useState(null);
+  const [transferCenterId, setTransferCenterId] = useState('');
+  const [transferCenterSearch, setTransferCenterSearch] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [transferLoading, setTransferLoading] = useState(false);
 
   async function handleDelete() {
     if (!deleteStudent) return;
@@ -80,6 +86,39 @@ export default function StudentsPage() {
       load();
     } catch(e) { toast.error(e.message); }
     finally { setDeleteLoading(false); }
+  }
+
+  const transferTargetCenter = centers.find(c => c._id === transferCenterId);
+
+  function openTransfer(student) {
+    setTransferStudent(student);
+    setTransferCenterId('');
+    setTransferCenterSearch('');
+    setTransferNote('');
+    setTransferOpen(true);
+  }
+
+  async function handleTransfer() {
+    if (!transferStudent) return;
+    if (!transferCenterId) return toast.error('Target center required');
+    if (String(transferStudent.center?._id || transferStudent.center) === String(transferCenterId)) {
+      return toast.error('Student is already in this center');
+    }
+    if (!transferTargetCenter?.assignedCounselor?._id && !transferTargetCenter?.assignedCounselor) {
+      return toast.error('Selected center has no assigned counselor');
+    }
+    setTransferLoading(true);
+    try {
+      await studentsApi.transferCenter(transferStudent._id, transferCenterId, transferNote);
+      toast.success(`${transferStudent.name} transferred to ${transferTargetCenter?.name || 'selected center'}`);
+      setTransferOpen(false);
+      setTransferStudent(null);
+      setTransferCenterId('');
+      setTransferCenterSearch('');
+      setTransferNote('');
+      load();
+    } catch(e) { toast.error(e.message); }
+    finally { setTransferLoading(false); }
   }
 
   const load = useCallback(async () => {
@@ -369,13 +408,22 @@ export default function StudentsPage() {
                       : <Square className="h-4 w-4"/>}
                   </button>
                   {isAdmin && (
-                    <button
-                      onClick={e => { e.stopPropagation(); setDeleteStudent(s); setDeleteOpen(true); }}
-                      className="flex-shrink-0 text-slate-300 hover:text-red-500 transition-colors p-1"
-                      title="Delete student"
-                    >
-                      <Trash2 className="h-4 w-4"/>
-                    </button>
+                    <>
+                      <button
+                        onClick={e => { e.stopPropagation(); openTransfer(s); }}
+                        className="flex-shrink-0 text-slate-300 hover:text-indigo-600 transition-colors p-1"
+                        title="Transfer student to another center"
+                      >
+                        <ArrowRightLeft className="h-4 w-4"/>
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); setDeleteStudent(s); setDeleteOpen(true); }}
+                        className="flex-shrink-0 text-slate-300 hover:text-red-500 transition-colors p-1"
+                        title="Delete student"
+                      >
+                        <Trash2 className="h-4 w-4"/>
+                      </button>
+                    </>
                   )}
                   <div className="flex-1 min-w-0 flex items-center justify-between gap-3"
                     onClick={() => navigate(`/students/${s._id}`)}>
@@ -386,6 +434,11 @@ export default function StudentsPage() {
                           {STATUS_LABELS[s.applicationStatus] || s.applicationStatus}
                         </span>
                         {s.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{s.enrollmentNumber}</span>}
+                        {s.enrollmentNumberChecked && (
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 className="h-3 w-3"/>Enrollment Checked
+                          </span>
+                        )}
                       </div>
                       <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
                         {s.center?.name    && <span>{s.center.name}</span>}
@@ -459,6 +512,87 @@ export default function StudentsPage() {
             <Button variant="outline" onClick={() => setCsvOpen(false)}>Cancel</Button>
             <Button onClick={doExportCSV} disabled={csvLoading} className="bg-indigo-600 hover:bg-indigo-700">
               {csvLoading ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin"/>Preparing…</> : <><Download className="h-4 w-4 mr-1.5"/>Download CSV</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Student Dialog */}
+      <Dialog open={transferOpen} onOpenChange={v => { setTransferOpen(v); if (!v) { setTransferStudent(null); setTransferCenterId(''); setTransferNote(''); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4"/>Transfer Student Center
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="font-semibold text-slate-800">{transferStudent?.name}</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Current: <span className="font-medium text-slate-700">{transferStudent?.center?.name || 'No center'}</span>
+                {transferStudent?.counselor?.name && <span> · {transferStudent.counselor.name}</span>}
+              </div>
+              {transferStudent?.enrollmentNumber && (
+                <div className="mt-1 text-xs font-mono text-emerald-700">{transferStudent.enrollmentNumber}</div>
+              )}
+            </div>
+
+            <div>
+              <Label>New Center *</Label>
+              <div className="relative mt-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-9"
+                  value={transferCenterSearch}
+                  onChange={e => setTransferCenterSearch(e.target.value)}
+                  placeholder="Search center name, city, counselor..."
+                />
+              </div>
+              <Select value={transferCenterId} onValueChange={setTransferCenterId}>
+                <SelectTrigger className="mt-2"><SelectValue placeholder="Select target center..." /></SelectTrigger>
+                <SelectContent>
+                  {centers.filter(c => {
+                    const q = transferCenterSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return [c.name, c.city, c.state, c.assignedCounselor?.name]
+                      .some(v => String(v || '').toLowerCase().includes(q));
+                  }).map(c => {
+                    const current = String(c._id) === String(transferStudent?.center?._id || transferStudent?.center);
+                    return (
+                      <SelectItem key={c._id} value={c._id} disabled={current}>
+                        {c.name}{current ? ' (Current)' : ''}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {transferCenterId && (
+              <div className={`rounded-xl border px-4 py-3 text-sm ${transferTargetCenter?.assignedCounselor ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                New counselor: <span className="font-semibold">{transferTargetCenter?.assignedCounselor?.name || 'No counselor assigned'}</span>
+              </div>
+            )}
+
+            <div>
+              <Label>Note</Label>
+              <Input
+                className="mt-1"
+                value={transferNote}
+                onChange={e => setTransferNote(e.target.value)}
+                placeholder="Optional reason for transfer"
+              />
+            </div>
+
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+              This will move the student, fee payment record, document requests, and document inventory to the new center and its assigned counselor.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+            <Button onClick={handleTransfer} disabled={transferLoading || !transferCenterId || !transferTargetCenter?.assignedCounselor} className="bg-indigo-600 hover:bg-indigo-700">
+              {transferLoading && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Transfer Student
             </Button>
           </DialogFooter>
         </DialogContent>

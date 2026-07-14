@@ -1767,7 +1767,7 @@ function PaymentsSection({ studentId }) {
 }
 
 // ── STUDENT DETAIL ───────────────────────────────────────────
-function StudentDetail({ student, onBack, onRefresh }) {
+function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const [s,setS]         = useState(student);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
@@ -1894,6 +1894,30 @@ function StudentDetail({ student, onBack, onRefresh }) {
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
 
+  async function checkEnrollmentNumber(){
+    const prev = s;
+    const optimistic = {
+      ...s,
+      enrollmentNumberChecked: true,
+      enrollmentNumberCheckedAt: new Date().toISOString(),
+    };
+    setS(optimistic);
+    onStudentUpdated?.(optimistic);
+    setSaving(true);
+    try {
+      const updated = await studentsApi.checkEnrollment(s._id);
+      setS(updated);
+      onStudentUpdated?.(updated);
+      toast.success('Enrollment number marked as checked');
+      onRefresh();
+    } catch(e) {
+      setS(prev);
+      onStudentUpdated?.(prev);
+      toast.error(e.message);
+    }
+    finally { setSaving(false); }
+  }
+
   const isCancelled = s.applicationStatus === 'Cancelled';
   const canEdit   = !s.coreLocked && !isCancelled;
   const canSubmit = !isCancelled && ['Draft','Changes_Requested'].includes(s.applicationStatus);
@@ -1916,6 +1940,11 @@ function StudentDetail({ student, onBack, onRefresh }) {
                 {s.enrollmentNumber}
               </span>
             )}
+            {s.enrollmentNumberChecked&&(
+              <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3"/>Enrollment Checked
+              </span>
+            )}
           </div>
           <div className="flex gap-4 text-xs text-slate-400 mt-0.5">
             {s.phone&&<span className="flex items-center gap-1"><Phone className="h-3 w-3"/>{s.phone}</span>}
@@ -1925,6 +1954,12 @@ function StudentDetail({ student, onBack, onRefresh }) {
         <div className="flex gap-2">
           {canEdit&&<Button variant="outline" size="sm" onClick={()=>startEdit('details')} className="border-slate-200 text-slate-600 h-8 text-xs"><Edit2 className="h-3.5 w-3.5 mr-1.5"/>Edit</Button>}
           {canSubmit&&<Button size="sm" onClick={()=>setSubmitOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs"><Send className="h-3.5 w-3.5 mr-1.5"/>Submit</Button>}
+          {s.applicationStatus === 'Enrolled' && s.enrollmentNumber && !s.enrollmentNumberChecked && (
+            <Button size="sm" onClick={checkEnrollmentNumber} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs">
+              {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin"/> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5"/>}
+              Enrollment Checked
+            </Button>
+          )}
         </div>
       </div>
 
@@ -2013,6 +2048,11 @@ function StudentDetail({ student, onBack, onRefresh }) {
             <div>
               <div className="text-xs text-emerald-600 font-bold uppercase tracking-wider">Enrollment Number</div>
               <div className="text-lg font-mono font-bold text-emerald-700 mt-0.5">{s.enrollmentNumber}</div>
+              {s.enrollmentNumberChecked && (
+                <div className="text-xs text-emerald-700 font-semibold mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3"/>Checked on center portal
+                </div>
+              )}
             </div>
             <CheckCircle2 className="h-8 w-8 text-emerald-300"/>
           </div>
@@ -2364,7 +2404,15 @@ export default function CenterPortalPage() {
       </div>
     </div>
   );
-  if(selected) return <StudentDetail student={selected} onBack={()=>setSelected(null)} onRefresh={loadAll}/>;
+  if(selected) return <StudentDetail
+    student={selected}
+    onBack={()=>setSelected(null)}
+    onRefresh={loadAll}
+    onStudentUpdated={(updated) => {
+      setSelected(updated);
+      setStudents(prev => prev.map(s => String(s._id) === String(updated._id) ? { ...s, ...updated } : s));
+    }}
+  />;
 
   const statusCounts=students.reduce((acc,s)=>{acc[s.applicationStatus]=(acc[s.applicationStatus]||0)+1;return acc;},{});
 
@@ -2469,6 +2517,11 @@ export default function CenterPortalPage() {
                         {s.enrollmentNumber&&(
                           <span className="text-xs text-emerald-700 font-bold font-mono bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
                             {s.enrollmentNumber}
+                          </span>
+                        )}
+                        {s.enrollmentNumberChecked&&(
+                          <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3"/>Enrollment Checked
                           </span>
                         )}
                         {s.amountSettled&&(

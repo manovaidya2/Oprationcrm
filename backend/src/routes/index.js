@@ -93,9 +93,11 @@ router.post('/students/:id/reject',            protect, requireRole('Admin','Cou
 router.post('/students/:id/request-changes',   protect, requireRole('Admin','Counselor'), studentC.requestChanges);
 router.post('/students/:id/accountant-action', protect, requireRole('Admin','Accountant'), studentC.accountantAction);
 router.post('/students/:id/enrollment',        protect, requireRole('Admin','University'), studentC.assignEnrollment);
+router.post('/students/:id/enrollment-check',  protect, requireRole('Admin','Center'), studentC.checkEnrollmentNumber);
 router.post('/students/:id/university-reject', protect, requireRole('Admin','University'), studentC.universityReject);
 router.post('/students/:id/accountant-forward-to-counselor', protect, requireRole('Admin','Accountant'), studentC.accountantForwardToCounselor);
 router.post('/students/:id/cancel',                          protect, requireRole('Admin'),               studentC.cancelApplication);
+router.post('/students/:id/transfer-center',                 protect, requireRole('Admin'),               studentC.transferCenter);
 router.post('/students/:id/amount-settle',                   protect, requireRole('Admin','Accountant'),  studentC.amountSettle);
 router.post('/students/:id/request-settlement',             protect, requireRole('Admin','Center'),            studentC.requestSettlement);
 router.post('/students/:id/forward-settlement',             protect, requireRole('Admin','Counselor'),         studentC.forwardSettlement);

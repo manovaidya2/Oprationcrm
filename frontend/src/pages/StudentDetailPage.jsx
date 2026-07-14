@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Loader2, Lock, Edit2, IndianRupee, FileText, CreditCard,
+  ArrowLeft, Loader2, Lock, Edit2, IndianRupee, FileText, CreditCard, Search,
   History, PlusCircle, Plus, Trash2, Download, Send, CheckCircle2, XCircle,
-  RotateCcw, AlertTriangle, Clock, Activity, Paperclip, Shield,
+  RotateCcw, AlertTriangle, Clock, Activity, Paperclip, Shield, ArrowRightLeft,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi } from '@/lib/api';
+import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
@@ -239,6 +239,7 @@ export default function StudentDetailPage() {
   const [student, setStudent] = useState(null);
   const [payment, setPayment] = useState(null);
   const [docs,    setDocs]    = useState([]);
+  const [centers, setCenters]  = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [editOpen,   setEditOpen]   = useState(false);
@@ -246,6 +247,10 @@ export default function StudentDetailPage() {
   const [actionOpen, setActionOpen] = useState(null);
   const [note,       setNote]       = useState('');
   const [saving,     setSaving]     = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferCenterId, setTransferCenterId] = useState('');
+  const [transferCenterSearch, setTransferCenterSearch] = useState('');
+  const [transferNote, setTransferNote] = useState('');
 
   const [txOpen, setTxOpen] = useState(false);
   const EMPTY_TF = { amount:'', mode:'', upiId:'', utrRef:'', bankName:'', accountHolder:'', accountNumber:'', ifscCode:'', note:'', paidAt:'', paidToAccount:'', paidToAccountLabel:'' };
@@ -276,12 +281,13 @@ export default function StudentDetailPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [s, p, d] = await Promise.all([
+      const [s, p, d, c] = await Promise.all([
         studentsApi.getOne(id),
         paymentsApi.get(id).catch(()=>null),
         docsApi.list({ studentId: id, all: '1' }).catch(()=>[]),
+        centersApi.getAll().catch(()=>[]),
       ]);
-      setStudent(s); setPayment(p); setDocs(d);
+      setStudent(s); setPayment(p); setDocs(d); setCenters(c);
     } catch(e) { toast.error(e.message); } finally { setLoading(false); }
   }, [id]);
 
@@ -352,6 +358,47 @@ export default function StudentDetailPage() {
     catch(e) { toast.error(e.message); }
   }
 
+  const transferTargetCenter = centers.find(c => c._id === transferCenterId);
+
+  async function handleTransfer() {
+    if (!transferCenterId) return toast.error('Target center required');
+    if (String(student.center?._id || student.center) === String(transferCenterId)) {
+      return toast.error('Student is already in this center');
+    }
+    if (!transferTargetCenter?.assignedCounselor) {
+      return toast.error('Selected center has no assigned counselor');
+    }
+    setSaving(true);
+    try {
+      await studentsApi.transferCenter(student._id, transferCenterId, transferNote);
+      toast.success(`${student.name} transferred to ${transferTargetCenter?.name || 'selected center'}`);
+      setTransferOpen(false);
+      setTransferCenterId('');
+      setTransferCenterSearch('');
+      setTransferNote('');
+      load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function handleEnrollmentCheck() {
+    const prev = student;
+    setStudent(p => ({
+      ...p,
+      enrollmentNumberChecked: true,
+      enrollmentNumberCheckedAt: new Date().toISOString(),
+    }));
+    setSaving(true);
+    try {
+      const updated = await studentsApi.checkEnrollment(student._id);
+      setStudent(updated);
+      toast.success('Enrollment number marked as checked');
+      load();
+    } catch(e) {
+      setStudent(prev);
+      toast.error(e.message);
+    } finally { setSaving(false); }
+  }
+
   async function saveDocEdit() {
     if (!editDoc) return;
     if (!editDocForm.name.trim()) return toast.error('Document name required');
@@ -397,10 +444,26 @@ export default function StudentDetailPage() {
             {student.coreLocked && <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"><Lock className="h-3 w-3"/>Core Locked</span>}
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st}`}>{student.applicationStatus?.replace(/_/g,' ')}</span>
             {student.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{student.enrollmentNumber}</span>}
+            {student.enrollmentNumberChecked && (
+              <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                <CheckCircle2 className="h-3 w-3"/>Enrollment Checked
+              </span>
+            )}
           </div>
           <div className="text-sm text-muted-foreground">{student.center?.name} · {student.counselor?.name}</div>
         </div>
         <div className="flex gap-2 flex-shrink-0">
+          {isAdmin && (
+            <Button variant="outline" size="sm" onClick={() => { setTransferCenterId(''); setTransferCenterSearch(''); setTransferNote(''); setTransferOpen(true); }}>
+              <ArrowRightLeft className="h-3.5 w-3.5 mr-1"/>Transfer
+            </Button>
+          )}
+          {user?.role === 'Center' && student.applicationStatus === 'Enrolled' && student.enrollmentNumber && !student.enrollmentNumberChecked && (
+            <Button size="sm" onClick={handleEnrollmentCheck} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700">
+              {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin"/> : <CheckCircle2 className="h-3.5 w-3.5 mr-1"/>}
+              Enrollment Checked
+            </Button>
+          )}
           {canEdit && (
             <Button variant="outline" size="sm" onClick={() => {
               setForm({
@@ -707,6 +770,71 @@ export default function StudentDetailPage() {
           ))}
         </TabsContent>
       </Tabs>
+
+      {/* Transfer Center Dialog */}
+      <Dialog open={transferOpen} onOpenChange={v => { setTransferOpen(v); if (!v) { setTransferCenterId(''); setTransferCenterSearch(''); setTransferNote(''); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4"/>Transfer Student Center
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="font-semibold text-slate-800">{student.name}</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Current: <span className="font-medium text-slate-700">{student.center?.name || 'No center'}</span>
+                {student.counselor?.name && <span> · {student.counselor.name}</span>}
+              </div>
+            </div>
+            <div>
+              <Label>New Center *</Label>
+              <div className="relative mt-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  className="pl-9"
+                  value={transferCenterSearch}
+                  onChange={e => setTransferCenterSearch(e.target.value)}
+                  placeholder="Search center name, city, counselor..."
+                />
+              </div>
+              <Select value={transferCenterId} onValueChange={setTransferCenterId}>
+                <SelectTrigger className="mt-2"><SelectValue placeholder="Select target center..." /></SelectTrigger>
+                <SelectContent>
+                  {centers.filter(c => {
+                    const q = transferCenterSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return [c.name, c.city, c.state, c.assignedCounselor?.name]
+                      .some(v => String(v || '').toLowerCase().includes(q));
+                  }).map(c => {
+                    const current = String(c._id) === String(student.center?._id || student.center);
+                    return <SelectItem key={c._id} value={c._id} disabled={current}>{c.name}{current ? ' (Current)' : ''}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            {transferCenterId && (
+              <div className={`rounded-xl border px-4 py-3 text-sm ${transferTargetCenter?.assignedCounselor ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                New counselor: <span className="font-semibold">{transferTargetCenter?.assignedCounselor?.name || 'No counselor assigned'}</span>
+              </div>
+            )}
+            <div>
+              <Label>Note</Label>
+              <Input className="mt-1" value={transferNote} onChange={e => setTransferNote(e.target.value)} placeholder="Optional reason for transfer" />
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+              Student, fee record, document requests, and inventory will move to the selected center and its assigned counselor.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferOpen(false)}>Cancel</Button>
+            <Button onClick={handleTransfer} disabled={saving || !transferCenterId || !transferTargetCenter?.assignedCounselor} className="bg-indigo-600 hover:bg-indigo-700">
+              {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Transfer Student
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Edit Student Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

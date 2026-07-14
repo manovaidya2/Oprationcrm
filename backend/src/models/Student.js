@@ -14,6 +14,9 @@ const studentSchema = new mongoose.Schema({
 
   // Enrollment
   enrollmentNumber: { type: String, trim: true },
+  enrollmentNumberChecked: { type: Boolean, default: false },
+  enrollmentNumberCheckedAt: { type: Date },
+  enrollmentNumberCheckedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   coreLocked:       { type: Boolean, default: false }, // locked after enrollment
 
   // Academic

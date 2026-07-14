@@ -95,11 +95,13 @@ export const studentsApi = {
   requestChanges:  (id, note)    => request(`/students/${id}/request-changes`, { method: 'POST', body: JSON.stringify({ note }) }),
   accountantAction:(id, action, note) => request(`/students/${id}/accountant-action`, { method: 'POST', body: JSON.stringify({ action, note }) }),
   assignEnrollment:(id, num)     => request(`/students/${id}/enrollment`, { method: 'POST', body: JSON.stringify({ enrollmentNumber: num }) }),
+  checkEnrollment: (id, note='') => request(`/students/${id}/enrollment-check`, { method: 'POST', body: JSON.stringify({ note }) }),
   universityReject:(id, reason)  => request(`/students/${id}/university-reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
   accountantForwardToCounselor:(id, note) => request(`/students/${id}/accountant-forward-to-counselor`, { method: 'POST', body: JSON.stringify({ note }) }),
   counselorSendToCenterFinal:(id, note)   => request(`/students/${id}/counselor-send-to-center`, { method: 'POST', body: JSON.stringify({ note, finalReject: true }) }),
   amountSettle:      (id)          => request(`/students/${id}/amount-settle`,      { method: 'POST' }),
   cancelApplication: (id, reason)  => request(`/students/${id}/cancel`,             { method: 'POST', body: JSON.stringify({ reason: reason || '' }) }),
+  transferCenter:    (id, centerId, note='') => request(`/students/${id}/transfer-center`, { method: 'POST', body: JSON.stringify({ centerId, note }) }),
   requestSettlement: (id, note)    => request(`/students/${id}/request-settlement`, { method: 'POST', body: JSON.stringify({ note: note || '' }) }),
   forwardSettlement: (id, note)    => request(`/students/${id}/forward-settlement`, { method: 'POST', body: JSON.stringify({ note: note || '' }) }),
 };

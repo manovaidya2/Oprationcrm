@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const Student    = require('../models/Student');
 const Payment    = require('../models/Payment');
+const StudentDoc = require('../models/StudentDocument');
 const User       = require('../models/User');
 const Counselor  = require('../models/Counselor');
 const Center     = require('../models/Center');
@@ -199,10 +200,117 @@ exports.update = asyncHandler(async (req, res) => {
   }
   delete updateData.submissionDocNames;
   delete updateData.submissionDocCount;
+  if (
+    updateData.enrollmentNumber !== undefined &&
+    String(updateData.enrollmentNumber || '').trim() !== String(student.enrollmentNumber || '').trim()
+  ) {
+    updateData.enrollmentNumberChecked = false;
+    updateData.enrollmentNumberCheckedAt = undefined;
+    updateData.enrollmentNumberCheckedBy = undefined;
+  }
 
   const updated = await Student.findByIdAndUpdate(req.params.id, updateData, { new: true })
     .populate('center','name').populate('counselor','name').populate('university','name shortName');
   await audit('student_updated', 'Student', student._id, req.user, {}, `Student ${student.name} updated`);
+  res.json(updated);
+});
+
+// POST /api/students/:id/transfer-center  — Admin only
+exports.transferCenter = asyncHandler(async (req, res) => {
+  const { centerId, note } = req.body;
+  if (!centerId) { const e = new Error('Target center required'); e.status = 400; throw e; }
+
+  const student = await Student.findById(req.params.id)
+    .populate('center', 'name')
+    .populate('counselor', 'name');
+  if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+
+  const targetCenter = await Center.findById(centerId).populate('assignedCounselor', 'name');
+  if (!targetCenter) { const e = new Error('Target center not found'); e.status = 404; throw e; }
+
+  let targetCounselorId = targetCenter.assignedCounselor?._id || targetCenter.assignedCounselor;
+  if (!targetCounselorId) {
+    const linked = await Counselor.findOne({ centers: targetCenter._id, isActive: true }).select('_id name');
+    if (linked) {
+      targetCounselorId = linked._id;
+      await Center.findByIdAndUpdate(targetCenter._id, { assignedCounselor: linked._id });
+      targetCenter.assignedCounselor = linked;
+    }
+  }
+  if (!targetCounselorId) {
+    const e = new Error('Target center has no assigned counselor. Assign counselor to center first.'); e.status = 400; throw e;
+  }
+
+  if (!((targetCenter.assignedCounselor?.centers || []).some?.(id => String(id) === String(targetCenter._id)))) {
+    await Counselor.findByIdAndUpdate(targetCounselorId, { $addToSet: { centers: targetCenter._id } });
+  }
+
+  const oldCenterId = student.center?._id || student.center;
+  const oldCounselorId = student.counselor?._id || student.counselor;
+  const sameCenter = String(oldCenterId) === String(targetCenter._id);
+  const sameCounselor = String(oldCounselorId || '') === String(targetCounselorId);
+  if (sameCenter && sameCounselor) {
+    const e = new Error('Student is already assigned to this center and counselor'); e.status = 400; throw e;
+  }
+
+  await Student.findByIdAndUpdate(student._id, {
+    $set: {
+      center: targetCenter._id,
+      counselor: targetCounselorId,
+    },
+    $push: {
+      statusHistory: {
+        status: 'Center_Transferred',
+        note: note || `Transferred from ${student.center?.name || 'old center'} to ${targetCenter.name}`,
+        changedBy: req.user._id,
+        role: req.user.role,
+        at: new Date(),
+      },
+    },
+  });
+
+  await Payment.updateOne(
+    { student: student._id },
+    { $set: { center: targetCenter._id } }
+  );
+
+  await StudentDoc.updateMany(
+    { student: student._id },
+    { $set: { center: targetCenter._id, counselor: targetCounselorId } }
+  );
+
+  const targetCenterUser = await User.findOne({ role: 'Center', centerId: targetCenter._id, isActive: true });
+  if (targetCenterUser) {
+    await notify(targetCenterUser._id, {
+      message: `${student.name} has been assigned to your center by Admin.`,
+      type: 'general',
+      role: 'Center',
+      studentId: student._id,
+    });
+  }
+
+  const targetCounselorUser = await User.findOne({ role: 'Counselor', counselorId: targetCounselorId, isActive: true });
+  if (targetCounselorUser) {
+    await notify(targetCounselorUser._id, {
+      message: `${student.name} transferred to ${targetCenter.name}. You are now the assigned counselor.`,
+      type: 'general',
+      role: 'Counselor',
+      studentId: student._id,
+    });
+  }
+
+  await audit('student_center_transferred', 'Student', student._id, req.user, {
+    fromCenter: oldCenterId,
+    toCenter: targetCenter._id,
+    fromCounselor: oldCounselorId,
+    toCounselor: targetCounselorId,
+    note: note || '',
+  }, `Admin transferred ${student.name} to ${targetCenter.name}`);
+
+  const updated = await Student.findById(student._id)
+    .populate('center','name city')
+    .populate('counselor','name avatarColor')
+    .populate('university','name shortName avatarColor');
   res.json(updated);
 });
 
@@ -539,7 +647,12 @@ exports.assignEnrollment = asyncHandler(async (req, res) => {
   }
 
   await Student.findByIdAndUpdate(req.params.id, {
-    enrollmentNumber: enrollmentNumber.trim(), applicationStatus: 'Enrolled', coreLocked: true,
+    enrollmentNumber: enrollmentNumber.trim(),
+    enrollmentNumberChecked: false,
+    enrollmentNumberCheckedAt: undefined,
+    enrollmentNumberCheckedBy: undefined,
+    applicationStatus: 'Enrolled',
+    coreLocked: true,
   });
   s.enrollmentNumber = enrollmentNumber.trim(); s.applicationStatus = 'Enrolled';
 
@@ -556,6 +669,64 @@ exports.assignEnrollment = asyncHandler(async (req, res) => {
   await audit('enrollment_assigned', 'Student', s._id, req.user, { enrollmentNumber }, `Enrollment ${enrollmentNumber} assigned to ${s.name}`);
   await pushHistory(req.params.id, 'Enrolled', req.user, `Enrollment number: ${enrollmentNumber}`);
   res.json(s);
+});
+
+// POST /api/students/:id/enrollment-check - Center confirms enrollment number is correct
+exports.checkEnrollmentNumber = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id)
+    .populate('center', 'name')
+    .populate('counselor', 'name')
+    .populate('university', 'name shortName');
+  await assertStudentAccess(req, s);
+
+  if (!s.enrollmentNumber) {
+    const e = new Error('Enrollment number is not assigned yet'); e.status = 400; throw e;
+  }
+  if (s.applicationStatus !== 'Enrolled') {
+    const e = new Error('Enrollment can be checked only after student is enrolled'); e.status = 400; throw e;
+  }
+
+  if (s.enrollmentNumberChecked) {
+    return res.json(s);
+  }
+
+  const updated = await Student.findByIdAndUpdate(
+    s._id,
+    {
+      enrollmentNumberChecked: true,
+      enrollmentNumberCheckedAt: new Date(),
+      enrollmentNumberCheckedBy: req.user._id,
+      $push: {
+        statusHistory: {
+          status: 'Enrollment_Checked',
+          note: req.body.note || `Enrollment number checked by ${req.user.role}`,
+          changedBy: req.user._id,
+          role: req.user.role,
+          at: new Date(),
+        },
+      },
+    },
+    { new: true }
+  )
+    .populate('center', 'name city')
+    .populate('counselor', 'name avatarColor')
+    .populate('university', 'name shortName avatarColor')
+    .populate('enrollmentNumberCheckedBy', 'name role');
+
+  const counselorUser = await User.findOne({ counselorId: updated.counselor?._id || updated.counselor, role: 'Counselor', isActive: true });
+  if (counselorUser) {
+    await notify(counselorUser._id, {
+      message: `Enrollment number checked by center for ${updated.name}: ${updated.enrollmentNumber}`,
+      type: 'general',
+      role: 'Counselor',
+      studentId: updated._id,
+    });
+  }
+
+  await audit('enrollment_checked', 'Student', updated._id, req.user, {
+    enrollmentNumber: updated.enrollmentNumber,
+  }, `Enrollment number checked for ${updated.name}`);
+  res.json(updated);
 });
 
 // POST /api/students/:id/cancel  — Admin only
