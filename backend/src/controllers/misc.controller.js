@@ -224,6 +224,8 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
 
   // Update Center.assignedCounselor
   await Center.findByIdAndUpdate(centerId, { assignedCounselor: req.params.id });
+  await Student.updateMany({ center: centerId }, { $set: { counselor: req.params.id } });
+  await StudentDoc.updateMany({ center: centerId }, { $set: { counselor: req.params.id } });
 
   res.json(c);
 });

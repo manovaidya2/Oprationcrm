@@ -2,6 +2,7 @@ const asyncHandler  = require('express-async-handler');
 const StudentDoc    = require('../models/StudentDocument');
 const Student       = require('../models/Student');
 const User          = require('../models/User');
+const Counselor     = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
 async function loadDoc(id) {
@@ -577,8 +578,13 @@ exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
 
 async function assertInventoryStudentAccess(req, student) {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
-  if (req.user.role === 'Counselor' && String(student.counselor?._id || student.counselor) !== String(req.user.counselorId)) {
-    const e = new Error('Forbidden'); e.status = 403; throw e;
+  if (req.user.role === 'Counselor') {
+    const directMatch = String(student.counselor?._id || student.counselor) === String(req.user.counselorId);
+    const counselorDoc = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const centerMatch = (counselorDoc?.centers || []).some(id => String(id) === String(student.center?._id || student.center));
+    if (!directMatch && !centerMatch) {
+      const e = new Error('Forbidden'); e.status = 403; throw e;
+    }
   }
   if (req.user.role === 'Center' && String(student.center?._id || student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
@@ -587,7 +593,13 @@ async function assertInventoryStudentAccess(req, student) {
 
 exports.inventoryList = asyncHandler(async (req, res) => {
   const filter = { applicationStatus: 'Enrolled', enrollmentNumber: { $exists: true, $ne: '' } };
-  if (req.user.role === 'Counselor') filter.counselor = req.user.counselorId;
+  if (req.user.role === 'Counselor') {
+    const counselorDoc = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const linkedCenterIds = counselorDoc?.centers || [];
+    filter.$or = linkedCenterIds.length > 0
+      ? [{ counselor: req.user.counselorId }, { center: { $in: linkedCenterIds } }]
+      : [{ counselor: req.user.counselorId }];
+  }
   if (req.user.role === 'Center') filter.center = req.user.centerId;
 
   const students = await Student.find(filter)
