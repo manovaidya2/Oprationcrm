@@ -92,6 +92,8 @@ export default function ChatPage() {
   const [saving, setSaving] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [statusDialog, setStatusDialog] = useState(null);
+  const [statusNote, setStatusNote] = useState('');
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [chatForm, setChatForm] = useState({ title: '', participantIds: [] });
   const [ticketForm, setTicketForm] = useState({ subject: '', priority: 'Normal', message: '' });
@@ -210,19 +212,40 @@ export default function ChatPage() {
     }
   }
 
-  async function updateTicket(status) {
+  function openStatusDialog(status) {
+    setStatusNote('');
+    setStatusDialog({ status });
+  }
+
+  async function updateTicket(status, data = {}) {
     if (!active) return;
     setSaving(true);
     try {
-      const updated = await chatApi.updateTicket(active._id, status);
+      const updated = await chatApi.updateTicket(active._id, status, data);
       setConversations(prev => prev.map(c => c._id === updated._id ? updated : c));
       toast.success(status === 'In_Progress' ? 'Ticket accepted' : `Ticket marked ${status.replace(/_/g, ' ')}`);
       const rows = await chatApi.messages(active._id);
       setMessages(rows);
+      return true;
     } catch (e) {
       toast.error(e.message);
+      return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitTicketStatus() {
+    if (!statusDialog || !active) return;
+    const text = statusNote.trim();
+    const closingUnresolved = statusDialog.status === 'Closed' && active.ticket?.status !== 'Resolved' && !active.ticket?.resolvedAt;
+    if (statusDialog.status === 'Resolved' && !text) return toast.error('Resolution details required');
+    if (closingUnresolved && !text) return toast.error('Close reason required for unresolved ticket');
+    const payload = closingUnresolved ? { reason: text } : { note: text };
+    const ok = await updateTicket(statusDialog.status, payload);
+    if (ok) {
+      setStatusDialog(null);
+      setStatusNote('');
     }
   }
 
@@ -390,11 +413,34 @@ export default function ChatPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', STATUS_TONE[active.ticket?.status])}>Status: {active.ticket?.status?.replace(/_/g, ' ')}</span>
                       {!isCenter && active.ticket?.status === 'Open' && <Button size="sm" onClick={() => updateTicket('In_Progress')} disabled={saving}>Accept</Button>}
-                      {!isCenter && ['Open', 'In_Progress'].includes(active.ticket?.status) && <Button size="sm" variant="outline" onClick={() => updateTicket('Resolved')} disabled={saving}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Resolve</Button>}
-                      {active.ticket?.status !== 'Closed' && <Button size="sm" variant="outline" onClick={() => updateTicket('Closed')} disabled={saving}>Close</Button>}
+                      {!isCenter && ['Open', 'In_Progress'].includes(active.ticket?.status) && <Button size="sm" variant="outline" onClick={() => openStatusDialog('Resolved')} disabled={saving}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Resolve</Button>}
+                      {active.ticket?.status !== 'Closed' && <Button size="sm" variant="outline" onClick={() => openStatusDialog('Closed')} disabled={saving}>Close</Button>}
                     </div>
                   )}
                 </div>
+                {active.kind === 'ticket' && (active.ticket?.resolutionNote || active.ticket?.closeReason || active.ticket?.closeNote || active.ticket?.closedAt) && (
+                  <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                    {active.ticket?.resolutionNote && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
+                        <div className="font-semibold">Resolution Details</div>
+                        <div className="mt-1 whitespace-pre-wrap">{active.ticket.resolutionNote}</div>
+                        {active.ticket?.resolvedAt && <div className="mt-1 text-emerald-700">Resolved at {fmtTime(active.ticket.resolvedAt)}</div>}
+                        {active.ticket?.resolvedBy?.name && <div className="mt-1 text-emerald-700">By {active.ticket.resolvedBy.name}</div>}
+                      </div>
+                    )}
+                    {active.ticket?.closedAt && (
+                      <div className={cn(
+                        'rounded-lg border px-3 py-2',
+                        active.ticket?.closedWithoutResolution ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-slate-50 text-slate-700'
+                      )}>
+                        <div className="font-semibold">{active.ticket?.closedWithoutResolution ? 'Closed Without Resolution' : 'Close Details'}</div>
+                        {(active.ticket?.closeReason || active.ticket?.closeNote) && <div className="mt-1 whitespace-pre-wrap">{active.ticket.closeReason || active.ticket.closeNote}</div>}
+                        <div className="mt-1">Closed at {fmtTime(active.ticket.closedAt)}</div>
+                        {active.ticket?.closedBy?.name && <div className="mt-1">By {active.ticket.closedBy.name}</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-muted/20">
@@ -509,6 +555,53 @@ export default function ChatPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setTicketOpen(false)}>Cancel</Button>
             <Button onClick={createTicket} disabled={saving}>{saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Submit Ticket</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(statusDialog)} onOpenChange={open => {
+        if (!open) {
+          setStatusDialog(null);
+          setStatusNote('');
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {statusDialog?.status === 'Resolved'
+                ? 'Resolve Ticket'
+                : active?.ticket?.status === 'Resolved' || active?.ticket?.resolvedAt
+                  ? 'Close Ticket'
+                  : 'Close Without Resolution'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>
+              {statusDialog?.status === 'Resolved'
+                ? 'Resolution details *'
+                : active?.ticket?.status === 'Resolved' || active?.ticket?.resolvedAt
+                  ? 'Close note'
+                  : 'Reason *'}
+            </Label>
+            <Textarea
+              rows={5}
+              value={statusNote}
+              onChange={e => setStatusNote(e.target.value)}
+              placeholder={
+                statusDialog?.status === 'Resolved'
+                  ? 'Write what solution was given...'
+                  : active?.ticket?.status === 'Resolved' || active?.ticket?.resolvedAt
+                    ? 'Optional final close note...'
+                    : 'Write proper reason why this ticket is being closed without resolution...'
+              }
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusDialog(null)}>Cancel</Button>
+            <Button onClick={submitTicketStatus} disabled={saving}>
+              {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

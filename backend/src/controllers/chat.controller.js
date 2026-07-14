@@ -29,7 +29,9 @@ async function populateConversation(query) {
     .populate('participants', 'name email role avatarColor avatarSeed centerId counselorId universityId')
     .populate('createdBy', 'name role')
     .populate('ticket.center', 'name organisationName city')
-    .populate('ticket.assignedTo', 'name email role avatarSeed');
+    .populate('ticket.assignedTo', 'name email role avatarSeed')
+    .populate('ticket.resolvedBy', 'name email role avatarSeed')
+    .populate('ticket.closedBy', 'name email role avatarSeed');
 }
 
 async function notifyConversation(conversation, sender, message) {
@@ -246,6 +248,8 @@ exports.sendMessage = asyncHandler(async (req, res) => {
 
 exports.updateTicketStatus = asyncHandler(async (req, res) => {
   const status = req.body.status;
+  const note = String(req.body.note || '').trim();
+  const reason = String(req.body.reason || note || '').trim();
   if (!['Open', 'In_Progress', 'Resolved', 'Closed'].includes(status)) {
     const e = new Error('Invalid ticket status'); e.status = 400; throw e;
   }
@@ -257,22 +261,49 @@ exports.updateTicketStatus = asyncHandler(async (req, res) => {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   if (req.user.role === 'Center' && !['Closed'].includes(status)) {
-    const e = new Error('Center can only close resolved tickets'); e.status = 403; throw e;
+    const e = new Error('Center can only close tickets'); e.status = 403; throw e;
   }
+
+  const wasResolved = conversation.ticket.status === 'Resolved';
+  let systemText = status === 'In_Progress' ? 'Ticket accepted by counselor' : `Ticket marked ${status.replace(/_/g, ' ')}`;
 
   conversation.ticket.status = status;
   if (status === 'In_Progress' && !conversation.ticket.acceptedAt) conversation.ticket.acceptedAt = new Date();
-  if (status === 'Closed') conversation.ticket.closedAt = new Date();
+  if (status === 'Resolved') {
+    if (!note) {
+      const e = new Error('Resolution details are required'); e.status = 400; throw e;
+    }
+    conversation.ticket.resolutionNote = note;
+    conversation.ticket.resolvedAt = new Date();
+    conversation.ticket.resolvedBy = req.user._id;
+    conversation.ticket.closedWithoutResolution = false;
+    systemText = `Ticket resolved: ${note}`;
+  }
+  if (status === 'Closed') {
+    const closingResolvedTicket = wasResolved || Boolean(conversation.ticket.resolvedAt);
+    if (!closingResolvedTicket && !reason) {
+      const e = new Error('Close reason is required when ticket is not resolved'); e.status = 400; throw e;
+    }
+    conversation.ticket.closedAt = new Date();
+    conversation.ticket.closedBy = req.user._id;
+    conversation.ticket.closedWithoutResolution = !closingResolvedTicket;
+    if (closingResolvedTicket) {
+      if (note) conversation.ticket.closeNote = note;
+      systemText = note ? `Ticket closed: ${note}` : 'Ticket closed after resolution';
+    } else {
+      conversation.ticket.closeReason = reason;
+      systemText = `Ticket closed without resolution: ${reason}`;
+    }
+  }
   conversation.lastMessageAt = new Date();
   await conversation.save();
 
-  const systemText = status === 'In_Progress' ? 'Ticket accepted by counselor' : `Ticket marked ${status.replace(/_/g, ' ')}`;
   await ChatMessage.create({
     conversation: conversation._id,
     sender: req.user._id,
     body: systemText,
     readBy: [req.user._id],
   });
-  await audit('ticket_status_changed', 'Conversation', conversation._id, req.user, { status }, systemText);
+  await audit('ticket_status_changed', 'Conversation', conversation._id, req.user, { status, note, reason }, systemText);
   res.json(await populateConversation(Conversation.findById(conversation._id)));
 });

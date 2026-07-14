@@ -18,6 +18,13 @@ const conversationSchema = new mongoose.Schema({
     center: { type: mongoose.Schema.Types.ObjectId, ref: 'Center', index: true },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     acceptedAt: Date,
+    resolutionNote: { type: String, trim: true },
+    resolvedAt: Date,
+    resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    closeNote: { type: String, trim: true },
+    closeReason: { type: String, trim: true },
+    closedWithoutResolution: { type: Boolean, default: false },
+    closedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     closedAt: Date,
   },
 

@@ -164,7 +164,7 @@ export const chatApi = {
   createTicket:  (data)        => request('/chat/tickets', { method: 'POST', body: JSON.stringify(data) }),
   messages:      (id)          => request(`/chat/conversations/${id}/messages`),
   sendMessage:   (id, body)    => request(`/chat/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ body }) }),
-  updateTicket:  (id, status)  => request(`/chat/tickets/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
+  updateTicket:  (id, status, data = {})  => request(`/chat/tickets/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...data }) }),
 };
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────
