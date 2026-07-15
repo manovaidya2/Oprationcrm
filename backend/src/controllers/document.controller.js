@@ -17,9 +17,18 @@ async function loadDoc(id) {
   return doc;
 }
 
-function pushHistory(doc, status, user, note = '') {
-  doc.statusHistory.push({ status, changedBy: user._id, at: new Date(), note });
+function asActionDate(value) {
+  const date = value ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function pushHistory(doc, status, user, note = '', at = new Date()) {
+  doc.statusHistory.push({ status, changedBy: user._id, at, note });
   doc.status = status;
+}
+
+function addHistoryOnly(doc, status, user, note = '', at = new Date()) {
+  doc.statusHistory.push({ status, changedBy: user._id, at, note });
 }
 
 const INVENTORY_DOC_NAMES = [
@@ -66,6 +75,11 @@ const INVENTORY_DOC_NAMES = [
   'Viva Voce Letter',
   'Provisional & Migration Certificate',
   'PhD Notification',
+];
+
+const INVENTORY_RECEIVED_OR_DONE_STATUSES = [
+  'Dispatch_Received', 'Scanned', 'Accountant_Received', 'Counselor_Received',
+  'Center_Notified', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered',
 ];
 
 // GET /api/documents
@@ -649,7 +663,7 @@ exports.inventoryList = asyncHandler(async (req, res) => {
 });
 
 exports.inventoryAddDoc = asyncHandler(async (req, res) => {
-  const { name, names, received } = req.body;
+  const { name, names, received, urgent, requestedDate, receivedDate, urgentDate } = req.body;
   const rawNames = Array.isArray(names) ? names : String(name || '').split('\n');
   const docNames = rawNames.map(n => String(n || '').trim()).filter(Boolean);
   if (docNames.length === 0) { const e = new Error('Document name required'); e.status = 400; throw e; }
@@ -659,6 +673,7 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
 
   const created = [];
   for (const docName of docNames) {
+    const actionDate = received ? asActionDate(receivedDate) : asActionDate(requestedDate || urgentDate);
     let doc = await StudentDoc.findOne({ student: student._id, origin: 'Inventory', name: new RegExp(`^${docName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
     if (!doc) {
       doc = new StudentDoc({
@@ -673,12 +688,24 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
         statusHistory: [{
           status: received ? 'Dispatch_Received' : 'Sent_To_University',
           changedBy: req.user._id,
-          at: new Date(),
+          at: actionDate,
           note: received ? 'Added to inventory as received from university' : 'Added to inventory and requested',
         }],
       });
-    } else if (received && !['Dispatch_Received','Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'].includes(doc.status)) {
-      pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university');
+      if (!received && urgent) {
+        addHistoryOnly(doc, 'Urgent_Requested', req.user, 'Urgent document request', asActionDate(urgentDate || requestedDate));
+      }
+    } else if (received && !INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
+      pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university', actionDate);
+    } else if (!received && !INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
+      if (!['Sent_To_University','University_Dispatched'].includes(doc.status)) {
+        pushHistory(doc, 'Sent_To_University', req.user, 'Document requested from university/external courier', actionDate);
+      } else {
+        addHistoryOnly(doc, 'Sent_To_University', req.user, 'Document requested from university/external courier', actionDate);
+      }
+      if (urgent) {
+        addHistoryOnly(doc, 'Urgent_Requested', req.user, 'Urgent document request', asActionDate(urgentDate || requestedDate));
+      }
     }
     await doc.save();
     if (!received && doc.university) {
@@ -715,7 +742,7 @@ exports.inventoryReceiveDoc = asyncHandler(async (req, res) => {
       sentAt: new Date(),
     };
   }
-  pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university');
+  pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university', asActionDate(req.body.receivedDate));
   await doc.save();
   res.json(doc);
 });
@@ -723,10 +750,10 @@ exports.inventoryReceiveDoc = asyncHandler(async (req, res) => {
 exports.inventoryRequestDoc = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   await assertInventoryStudentAccess(req, doc.student);
-  if (['Dispatch_Received','Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'].includes(doc.status)) {
+  if (INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
     return res.json(doc);
   }
-  pushHistory(doc, 'Sent_To_University', req.user, 'Document requested from university/external courier');
+  pushHistory(doc, 'Sent_To_University', req.user, 'Document requested from university/external courier', asActionDate(req.body.requestedDate));
   await doc.save();
   await notifyRole('Dispatch', {
     message: `Inventory request: "${doc.name}" - Student: ${doc.student?.name}. Mark received when it arrives.`,
@@ -736,6 +763,36 @@ exports.inventoryRequestDoc = asyncHandler(async (req, res) => {
     const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
     await notify(uniUsers.map(u => u._id), {
       message: `Document requested by Dispatch: "${doc.name}" - Student: ${doc.student?.name}`,
+      type: 'doc_forwarded',
+      documentId: doc._id,
+      studentId: doc.student?._id,
+      role: 'University',
+    });
+  }
+  res.json(doc);
+});
+
+exports.inventoryUrgentRequestDoc = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  await assertInventoryStudentAccess(req, doc.student);
+  if (INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
+    return res.json(doc);
+  }
+  const actionDate = asActionDate(req.body.urgentDate || req.body.requestedDate);
+  if (!['Sent_To_University','University_Dispatched'].includes(doc.status)) {
+    pushHistory(doc, 'Sent_To_University', req.user, 'Urgent document request from university/external courier', actionDate);
+  }
+  addHistoryOnly(doc, 'Urgent_Requested', req.user, req.body.note || 'Urgent document request', actionDate);
+  await doc.save();
+
+  await notifyRole('Dispatch', {
+    message: `Urgent inventory request: "${doc.name}" - Student: ${doc.student?.name}.`,
+    type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
+  });
+  if (doc.university) {
+    const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
+    await notify(uniUsers.map(u => u._id), {
+      message: `Urgent document requested by Dispatch: "${doc.name}" - Student: ${doc.student?.name}`,
       type: 'doc_forwarded',
       documentId: doc._id,
       studentId: doc.student?._id,

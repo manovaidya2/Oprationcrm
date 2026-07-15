@@ -157,7 +157,8 @@ export const documentInventoryApi = {
   list:        ()                => request('/document-inventory'),
   addDocs:     (studentId, data) => request(`/document-inventory/${studentId}/docs`, { method: 'POST', body: JSON.stringify(data) }),
   markReceived:(docId, data={})  => request(`/document-inventory/docs/${docId}/receive`, { method: 'PATCH', body: JSON.stringify(data) }),
-  requestDoc:  (docId)           => request(`/document-inventory/docs/${docId}/request`, { method: 'PATCH' }),
+  requestDoc:  (docId, data={})  => request(`/document-inventory/docs/${docId}/request`, { method: 'PATCH', body: JSON.stringify(data) }),
+  urgentDoc:   (docId, data={})  => request(`/document-inventory/docs/${docId}/urgent`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 export const chatApi = {

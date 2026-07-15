@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { docsApi } from '@/lib/api';
+import { docsApi, documentInventoryApi } from '@/lib/api';
 
 const MEDIA  = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 
@@ -183,7 +183,7 @@ function DocDetailModal({ doc, onClose }) {
 }
 
 // ── Doc Card ─────────────────────────────────────────────────
-function DocCard({ doc, action, onViewDetail }) {
+function DocCard({ doc, action, onViewDetail, alreadyInInventory = false }) {
   const st = STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
   return (
     <Card className="hover:border-primary/40 transition-colors">
@@ -193,6 +193,11 @@ function DocCard({ doc, action, onViewDetail }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium">{doc.name}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.label}</span>
+              {alreadyInInventory && (
+                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Already in Inventory
+                </span>
+              )}
             </div>
             <div className="text-sm text-muted-foreground mt-0.5">
               Student: <b>{doc.student?.name}</b>
@@ -229,6 +234,7 @@ function DocCard({ doc, action, onViewDetail }) {
 // ── Main Page ─────────────────────────────────────────────────
 export default function DispatchPage() {
   const [all,     setAll]     = useState([]);
+  const [inventoryReceivedKeys, setInventoryReceivedKeys] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [dialog,  setDialog]  = useState(null);
   const [detailDoc, setDetailDoc] = useState(null);
@@ -241,8 +247,20 @@ export default function DispatchPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const d = await docsApi.list({ all: '1' });
+      const [d, inventoryRows] = await Promise.all([
+        docsApi.list({ all: '1' }),
+        documentInventoryApi.list().catch(() => []),
+      ]);
       setAll(d);
+      const keys = new Set();
+      inventoryRows.forEach(({ student, docs = [] }) => {
+        docs.forEach(doc => {
+          if (doc.catalog) return;
+          if (!['Dispatch_Received', 'Scanned', 'Accountant_Received', 'Counselor_Received', 'Center_Notified', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered'].includes(doc.status)) return;
+          keys.add(`${String(student?._id || doc.student?._id || doc.student)}::${String(doc.name || '').trim().toLowerCase()}`);
+        });
+      });
+      setInventoryReceivedKeys(keys);
     } catch { toast.error('Failed'); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -268,8 +286,12 @@ export default function DispatchPage() {
   const dispatched  = all.filter(d => ['Dispatched','Delivered'].includes(d.status)).filter(filter);
 
   async function confirmReceipt(id) {
-    try { await docsApi.dispatchReceive(id); toast.success('Receipt confirmed'); load(); }
+    try { await docsApi.dispatchReceive(id); toast.success('Request processed'); load(); }
     catch(e) { toast.error(e.message); }
+  }
+
+  function isAlreadyInInventory(doc) {
+    return inventoryReceivedKeys.has(`${String(doc.student?._id || doc.student)}::${String(doc.name || '').trim().toLowerCase()}`);
   }
 
   async function uploadScan() {
@@ -316,7 +338,7 @@ export default function DispatchPage() {
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-xs text-blue-700">
         <span className="font-medium">Flow: </span>
-        Document Request → Confirm Receipt → Upload Scan → Counselor Reviews →
+        Document Request → Process Request → Upload Scan → Counselor Reviews →
         Center Pays → Accountant Verifies → Dispatch to Center
       </div>
 
@@ -501,7 +523,7 @@ export default function DispatchPage() {
                       {isAwaiting && (
                         <Button size="sm" className="bg-purple-600 hover:bg-purple-700 text-xs h-8"
                           onClick={() => confirmReceipt(d._id)}>
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5"/>Confirm Receipt
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5"/>Process Request
                         </Button>
                       )}
                       {isReceived && (
@@ -529,12 +551,13 @@ export default function DispatchPage() {
 
         {/* Incoming */}
         <TabsContent value="incoming" className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">Couriers from University — confirm receipt to proceed to scanning.</p>
+          <p className="text-xs text-muted-foreground">Couriers from University — process request to proceed to scanning.</p>
           {incoming.length === 0
             ? <div className="text-center py-10 text-muted-foreground">No incoming couriers</div>
             : incoming.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
-                action={<Button size="sm" onClick={() => confirmReceipt(d._id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Confirm Receipt</Button>}
+                alreadyInInventory={isAlreadyInInventory(d)}
+                action={<Button size="sm" onClick={() => confirmReceipt(d._id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Process Request</Button>}
               />
             ))
           }
