@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Plus, Edit2, Trash2, Loader2, Building2, User, Key,
   UserPlus, ChevronDown, ChevronUp, MapPin, Phone,
-  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip, Search, X,
+  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip, Search, X, Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,22 @@ const COVERAGE      = ['City','State','Multiple States','PAN India'];
 const TIMELINES     = ['Immediate (0 to 15 days)','15 to 30 days','1 to 3 months','Not sure'];
 const PROGRAMS      = ['UG','PG','Diploma/Certificate','Research/PhD (if applicable)'];
 const STREAMS_LIST  = ['Management','IT/Computer','Education','Arts','Science','Healthcare','Engineering','Other'];
+const FEE_STRUCTURES = ['Very Special', 'Special', 'Normal'];
+
+const csvEscape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+const csvDate = value => value ? new Date(value).toLocaleDateString('en-IN') : '';
+const joinList = value => Array.isArray(value) ? value.filter(Boolean).join(' | ') : (value || '');
+
+function downloadCsv(filename, headers, rows) {
+  const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const EMPTY_FORM = {
   // Screen 1
@@ -187,7 +203,7 @@ function CenterStudentsModal({ center, onClose }) {
 }
 
 // ── Center detail card expand ────────────────────────────────
-function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
+function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
   const [expanded,    setExpanded]    = useState(false);
   const [uploadOpen,  setUploadOpen]  = useState(false);
   const [uploadName,  setUploadName]  = useState('');
@@ -199,6 +215,8 @@ function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCrea
   const [uniManageOpen,   setUniManageOpen]   = useState(false);
   const [selectedUniIds,  setSelectedUniIds]  = useState([]);
   const [savingUnis,      setSavingUnis]       = useState(false);
+  const [savingFeeStructure, setSavingFeeStructure] = useState(false);
+  const [editingFeeStructure, setEditingFeeStructure] = useState(false);
 
   const programBadges = Array.isArray(center.programInterest) ? center.programInterest : [];
   const streamBadges  = Array.isArray(center.streams) ? center.streams : [];
@@ -223,6 +241,17 @@ function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCrea
       onRefresh?.();
     } catch(e) { toast.error(e.message); }
     finally { setSavingUnis(false); }
+  }
+
+  async function updateFeeStructure(value) {
+    setSavingFeeStructure(true);
+    try {
+      await centersApi.update(center._id, { feeStructureType: value });
+      toast.success('Fee structure updated');
+      setEditingFeeStructure(false);
+      onRefresh?.();
+    } catch(e) { toast.error(e.message); }
+    finally { setSavingFeeStructure(false); }
   }
 
   function toggleUni(id) {
@@ -260,7 +289,16 @@ function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCrea
       <CardContent className="p-4">
         {/* Header row */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            <input
+              type="checkbox"
+              checked={selectedForExport}
+              onChange={() => onToggleExport?.(center._id)}
+              onClick={e => e.stopPropagation()}
+              className="mt-1 h-4 w-4 rounded border-slate-300"
+              aria-label={`Select ${center.name || center.organisationName} for CSV`}
+            />
+            <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap cursor-pointer" onClick={() => onViewStudents(center)}>
               <span className="font-semibold text-base text-primary hover:underline">{center.name || center.organisationName}</span>
               {center.organisationType && (
@@ -278,6 +316,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCrea
                 <User className="h-3 w-3"/>Counselor: {center.assignedCounselor.name}
               </div>
             )}
+            </div>
           </div>
           <div className="flex gap-1 flex-shrink-0">
             <Button variant="ghost" size="sm" onClick={() => setExpanded(p => !p)} title="View details">
@@ -370,6 +409,47 @@ function CenterCard({ center, isAdmin, loginUsers = [], onEdit, onDelete, onCrea
                 </div>
               </div>
             )}
+
+            <div className="border rounded-lg p-3 bg-emerald-50/40 border-emerald-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">Fee Structure Given</div>
+                  <p className="text-xs text-emerald-600 mt-0.5">Which fee structure this center has been offered.</p>
+                </div>
+                <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+                  {editingFeeStructure ? (
+                    <Select
+                      value={center.feeStructureType || 'Normal'}
+                      onValueChange={updateFeeStructure}
+                      disabled={savingFeeStructure}
+                    >
+                      <SelectTrigger className="w-full bg-white border-emerald-200 sm:w-56">
+                        <SelectValue placeholder="Select fee structure" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FEE_STRUCTURES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <>
+                      <span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700">
+                        {center.feeStructureType || 'Normal'}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1 border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                        onClick={e => { e.stopPropagation(); setEditingFeeStructure(true); }}
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        Edit
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="border rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
@@ -564,6 +644,11 @@ export default function CentersPage() {
   const [centerUsers,setCenterUsers]= useState([]);
   const [centerSearch,setCenterSearch]= useState('');
   const [loading,    setLoading]    = useState(true);
+  const [selectedCenters, setSelectedCenters] = useState(() => new Set());
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportCenterDetails, setExportCenterDetails] = useState(true);
+  const [exportStudentList, setExportStudentList] = useState(false);
 
   // Form state
   const [formOpen,   setFormOpen]   = useState(false);
@@ -710,6 +795,135 @@ export default function CentersPage() {
     } catch(e) { toast.error(e.message); }
   }
 
+  function toggleCenterSelection(id) {
+    setSelectedCenters(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function getSelectedOrFilteredCenters(list = filteredCenters) {
+    if (selectedCenters.size === 0) return list;
+    return centers.filter(c => selectedCenters.has(c._id));
+  }
+
+  async function exportCentersCsv() {
+    if (!exportCenterDetails && !exportStudentList) {
+      toast.error('Select at least one export option');
+      return;
+    }
+
+    const targetCenters = getSelectedOrFilteredCenters();
+    if (targetCenters.length === 0) {
+      toast.error('No centers to export');
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      let studentsByCenter = new Map();
+      if (exportStudentList) {
+        const allStudents = await studentsApi.getAll();
+        const targetIds = new Set(targetCenters.map(c => String(c._id)));
+        allStudents
+          .filter(s => targetIds.has(String(s.center?._id || s.center || '')))
+          .forEach(s => {
+            const centerId = String(s.center?._id || s.center || '');
+            if (!studentsByCenter.has(centerId)) studentsByCenter.set(centerId, []);
+            studentsByCenter.get(centerId).push(s);
+          });
+      }
+
+      const centerHeaders = exportCenterDetails ? [
+        'Center Name', 'Organisation Type', 'Contact Person', 'Email', 'Phone',
+        'City', 'State', 'Address', 'Fee Structure', 'Assigned Counselor',
+        'Programs', 'Streams', 'Experience', 'Team Size', 'Monthly Enquiries',
+        'Coverage', 'Timeline', 'Website', 'Active', 'Login Emails',
+      ] : ['Center Name'];
+
+      const studentHeaders = exportStudentList ? [
+        'Student Name', 'Father Name', 'Phone', 'Email', 'Course', 'Session',
+        'University', 'Status', 'Enrollment Number', 'Enrollment Checked',
+        'Submitted Date',
+      ] : [];
+
+      const headers = [...centerHeaders, ...studentHeaders];
+
+      const centerRow = center => {
+        const loginEmails = centerUsers
+          .filter(u => String(u.centerId?._id || u.centerId) === String(center._id))
+          .map(u => u.email)
+          .filter(Boolean)
+          .join(' | ');
+
+        if (!exportCenterDetails) return [center.name || center.organisationName || ''];
+
+        return [
+          center.name || center.organisationName || '',
+          center.organisationType || '',
+          center.fullName || '',
+          center.emailId || '',
+          center.contactNumber || '',
+          center.city || '',
+          center.state || '',
+          center.address || '',
+          center.feeStructureType || 'Normal',
+          center.assignedCounselor?.name || '',
+          joinList(center.programInterest),
+          joinList(center.streams),
+          center.experience || '',
+          center.teamSize || '',
+          center.monthlyEnquiries || '',
+          center.coverage || '',
+          center.timeline || '',
+          center.website || '',
+          center.isActive === false ? 'No' : 'Yes',
+          loginEmails,
+        ];
+      };
+
+      const studentRow = student => [
+        student.name || '',
+        student.fatherName || '',
+        student.phone || '',
+        student.email || '',
+        student.courseName || '',
+        student.courseYear || '',
+        student.university?.name || student.universityName || '',
+        STATUS_LABELS[student.applicationStatus] || student.applicationStatus || '',
+        student.enrollmentNumber || '',
+        student.enrollmentNumberChecked ? 'Yes' : 'No',
+        csvDate((student.statusHistory || []).find(h => h.status === 'Submitted')?.at),
+      ];
+
+      const rows = [];
+      targetCenters.forEach(center => {
+        const base = centerRow(center);
+        const centerStudents = studentsByCenter.get(String(center._id)) || [];
+        if (!exportStudentList) {
+          rows.push(base);
+          return;
+        }
+        if (centerStudents.length === 0) {
+          rows.push([...base, ...studentHeaders.map(() => '')]);
+          return;
+        }
+        centerStudents.forEach(student => rows.push([...base, ...studentRow(student)]));
+      });
+
+      const date = new Date().toISOString().slice(0, 10);
+      const scope = selectedCenters.size > 0 ? 'selected' : 'all';
+      downloadCsv(`centers_${scope}_${date}.csv`, headers, rows);
+      toast.success(`CSV downloaded - ${targetCenters.length} center${targetCenters.length > 1 ? 's' : ''}`);
+      setExportOpen(false);
+    } catch(e) {
+      toast.error('Export failed: ' + e.message);
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
   const set = (field, val) => setForm(p => ({ ...p, [field]: val }));
   const centerQuery = centerSearch.toLowerCase().trim();
   const filteredCenters = centers.filter(c => {
@@ -726,6 +940,8 @@ export default function CentersPage() {
       c.assignedCounselor?.name,
     ].some(v => String(v || '').toLowerCase().includes(centerQuery));
   });
+  const filteredIds = filteredCenters.map(c => c._id);
+  const selectedInFiltered = filteredIds.filter(id => selectedCenters.has(id)).length;
 
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
 
@@ -737,6 +953,9 @@ export default function CentersPage() {
           <p className="text-sm text-muted-foreground">Manage admission centers and their details</p>
         </div>
         <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} disabled={centers.length === 0}>
+            <Download className="h-4 w-4 mr-1"/>CSV
+          </Button>
           <Button size="sm" onClick={openAdd}>
             <Plus className="h-4 w-4 mr-1"/>Add Center
           </Button>
@@ -763,6 +982,38 @@ export default function CentersPage() {
         )}
       </div>
 
+      {centers.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={filteredCenters.length > 0 && selectedInFiltered === filteredCenters.length}
+              onChange={e => {
+                setSelectedCenters(prev => {
+                  const next = new Set(prev);
+                  filteredIds.forEach(id => e.target.checked ? next.add(id) : next.delete(id));
+                  return next;
+                });
+              }}
+            />
+            <span className="font-medium">Select All</span>
+          </label>
+          <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+            <span>
+              {selectedCenters.size > 0
+                ? `${selectedCenters.size} center selected for CSV`
+                : 'No selection - CSV will export all visible centers'}
+            </span>
+            {selectedCenters.size > 0 && (
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={() => setSelectedCenters(new Set())}>
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {centers.length === 0 ? (
         <div className="text-center py-16 border border-dashed rounded-lg">
           <Building2 className="h-10 w-10 mx-auto text-muted-foreground mb-3"/>
@@ -778,6 +1029,8 @@ export default function CentersPage() {
           {filteredCenters.map(c => (
             <CenterCard key={c._id} center={c} isAdmin={isAdmin}
               loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
+              selectedForExport={selectedCenters.has(c._id)}
+              onToggleExport={toggleCenterSelection}
               onEdit={openEdit}
               onDelete={deleteCenter}
               onCreateLogin={c => { setLoginTarget(c); setLoginForm({ name: c.fullName||'', email:'', password:'' }); setLoginOpen(true); }}
@@ -791,6 +1044,58 @@ export default function CentersPage() {
       )}
 
       {/* ── Add/Edit Center Dialog — 2-step form ──────────── */}
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Export Centers CSV</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+              <div className="font-medium">Centers to export</div>
+              <p className="text-muted-foreground mt-1">
+                {selectedCenters.size > 0
+                  ? `${selectedCenters.size} selected center${selectedCenters.size > 1 ? 's' : ''}`
+                  : `${filteredCenters.length} visible center${filteredCenters.length > 1 ? 's' : ''} (all)`}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-medium">What should be exported?</div>
+              <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/30">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                  checked={exportCenterDetails}
+                  onChange={e => setExportCenterDetails(e.target.checked)}
+                />
+                <span>
+                  <span className="block font-medium">Center details</span>
+                  <span className="block text-xs text-muted-foreground">Name, phone, city, counselor, fee structure, login emails and business details.</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer hover:bg-muted/30">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                  checked={exportStudentList}
+                  onChange={e => setExportStudentList(e.target.checked)}
+                />
+                <span>
+                  <span className="block font-medium">Student list</span>
+                  <span className="block text-xs text-muted-foreground">Students under each selected center with course, status and enrollment number.</span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportOpen(false)}>Cancel</Button>
+            <Button onClick={exportCentersCsv} disabled={exportLoading}>
+              {exportLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin"/>Preparing</> : <><Download className="h-4 w-4 mr-1"/>Download CSV</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>

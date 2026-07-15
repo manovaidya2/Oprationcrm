@@ -47,6 +47,7 @@ const centerSchema = new mongoose.Schema({
   },
 
   isActive:          { type: Boolean, default: true },
+  feeStructureType:  { type: String, enum: ['Very Special', 'Special', 'Normal'], default: 'Normal' },
   assignedCounselor: { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor' },
 
   // Universities this center is allowed to apply to (set by counselor)
