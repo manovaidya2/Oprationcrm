@@ -3,7 +3,7 @@ import {
   BookOpen, BadgeCheck, Truck, Paperclip, Search, X, Eye,
   Loader2, GraduationCap, FileText, Package, TrendingUp,
   Clock, CheckCircle2, Hash, User, Building2, Download,
-  ChevronRight, History, Send, XCircle,
+  ChevronRight, History, Send, XCircle, AlertTriangle,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -285,8 +285,11 @@ export default function UniversityPage() {
   }
 
   // ── Derived stats ───────────────────────────────────────────
+  const isUrgentDoc = d => (d.statusHistory || []).some(h => h.status === 'Urgent_Requested');
   const allStudents   = [...pending, ...enrolled, ...cancelled];
-  const pendingDocs   = docs.filter(d => d.status === 'Sent_To_University');
+  const urgentPendingDocs = docs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d));
+  const urgentHistoryDocs = docs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d));
+  const pendingDocs   = docs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d));
   const dispatchedDocs= docs.filter(d => DISPATCHED_STATUSES.includes(d.status));
   const totalDocs     = docs.length;
 
@@ -336,11 +339,11 @@ export default function UniversityPage() {
     setSelectedDocIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
   }
 
-  function downloadDocRequestsCSV() {
-    const pendingList = filtDocs.filter(d => d.status === 'Sent_To_University');
+  function downloadDocRequestsCSV(urgentOnly = false) {
+    const pendingList = filtDocs.filter(d => d.status === 'Sent_To_University' && (urgentOnly ? isUrgentDoc(d) : !isUrgentDoc(d)));
     const selected = pendingList.filter(d => selectedDocIds.includes(String(d._id)));
     const list = selected.length ? selected : pendingList;
-    if (!list.length) return toast.error('No requested documents to export');
+    if (!list.length) return toast.error(urgentOnly ? 'No urgent document requests to export' : 'No requested documents to export');
     const grouped = new Map();
     list.forEach(doc => {
       const sid = String(doc.student?._id || doc.student?.enrollmentNumber || doc.student?.name || doc._id);
@@ -351,6 +354,7 @@ export default function UniversityPage() {
       'Student Name': student.name || '',
       'Enrollment Number': student.enrollmentNumber || '',
       'Course': student.courseName || '',
+      'Request Type': urgentOnly ? 'Urgent' : 'Normal',
       'Requested Documents': docs.join(' | '),
     }));
     const headers = Object.keys(rows[0]);
@@ -360,7 +364,7 @@ export default function UniversityPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `university_doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `university_${urgentOnly ? 'urgent_' : ''}doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length} students`);
@@ -428,7 +432,7 @@ export default function UniversityPage() {
           icon={FileText}
           label="Document Requests"
           value={totalDocs}
-          sub={`${pendingDocs.length} pending action`}
+          sub={`${pendingDocs.length} normal · ${urgentPendingDocs.length} urgent pending`}
           color="text-blue-600"
         />
         <StatCard
@@ -462,7 +466,13 @@ export default function UniversityPage() {
                 <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{pendingDocs.length}</span>
               </div>
             )}
-            {pending.length === 0 && pendingDocs.length === 0 && (
+            {urgentPendingDocs.length > 0 && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Urgent Doc Requests</span>
+                <span className="font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded">{urgentPendingDocs.length}</span>
+              </div>
+            )}
+            {pending.length === 0 && pendingDocs.length === 0 && urgentPendingDocs.length === 0 && (
               <p className="text-sm text-muted-foreground">All clear ✓</p>
             )}
           </CardContent>
@@ -549,6 +559,7 @@ export default function UniversityPage() {
               { val:'enrolled',   label:'Enrolled',            count: enrolled.length,      dot:'bg-emerald-500',icon: <CheckCircle2 className="h-3.5 w-3.5"/> },
               { val:'cancelled',  label:'Cancelled',           count: cancelled.length,     dot:'bg-slate-400',  icon: <XCircle className="h-3.5 w-3.5"/> },
               { val:'docreq',     label:'Doc Requests',        count: pendingDocs.length,   dot:'bg-blue-500',   icon: <FileText className="h-3.5 w-3.5"/> },
+              { val:'urgent',     label:'Urgent Requests',     count: urgentPendingDocs.length + urgentHistoryDocs.length, dot:'bg-red-500', icon: <AlertTriangle className="h-3.5 w-3.5"/> },
               { val:'dispatched', label:'Dispatched History',  count: dispatchedDocs.length,dot:'',              icon: <Truck className="h-3.5 w-3.5"/> },
             ].map(({ val, label, count, dot, icon }) => (
               <TabsTrigger key={val} value={val}
@@ -711,21 +722,21 @@ export default function UniversityPage() {
               <Button
                 variant="outline"
                 className="gap-2"
-                onClick={downloadDocRequestsCSV}
-                disabled={filtDocs.filter(d => d.status === 'Sent_To_University').length === 0}
+                onClick={() => downloadDocRequestsCSV(false)}
+                disabled={filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).length === 0}
               >
                 <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'Requests'}
               </Button>
             </div>
 
             {/* Group: Pending Action */}
-            {filtDocs.filter(d => d.status === 'Sent_To_University').length > 0 && (
+            {filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).length > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"/>
-                  <span className="text-sm font-semibold text-amber-700">Pending My Action ({filtDocs.filter(d=>d.status==='Sent_To_University').length})</span>
+                  <span className="text-sm font-semibold text-amber-700">Pending My Action ({filtDocs.filter(d=>d.status==='Sent_To_University' && !isUrgentDoc(d)).length})</span>
                 </div>
-                {filtDocs.filter(d => d.status === 'Sent_To_University').map(d => (
+                {filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).map(d => (
                   <Card key={d._id} className="border-amber-200 mb-2">
                     <CardContent className="p-4 flex items-center justify-between gap-3">
                       <div className="flex items-start gap-3">
@@ -805,6 +816,120 @@ export default function UniversityPage() {
           </TabsContent>
 
           {/* ── Dispatched History ───────────────────────── */}
+          <TabsContent value="urgent" className="space-y-3 mt-4">
+            <div className="flex flex-wrap gap-2">
+              <div className="relative flex-1 min-w-[260px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+                <Input className="pl-9 pr-9" placeholder="Search urgent documents..."
+                  value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
+                {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
+              </div>
+              <Button
+                variant="outline"
+                className="gap-2 border-red-300 text-red-700 hover:bg-red-50"
+                onClick={() => downloadDocRequestsCSV(true)}
+                disabled={filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).length === 0}
+              >
+                <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'Urgent Requests'}
+              </Button>
+            </div>
+
+            {filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).length > 0 ? (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="h-4 w-4 text-red-600"/>
+                  <span className="text-sm font-semibold text-red-700">
+                    Urgent Pending Requests ({filtDocs.filter(d=>d.status==='Sent_To_University' && isUrgentDoc(d)).length})
+                  </span>
+                </div>
+                {filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).map(d => {
+                  const urgentEntry = [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested');
+                  return (
+                    <Card key={d._id} className="border-red-200 bg-red-50/40 mb-2">
+                      <CardContent className="p-4 flex items-center justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedDocIds.includes(String(d._id))}
+                            onChange={() => toggleDocSelection(d._id)}
+                            className="mt-1 h-4 w-4 accent-red-600"
+                          />
+                          <div>
+                            <div className="font-medium">{d.name}</div>
+                            <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
+                              Student: <b>{d.student?.name}</b>
+                              {d.student?.enrollmentNumber && (
+                                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                  {d.student.enrollmentNumber}
+                                </span>
+                              )}
+                            </div>
+                            {urgentEntry?.at && (
+                              <div className="text-xs text-red-700 mt-0.5">Urgent requested: {fmtDt(urgentEntry.at)}</div>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-xs font-semibold text-red-700 bg-red-100 border border-red-200 px-2.5 py-1 rounded-full">
+                          Urgent - Awaiting Physical Courier
+                        </span>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-300"/>
+                {urgentPendingDocs.length === 0 && urgentHistoryDocs.length === 0 ? 'No urgent document requests' : `No results for "${docSearch}"`}
+              </div>
+            ) : null}
+
+            {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length > 0 && (
+              <div className="border-t pt-3">
+                <span className="text-sm font-semibold text-muted-foreground flex items-center gap-2 mb-2">
+                  <History className="h-4 w-4"/>Urgent Requests History ({filtDocs.filter(d=>DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length})
+                </span>
+                {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).map(d => {
+                  const si = DOC_STATUS[d.status] || { label: d.status, color: 'bg-gray-100 text-gray-700' };
+                  const urgentEntry = [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested');
+                  return (
+                    <Card key={d._id} className="border-red-100 mb-2">
+                      <CardContent className="p-4 flex items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">{d.name}</span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
+                            <span className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">Urgent</span>
+                          </div>
+                          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+                            Student: <b>{d.student?.name}</b>
+                            {d.student?.enrollmentNumber && (
+                              <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                {d.student.enrollmentNumber}
+                              </span>
+                            )}
+                          </div>
+                          {urgentEntry?.at && (
+                            <div className="text-xs text-red-700 mt-0.5">Urgent requested: {fmtDt(urgentEntry.at)}</div>
+                          )}
+                          {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
+                            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
+                              <Truck className="h-3 w-3"/>
+                              {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
+                              {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
+                              {d.courierInfo.dispatchDate && <span>{fmtDt(d.courierInfo.dispatchDate)}</span>}
+                              {d.courierInfo.documentsDesc && <span>{d.courierInfo.documentsDesc}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </TabsContent>
+
           <TabsContent value="dispatched" className="space-y-2 mt-4">
             <p className="text-sm text-muted-foreground">Complete record of all documents dispatched from university.</p>
             {dispatchedDocs.length === 0

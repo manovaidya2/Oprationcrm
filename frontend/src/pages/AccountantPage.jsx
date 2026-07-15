@@ -339,6 +339,7 @@ export default function AccountantPage() {
   const [search, setSearch] = useState('');
   const [note,   setNote]   = useState('');
   const [saving, setSaving] = useState(false);
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -566,10 +567,40 @@ export default function AccountantPage() {
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
+  function toggleDocSelection(id) {
+    setSelectedDocIds(prev => prev.includes(String(id)) ? prev.filter(x => x !== String(id)) : [...prev, String(id)]);
+  }
+
+  async function batchDocApprove(list) {
+    const selected = list.filter(d => selectedDocIds.includes(String(d._id)));
+    if (!selected.length) return toast.error('Select documents first');
+    setSaving(true);
+    try {
+      for (const doc of selected) await docsApi.accountantAction(doc._id, 'approve', '');
+      toast.success(`${selected.length} documents approved`);
+      setSelectedDocIds([]);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  }
+
   async function doPayVerify(approved) {
     setSaving(true);
     try { await docsApi.verifyPayment(dialog.item._id, approved, note); toast.success(approved?'Verified':'Rejected'); setDialog(null); setNote(''); load(); }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function batchPayVerify(list) {
+    const selected = list.filter(d => selectedDocIds.includes(String(d._id)));
+    if (!selected.length) return toast.error('Select payments first');
+    setSaving(true);
+    try {
+      for (const doc of selected) await docsApi.verifyPayment(doc._id, true, '');
+      toast.success(`${selected.length} document payments verified`);
+      setSelectedDocIds([]);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
   }
 
   async function forwardScanToCounselor(docId) {
@@ -1019,12 +1050,35 @@ export default function AccountantPage() {
 
         {/* Doc Fees Tab */}
         <TabsContent value="docs" className="space-y-2 mt-3">
+          {filtDocs.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={filtDocs.length > 0 && filtDocs.every(d => selectedDocIds.includes(String(d._id)))}
+                  onChange={e => setSelectedDocIds(e.target.checked ? filtDocs.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all visible doc fee checks
+              </label>
+              <Button size="sm" onClick={() => batchDocApprove(filtDocs)} disabled={saving || !filtDocs.some(d => selectedDocIds.includes(String(d._id)))}>
+                Approve Selected
+              </Button>
+            </div>
+          )}
           {filtDocs.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No doc fees matching "${search}"` : 'No doc fee checks'}</div>
           : filtDocs.map(d => (
             <Card key={d._id}>
               <CardContent className="p-4 flex justify-between items-start gap-3">
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocIds.includes(String(d._id))}
+                      onChange={() => toggleDocSelection(d._id)}
+                      className="h-4 w-4 accent-indigo-600"
+                      aria-label={`Select ${d.name}`}
+                    />
                     <span className="font-medium">{d.name}</span>
                     <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{d.status?.replace(/_/g,' ')}</span>
                   </div>
@@ -1081,12 +1135,35 @@ export default function AccountantPage() {
 
         {/* Doc Payments Tab */}
         <TabsContent value="payments" className="space-y-2 mt-3">
+          {filtPayDocs.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={filtPayDocs.length > 0 && filtPayDocs.every(d => selectedDocIds.includes(String(d._id)))}
+                  onChange={e => setSelectedDocIds(e.target.checked ? filtPayDocs.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all visible payments
+              </label>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => batchPayVerify(filtPayDocs)} disabled={saving || !filtPayDocs.some(d => selectedDocIds.includes(String(d._id)))}>
+                Verify Selected
+              </Button>
+            </div>
+          )}
           {filtPayDocs.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No payments matching "${search}"` : 'No payments to verify'}</div>
           : filtPayDocs.map(d => (
             <Card key={d._id}>
               <CardContent className="p-4 flex justify-between items-start gap-3">
                 <div>
                   <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocIds.includes(String(d._id))}
+                      onChange={() => toggleDocSelection(d._id)}
+                      className="h-4 w-4 accent-indigo-600"
+                      aria-label={`Select ${d.name}`}
+                    />
                     <span className="font-medium">{d.name}</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Payment Submitted</span>
                   </div>

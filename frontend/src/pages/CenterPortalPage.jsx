@@ -1287,13 +1287,17 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
+  const [editDoc,setEditDoc]=useState(null);
   const [saving,setSaving]=useState(false);
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
   const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
-  const [df,setDf]=useState({name:'',chargeFee:'',note:'',payAmount:''});
+  const [df,setDf]=useState({name:'',names:[],chargeFee:'',note:'',payAmount:''});
+  const [editDf,setEditDf]=useState({name:'',chargeFee:'',note:''});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
+  const editDocFileRef=useRef();
+  const [editDocFile,setEditDocFile]=useState(null);
 
   useEffect(() => {
     paymentAccountsApi.list().then(accs => {
@@ -1308,30 +1312,33 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   useEffect(()=>{load();},[load]);
 
   async function addDoc(){
-    if(!df.name.trim()) return toast.error('Document name required');
+    const names = df.names?.length ? df.names : (df.name?.trim() ? [df.name.trim()] : []);
+    if(!names.length) return toast.error('Select at least one document');
     setSaving(true);
     try{
-      const fd=new FormData();
-      fd.append('studentId',studentId); fd.append('name',df.name);
-      fd.append('note',df.note);
-      fd.append('chargeFee',df.chargeFee||0);
-      if(df.payAmount&&Number(df.payAmount)>0){
-        fd.append('paymentAmount',df.payAmount);
-        fd.append('paymentMode',dfPay.mode||'UPI');
-        fd.append('paymentUpiId',dfPay.upiId||'');
-        fd.append('paymentUtrRef',dfPay.utrRef||'');
-        fd.append('paymentBankName',dfPay.bankName||'');
-        fd.append('paymentAccountHolder',dfPay.accountHolder||'');
-        fd.append('paymentAccountNumber',dfPay.accountNumber||'');
-        fd.append('paymentIfscCode',dfPay.ifscCode||'');
-        fd.append('paymentDate',dfPay.paidAt||'');
-        fd.append('paymentPaidToAccount',dfPay.paidToAccount||'');
-        fd.append('paymentPaidToAccountLabel',dfPay.paidToAccountLabel||'');
+      for (const name of names) {
+        const fd=new FormData();
+        fd.append('studentId',studentId); fd.append('name',name);
+        fd.append('note',df.note);
+        fd.append('chargeFee',df.chargeFee||0);
+        if(df.payAmount&&Number(df.payAmount)>0){
+          fd.append('paymentAmount',df.payAmount);
+          fd.append('paymentMode',dfPay.mode||'UPI');
+          fd.append('paymentUpiId',dfPay.upiId||'');
+          fd.append('paymentUtrRef',dfPay.utrRef||'');
+          fd.append('paymentBankName',dfPay.bankName||'');
+          fd.append('paymentAccountHolder',dfPay.accountHolder||'');
+          fd.append('paymentAccountNumber',dfPay.accountNumber||'');
+          fd.append('paymentIfscCode',dfPay.ifscCode||'');
+          fd.append('paymentDate',dfPay.paidAt||'');
+          fd.append('paymentPaidToAccount',dfPay.paidToAccount||'');
+          fd.append('paymentPaidToAccountLabel',dfPay.paidToAccountLabel||'');
+        }
+        if(docFile) fd.append('file',docFile);
+        await docsApi.create(fd);
       }
-      if(docFile) fd.append('file',docFile);
-      await docsApi.create(fd);
-      toast.success('Document request submitted'); setAddOpen(false);
-      setDf({name:'',chargeFee:'',note:'',payAmount:''}); setDfPay({...EMPTY_PF});
+      toast.success(names.length > 1 ? `${names.length} document requests submitted` : 'Document request submitted'); setAddOpen(false);
+      setDf({name:'',names:[],chargeFee:'',note:'',payAmount:''}); setDfPay({...EMPTY_PF});
       setDocFile(null); if(fileRef.current) fileRef.current.value='';
       load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1391,6 +1398,35 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   paidToAccountLabel: editPay.payment.paidToAccountLabel,
 });
       toast.success('Payment updated'); setEditPay(null); load();
+    } catch(e){toast.error(e.message);} finally{setSaving(false);}
+  }
+
+  function canEditDocRequest(doc) {
+    return !isCancelled && ['Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'].includes(doc.status) && !doc.scannedUrl;
+  }
+
+  function openEditDoc(doc) {
+    setEditDoc(doc);
+    setEditDf({ name: doc.name || '', chargeFee: doc.chargeFee || '', note: doc.note || '' });
+    setEditDocFile(null);
+    if (editDocFileRef.current) editDocFileRef.current.value = '';
+  }
+
+  async function saveDocEdit(){
+    if(!editDoc) return;
+    if(!editDf.name.trim()) return toast.error('Document name required');
+    setSaving(true);
+    try{
+      const fd = new FormData();
+      fd.append('name', editDf.name);
+      fd.append('chargeFee', editDf.chargeFee || 0);
+      fd.append('note', editDf.note || '');
+      if(editDocFile) fd.append('file', editDocFile);
+      await docsApi.update(editDoc._id, fd);
+      toast.success('Document request updated');
+      setEditDoc(null); setEditDocFile(null);
+      if (editDocFileRef.current) editDocFileRef.current.value = '';
+      load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
 
@@ -1580,6 +1616,11 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
               )}
             </div>
             <div className="flex flex-col gap-2 flex-shrink-0">
+              {canEditDocRequest(d) && (
+                <Button size="sm" variant="outline" onClick={()=>openEditDoc(d)} className="text-xs h-8 border-slate-200">
+                  <Pencil className="h-3.5 w-3.5 mr-1"/>Edit
+                </Button>
+              )}
               {d.chargeFee > 0 && d.totalPaid < d.chargeFee && (
                 <Button size="sm" onClick={()=>{setPayDoc(d);setPf({...EMPTY_PF});}} className="bg-amber-500 hover:bg-amber-600 text-white text-xs h-8">
                   <CreditCard className="h-3.5 w-3.5 mr-1"/>Pay {fmt(d.chargeFee - d.totalPaid)}
@@ -1611,13 +1652,28 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
           <DialogHeader><DialogTitle className="text-slate-800">Request Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label className="text-xs font-semibold text-slate-600">Document Name *</Label>
-              <Select value={df.name} onValueChange={v=>setDf(p=>({...p,name:v}))}>
-                <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose document"/></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label className="text-xs font-semibold text-slate-600">Document Names *</Label>
+              <div className="mt-1 max-h-72 overflow-y-auto rounded-md border border-slate-200 p-2">
+                {DOCUMENT_OPTIONS.map(name => {
+                  const checked = df.names.includes(name);
+                  return (
+                    <label key={name} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setDf(p => ({
+                          ...p,
+                          name: '',
+                          names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
+                        }))}
+                        className="h-4 w-4 accent-indigo-600"
+                      />
+                      <span>{name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="mt-1 text-xs text-slate-500">{df.names.length} selected</div>
             </div>
             <div className="grid grid-cols-1 gap-3">
               <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
@@ -1635,6 +1691,34 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
             </div> */}
           </div>
           <DialogFooter><Button variant="outline" onClick={()=>setAddOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={addDoc} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Submit Request</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editDoc} onOpenChange={()=>setEditDoc(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle className="text-slate-800">Edit Document Request</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-semibold text-slate-600">Document Name *</Label>
+              <Select value={editDf.name} onValueChange={v=>setEditDf(p=>({...p,name:v}))}>
+                <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose document"/></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={editDf.chargeFee} onChange={e=>setEditDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+            <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={editDf.note} onChange={e=>setEditDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600">Replace File</Label>
+              <input ref={editDocFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setEditDocFile(e.target.files[0] || null)} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-600 file:font-medium"/>
+            </div>
+            <p className="text-xs text-slate-500">Editing is available until the scanned copy is uploaded.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setEditDoc(null)} className="border-slate-200">Cancel</Button>
+            <Button onClick={saveDocEdit} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Changes</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

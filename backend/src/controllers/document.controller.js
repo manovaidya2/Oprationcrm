@@ -32,16 +32,11 @@ function addHistoryOnly(doc, status, user, note = '', at = new Date()) {
 }
 
 const INVENTORY_DOC_NAMES = [
-  'Marksheet – Semester 1',
-  'Marksheet – Semester 2',
-  'Marksheet – Semester 3',
-  'Marksheet – Semester 4',
-  'Marksheet – Semester 5',
-  'Marksheet – Semester 6',
-  'Marksheet – Semester 7',
-  'Marksheet – Semester 8',
-  'Marksheet – Semester 9',
-  'Marksheet – Semester 10',
+  'Marksheet Year One',
+  'Marksheet Year Two',
+  'Marksheet Year Three',
+  'Marksheet Year Four',
+  'Marksheet Year Five',
   'Consolidated Marksheet',
   'Final Marksheet',
   'Degree Certificate',
@@ -58,7 +53,7 @@ const INVENTORY_DOC_NAMES = [
   'Character Certificate',
   'Duplicate Marksheet',
   'Duplicate Degree',
-  'Other Certificate – Custom',
+  'Other Certificate - Custom',
   'Entrance Exam Result',
   'Admission Offer Letter',
   'Admission Confirmation Letter',
@@ -199,9 +194,18 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.body.name)      doc.name      = req.body.name;
-  if (req.body.type)      doc.type      = req.body.type;
-  if (req.body.note)      doc.note      = req.body.note;
+  if (req.user.role === 'Center') {
+    if (String(doc.center) !== String(req.user.centerId)) {
+      const e = new Error('Forbidden'); e.status = 403; throw e;
+    }
+    const editableBeforeScan = ['Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
+    if (!editableBeforeScan.includes(doc.status) || doc.scannedUrl) {
+      const e = new Error('Document request cannot be edited after scan is uploaded'); e.status = 400; throw e;
+    }
+  }
+  if (req.body.name !== undefined)      doc.name      = req.body.name;
+  if (req.body.type !== undefined)      doc.type      = req.body.type;
+  if (req.body.note !== undefined)      doc.note      = req.body.note;
   if (req.body.chargeFee !== undefined) doc.chargeFee = Number(req.body.chargeFee);
   if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
   await doc.save();

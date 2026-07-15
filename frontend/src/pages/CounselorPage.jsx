@@ -719,6 +719,7 @@ export default function CounselorPage() {
   const [centerModal, setCenterModal] = useState(null);
   const [docModal, setDocModal] = useState(null);
   const [docPayments, setDocPayments] = useState({});
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
 
   const load = useCallback(async () => {
     try {
@@ -802,6 +803,26 @@ export default function CounselorPage() {
   async function forwardDoc(d) {
     try { await docsApi.forward(d._id); toast.success('Forwarded to accountant'); load(); }
     catch(e) { toast.error(e.message); }
+  }
+
+  function toggleDocSelection(id) {
+    setSelectedDocIds(prev => prev.includes(String(id)) ? prev.filter(x => x !== String(id)) : [...prev, String(id)]);
+  }
+
+  async function batchForwardDocs(list, action, successLabel) {
+    const selected = list.filter(d => selectedDocIds.includes(String(d._id)));
+    if (!selected.length) return toast.error('Select documents first');
+    setSaving(true);
+    try {
+      for (const doc of selected) await action(doc);
+      toast.success(`${selected.length} documents ${successLabel}`);
+      setSelectedDocIds([]);
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleForwardSettlement(student, note) {
@@ -1001,6 +1022,22 @@ export default function CounselorPage() {
         {/* ── Doc Requests Tab ───────────────────────────── */}
         <TabsContent value="docs" className="space-y-2 mt-4">
           <TabHint>New document requests from centers — forward to accountant for fee approval.</TabHint>
+          {newDocs.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={newDocs.length > 0 && newDocs.every(d => selectedDocIds.includes(String(d._id)))}
+                  onChange={e => setSelectedDocIds(e.target.checked ? newDocs.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all document requests
+              </label>
+              <Button size="sm" onClick={() => batchForwardDocs(newDocs, d => docsApi.forward(d._id), 'forwarded to accountant')} disabled={saving || !newDocs.some(d => selectedDocIds.includes(String(d._id)))}>
+                <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
+              </Button>
+            </div>
+          )}
           {newDocs.length===0 ? <EmptyState message="No new document requests"/> :
           newDocs.map(d=>(
             <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
@@ -1009,10 +1046,19 @@ export default function CounselorPage() {
               badgeColor={DOC_COLORS[d.status]||'bg-slate-100 text-slate-600'}
               onClick={()=>setDocModal(d)}>
               {d.status==='Requested'&&(
-                <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-xs h-8"
-                  onClick={e=>{e.stopPropagation();forwardDoc(d);}}>
-                  <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
-                </Button>
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedDocIds.includes(String(d._id))}
+                    onChange={() => toggleDocSelection(d._id)}
+                    className="h-4 w-4 accent-indigo-600"
+                    aria-label={`Select ${d.name}`}
+                  />
+                  <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-xs h-8"
+                    onClick={e=>{e.stopPropagation();forwardDoc(d);}}>
+                    <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
+                  </Button>
+                </div>
               )}
             </DocCard>
           ))}
@@ -1095,6 +1141,22 @@ export default function CounselorPage() {
         {/* ── Doc Payments Tab ───────────────────────────── */}
         <TabsContent value="payment" className="space-y-2 mt-4">
           <TabHint>Center has submitted payment — review and forward to accountant for verification.</TabHint>
+          {paymentPending.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={paymentPending.length > 0 && paymentPending.every(d => selectedDocIds.includes(String(d._id)))}
+                  onChange={e => setSelectedDocIds(e.target.checked ? paymentPending.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all payment requests
+              </label>
+              <Button size="sm" onClick={() => batchForwardDocs(paymentPending, d => docsApi.forwardPayment(d._id), 'payment requests forwarded to accountant')} disabled={saving || !paymentPending.some(d => selectedDocIds.includes(String(d._id)))}>
+                <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
+              </Button>
+            </div>
+          )}
           {paymentPending.length===0 ? <EmptyState icon={IndianRupee} message="No payments pending review"/> :
           paymentPending.map(d=>(
             <DocCard key={d._id} d={d} accMap={payAccounts}
@@ -1102,10 +1164,19 @@ export default function CounselorPage() {
               badge="Payment Submitted"
               badgeColor="bg-emerald-50 text-emerald-700 border border-emerald-200"
               onClick={()=>setDocModal(d)}>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8"
-                onClick={e=>{e.stopPropagation();forwardPaymentToAccountant(d);}}>
-                <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
-              </Button>
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selectedDocIds.includes(String(d._id))}
+                  onChange={() => toggleDocSelection(d._id)}
+                  className="h-4 w-4 accent-indigo-600"
+                  aria-label={`Select ${d.name}`}
+                />
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8"
+                  onClick={e=>{e.stopPropagation();forwardPaymentToAccountant(d);}}>
+                  <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
+                </Button>
+              </div>
             </DocCard>
           ))}
         </TabsContent>
@@ -1113,6 +1184,22 @@ export default function CounselorPage() {
         {/* ── From Dispatch Tab ──────────────────────────── */}
         <TabsContent value="dispatch" className="space-y-2 mt-4">
           <TabHint>Scanned documents from Dispatch — review and forward to center.</TabHint>
+          {fromDisp.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={fromDisp.length > 0 && fromDisp.every(d => selectedDocIds.includes(String(d._id)))}
+                  onChange={e => setSelectedDocIds(e.target.checked ? fromDisp.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all scanned documents
+              </label>
+              <Button size="sm" onClick={() => batchForwardDocs(fromDisp, d => docsApi.forwardToCenter(d._id), 'forwarded to center')} disabled={saving || !fromDisp.some(d => selectedDocIds.includes(String(d._id)))}>
+                <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
+              </Button>
+            </div>
+          )}
           {fromDisp.length===0 ? <EmptyState icon={Download} message="No documents from dispatch"/> :
           fromDisp.map(d=>(
             <DocCard key={d._id} d={d} accMap={payAccounts}
@@ -1120,10 +1207,19 @@ export default function CounselorPage() {
               badge="Scan Ready"
               badgeColor="bg-violet-50 text-violet-700 border border-violet-200"
               onClick={()=>setDocModal(d)}>
-              <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs h-8"
-                onClick={e=>{e.stopPropagation();forwardDocToCenter(d);}}>
-                <Send className="h-3.5 w-3.5 mr-1.5"/>Forward to Center
-              </Button>
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={selectedDocIds.includes(String(d._id))}
+                  onChange={() => toggleDocSelection(d._id)}
+                  className="h-4 w-4 accent-indigo-600"
+                  aria-label={`Select ${d.name}`}
+                />
+                <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-xs h-8"
+                  onClick={e=>{e.stopPropagation();forwardDocToCenter(d);}}>
+                  <Send className="h-3.5 w-3.5 mr-1.5"/>Forward to Center
+                </Button>
+              </div>
             </DocCard>
           ))}
         </TabsContent>

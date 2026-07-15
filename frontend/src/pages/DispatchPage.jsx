@@ -241,6 +241,7 @@ export default function DispatchPage() {
   const [form,    setForm]    = useState({ company:'', trackingNo:'', dispatchDate:'', documentsDesc:'' });
   const [saving,  setSaving]  = useState(false);
   const [search,  setSearch]  = useState('');
+  const [selectedReadyIds, setSelectedReadyIds] = useState([]);
   const fileRef = useRef();
   const [scanFile, setScanFile] = useState(null);
 
@@ -313,13 +314,28 @@ export default function DispatchPage() {
     if (!form.company.trim())    return toast.error('Courier company required');
     setSaving(true);
     try {
-      await docsApi.dispatchToCenter(dialog.item._id, {
-        ...form,
-        dispatchDate: form.dispatchDate ? new Date(form.dispatchDate) : new Date(),
-      });
-      toast.success('Dispatched! Counselor & Center notified.');
-      setDialog(null); load();
+      const docs = dialog.items?.length ? dialog.items : [dialog.item];
+      for (const doc of docs) {
+        await docsApi.dispatchToCenter(doc._id, {
+          ...form,
+          documentsDesc: form.documentsDesc || docs.map(x => x.name).join(', '),
+          dispatchDate: form.dispatchDate ? new Date(form.dispatchDate) : new Date(),
+        });
+      }
+      toast.success(docs.length > 1 ? `${docs.length} documents dispatched. Counselor & Center notified.` : 'Dispatched! Counselor & Center notified.');
+      setDialog(null); setSelectedReadyIds([]); load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  function toggleReadySelection(id) {
+    setSelectedReadyIds(prev => prev.includes(String(id)) ? prev.filter(x => x !== String(id)) : [...prev, String(id)]);
+  }
+
+  function openBatchDispatch() {
+    const docs = ready.filter(d => selectedReadyIds.includes(String(d._id)));
+    if (!docs.length) return toast.error('Select documents to dispatch');
+    setDialog({ type:'dispatch', items: docs });
+    setForm({ company:'', trackingNo:'', dispatchDate: new Date().toISOString().split('T')[0], documentsDesc: docs.map(d => d.name).join(', ') });
   }
 
   if (loading) return (
@@ -583,17 +599,42 @@ export default function DispatchPage() {
         {/* Ready to Dispatch */}
         <TabsContent value="ready" className="space-y-2 mt-3">
           <p className="text-xs text-muted-foreground">Payment verified — send courier to center.</p>
+          {ready.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={ready.length > 0 && ready.every(d => selectedReadyIds.includes(String(d._id)))}
+                  onChange={e => setSelectedReadyIds(e.target.checked ? ready.map(d => String(d._id)) : [])}
+                  className="h-4 w-4 accent-indigo-600"
+                />
+                Select all ready documents
+              </label>
+              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={openBatchDispatch} disabled={selectedReadyIds.length === 0 || saving}>
+                <Truck className="h-3.5 w-3.5 mr-1"/>Dispatch Selected ({selectedReadyIds.length})
+              </Button>
+            </div>
+          )}
           {ready.length === 0
             ? <div className="text-center py-10 text-muted-foreground">No documents ready for dispatch</div>
             : ready.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
                 action={
-                  <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => {
-                    setDialog({type:'dispatch', item:d});
-                    setForm({ company:'', trackingNo:'', dispatchDate: new Date().toISOString().split('T')[0], documentsDesc: d.name });
-                  }}>
-                    <Truck className="h-3.5 w-3.5 mr-1"/>Dispatch
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedReadyIds.includes(String(d._id))}
+                      onChange={() => toggleReadySelection(d._id)}
+                      className="h-4 w-4 accent-indigo-600"
+                      aria-label={`Select ${d.name} for dispatch`}
+                    />
+                    <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => {
+                      setDialog({type:'dispatch', item:d});
+                      setForm({ company:'', trackingNo:'', dispatchDate: new Date().toISOString().split('T')[0], documentsDesc: d.name });
+                    }}>
+                      <Truck className="h-3.5 w-3.5 mr-1"/>Dispatch
+                    </Button>
+                  </div>
                 }
               />
             ))
@@ -686,10 +727,16 @@ export default function DispatchPage() {
       {/* Dispatch to Center Dialog */}
       <Dialog open={dialog?.type === 'dispatch'} onOpenChange={() => setDialog(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Dispatch to Center: {dialog?.item?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{dialog?.items?.length ? `Dispatch ${dialog.items.length} Documents` : `Dispatch to Center: ${dialog?.item?.name}`}</DialogTitle></DialogHeader>
           <div className="text-sm text-muted-foreground space-y-0.5">
-            <div>Student: <b>{dialog?.item?.student?.name}</b></div>
-            <div>Center: <b>{dialog?.item?.center?.name}</b></div>
+            {dialog?.items?.length ? (
+              <div>Documents: <b>{dialog.items.map(d => `${d.student?.name || 'Student'} - ${d.name}`).join(', ')}</b></div>
+            ) : (
+              <>
+                <div>Student: <b>{dialog?.item?.student?.name}</b></div>
+                <div>Center: <b>{dialog?.item?.center?.name}</b></div>
+              </>
+            )}
           </div>
           <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
             Courier details will be shared with Counselor and Center both.

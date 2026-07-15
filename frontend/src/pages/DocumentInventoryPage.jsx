@@ -293,33 +293,46 @@ export default function DocumentInventoryPage() {
     setActionDate(todayInput());
   }
 
+  function openBatchAction(type) {
+    const docs = selectedInventoryDocs
+      .filter(x => !RECEIVED_STATUSES.has(x.doc.status))
+      .map(x => ({ doc: x.doc, studentId: x.student?._id }));
+    if (!docs.length) return toast.error('Select pending documents first');
+    setActionTarget({ type, docs });
+    setActionDate(todayInput());
+  }
+
   async function confirmAction() {
     if (!actionTarget) return;
     const { type, doc, studentId } = actionTarget;
+    const targets = actionTarget.docs || [{ doc, studentId }];
     setSaving(true);
     try {
-      if (type === 'receive') {
-        if (doc.catalog) {
-          await documentInventoryApi.addDocs(studentId, { names: [doc.name], received: true, receivedDate: actionDate });
-        } else {
-          await documentInventoryApi.markReceived(doc._id, { receivedDate: actionDate });
+      for (const target of targets) {
+        if (type === 'receive') {
+          if (target.doc.catalog) {
+            await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: true, receivedDate: actionDate });
+          } else {
+            await documentInventoryApi.markReceived(target.doc._id, { receivedDate: actionDate });
+          }
+        } else if (type === 'request') {
+          if (target.doc.catalog) {
+            await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: false, requestedDate: actionDate });
+          } else {
+            await documentInventoryApi.requestDoc(target.doc._id, { requestedDate: actionDate });
+          }
+        } else if (type === 'urgent') {
+          if (target.doc.catalog) {
+            await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: false, urgent: true, requestedDate: actionDate, urgentDate: actionDate });
+          } else {
+            await documentInventoryApi.urgentDoc(target.doc._id, { urgentDate: actionDate, requestedDate: actionDate });
+          }
         }
-        toast.success('Marked received');
-      } else if (type === 'request') {
-        if (doc.catalog) {
-          await documentInventoryApi.addDocs(studentId, { names: [doc.name], received: false, requestedDate: actionDate });
-        } else {
-          await documentInventoryApi.requestDoc(doc._id, { requestedDate: actionDate });
-        }
-        toast.success('Request sent to university');
-      } else if (type === 'urgent') {
-        if (doc.catalog) {
-          await documentInventoryApi.addDocs(studentId, { names: [doc.name], received: false, urgent: true, requestedDate: actionDate, urgentDate: actionDate });
-        } else {
-          await documentInventoryApi.urgentDoc(doc._id, { urgentDate: actionDate, requestedDate: actionDate });
-        }
-        toast.success('Urgent request sent');
       }
+      const count = targets.length;
+      if (type === 'receive') toast.success(count > 1 ? `${count} documents marked received` : 'Marked received');
+      if (type === 'request') toast.success(count > 1 ? `${count} requests sent to university` : 'Request sent to university');
+      if (type === 'urgent') toast.success(count > 1 ? `${count} urgent requests sent` : 'Urgent request sent');
       setActionTarget(null);
       load();
     } catch (e) {
@@ -354,11 +367,28 @@ export default function DocumentInventoryPage() {
           </h1>
           <p className="text-sm text-muted-foreground">Enrolled students and university document receipt tracking</p>
         </div>
-        {['Admin', 'Dispatch', 'University'].includes(user?.role) && (
-          <Button variant="outline" onClick={() => setCsvOpen(true)} disabled={inventoryDocRows.length === 0} className="gap-2">
-            <Download className="h-4 w-4"/>CSV {selectedInventoryDocs.length ? `(${selectedInventoryDocs.length} selected)` : ''}
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {selectedInventoryDocs.length > 0 && canRequest && (
+            <>
+              <Button variant="outline" onClick={() => openBatchAction('request')} disabled={saving} className="gap-2">
+                <Send className="h-4 w-4"/>Request Selected
+              </Button>
+              <Button variant="outline" onClick={() => openBatchAction('urgent')} disabled={saving} className="gap-2 border-red-200 text-red-700 hover:bg-red-50">
+                <AlertTriangle className="h-4 w-4"/>Urgent Selected
+              </Button>
+            </>
+          )}
+          {selectedInventoryDocs.length > 0 && canReceive && (
+            <Button onClick={() => openBatchAction('receive')} disabled={saving}>
+              Tick Selected Received
+            </Button>
+          )}
+          {['Admin', 'Dispatch', 'University'].includes(user?.role) && (
+            <Button variant="outline" onClick={() => setCsvOpen(true)} disabled={inventoryDocRows.length === 0} className="gap-2">
+              <Download className="h-4 w-4"/>CSV {selectedInventoryDocs.length ? `(${selectedInventoryDocs.length} selected)` : ''}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="relative">
@@ -678,7 +708,16 @@ export default function DocumentInventoryPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
-              <b>{actionTarget?.doc?.name}</b>
+              {actionTarget?.docs?.length ? (
+                <div>
+                  <b>{actionTarget.docs.length} documents selected</b>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {actionTarget.docs.map(x => x.doc.name).join(', ')}
+                  </div>
+                </div>
+              ) : (
+                <b>{actionTarget?.doc?.name}</b>
+              )}
             </div>
             <div>
               <Label>

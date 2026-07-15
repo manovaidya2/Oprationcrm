@@ -268,7 +268,7 @@ export default function StudentDetailPage() {
   const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
 
   const [docOpen, setDocOpen] = useState(false);
-  const [docForm, setDocForm] = useState({ name:'', chargeFee:'', note:'' });
+  const [docForm, setDocForm] = useState({ name:'', names:[], chargeFee:'', note:'' });
   const [docFile, setDocFile] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
   const [editDocForm, setEditDocForm] = useState({ name:'', chargeFee:'', note:'' });
@@ -337,17 +337,20 @@ export default function StudentDetailPage() {
   }
 
   async function addDoc() {
-    if (!docForm.name.trim()) return toast.error('Document name required');
+    const names = docForm.names?.length ? docForm.names : (docForm.name?.trim() ? [docForm.name.trim()] : []);
+    if (!names.length) return toast.error('Select at least one document');
     setSaving(true);
     try {
-      const fd = new FormData();
-      fd.append('studentId', id); fd.append('name', docForm.name);
-      fd.append('note', docForm.note);
-      fd.append('chargeFee', docForm.chargeFee||0);
-      if (docFile) fd.append('file', docFile);
-      await docsApi.create(fd);
-      toast.success('Document added'); setDocOpen(false);
-      setDocForm({name:'',chargeFee:'',note:''}); setDocFile(null);
+      for (const name of names) {
+        const fd = new FormData();
+        fd.append('studentId', id); fd.append('name', name);
+        fd.append('note', docForm.note);
+        fd.append('chargeFee', docForm.chargeFee||0);
+        if (docFile) fd.append('file', docFile);
+        await docsApi.create(fd);
+      }
+      toast.success(names.length > 1 ? `${names.length} documents added` : 'Document added'); setDocOpen(false);
+      setDocForm({name:'',names:[],chargeFee:'',note:''}); setDocFile(null);
       if (fileRef.current) fileRef.current.value='';
       load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
@@ -1062,13 +1065,28 @@ export default function StudentDetailPage() {
           <DialogHeader><DialogTitle>Request Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label>Document Name *</Label>
-              <Select value={docForm.name} onValueChange={v=>setDocForm(p=>({...p,name:v}))}>
-                <SelectTrigger><SelectValue placeholder="Choose document"/></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label>Document Names *</Label>
+              <div className="mt-1 max-h-72 overflow-y-auto rounded-md border p-2">
+                {DOCUMENT_OPTIONS.map(name => {
+                  const checked = docForm.names.includes(name);
+                  return (
+                    <label key={name} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setDocForm(p => ({
+                          ...p,
+                          name: '',
+                          names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
+                        }))}
+                        className="h-4 w-4 accent-indigo-600"
+                      />
+                      <span>{name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">{docForm.names.length} selected</div>
             </div>
             <div className="grid grid-cols-1 gap-3">
               <div><Label>Charge (₹)</Label><Input type="number" value={docForm.chargeFee} onChange={e=>setDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>

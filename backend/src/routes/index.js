@@ -128,7 +128,7 @@ router.patch ('/document-inventory/docs/:id/urgent',    protect, requireRole('Ad
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);
 router.post  ('/documents',                       protect, requireRole('Admin','Center','Counselor'), upload.single('file'), docC.create);
-router.patch ('/documents/:id',                   protect, requireRole('Admin','Counselor'), upload.single('file'), docC.update);
+router.patch ('/documents/:id',                   protect, requireRole('Admin','Counselor','Center'), upload.single('file'), docC.update);
 router.delete('/documents/:id',                   protect, requireRole('Admin','Counselor'), docC.remove);
 
 // Document flow
