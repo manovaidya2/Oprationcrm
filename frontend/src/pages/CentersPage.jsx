@@ -27,6 +27,7 @@ const TIMELINES     = ['Immediate (0 to 15 days)','15 to 30 days','1 to 3 months
 const PROGRAMS      = ['UG','PG','Diploma/Certificate','Research/PhD (if applicable)'];
 const STREAMS_LIST  = ['Management','IT/Computer','Education','Arts','Science','Healthcare','Engineering','Other'];
 const FEE_STRUCTURES = ['Very Special', 'Special', 'Normal'];
+const LOGIN_PROVISION_OPTIONS = ['Login Provided', 'Login Not Provided'];
 
 const csvEscape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 const csvDate = value => value ? new Date(value).toLocaleDateString('en-IN') : '';
@@ -217,6 +218,8 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
   const [savingUnis,      setSavingUnis]       = useState(false);
   const [savingFeeStructure, setSavingFeeStructure] = useState(false);
   const [editingFeeStructure, setEditingFeeStructure] = useState(false);
+  const [savingLoginProvision, setSavingLoginProvision] = useState(false);
+  const [editingLoginProvision, setEditingLoginProvision] = useState(false);
 
   const programBadges = Array.isArray(center.programInterest) ? center.programInterest : [];
   const streamBadges  = Array.isArray(center.streams) ? center.streams : [];
@@ -252,6 +255,17 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
       onRefresh?.();
     } catch(e) { toast.error(e.message); }
     finally { setSavingFeeStructure(false); }
+  }
+
+  async function updateLoginProvision(value) {
+    setSavingLoginProvision(true);
+    try {
+      await centersApi.update(center._id, { loginProvisionStatus: value });
+      toast.success('Login provision status updated');
+      setEditingLoginProvision(false);
+      onRefresh?.();
+    } catch(e) { toast.error(e.message); }
+    finally { setSavingLoginProvision(false); }
   }
 
   function toggleUni(id) {
@@ -409,6 +423,47 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                 </div>
               </div>
             )}
+
+            <div className="border rounded-lg p-3 bg-blue-50/40 border-blue-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Login Status</div>
+                  <p className="text-xs text-blue-600 mt-0.5">Whether login access has been provided to this center.</p>
+                </div>
+                <div className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-end">
+                  {editingLoginProvision ? (
+                    <Select
+                      value={center.loginProvisionStatus || 'Login Not Provided'}
+                      onValueChange={updateLoginProvision}
+                      disabled={savingLoginProvision}
+                    >
+                      <SelectTrigger className="w-full bg-white border-blue-200 sm:w-56">
+                        <SelectValue placeholder="Select login status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LOGIN_PROVISION_OPTIONS.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <>
+                      <span className="rounded-full border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700">
+                        {center.loginProvisionStatus || 'Login Not Provided'}
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-8 gap-1 border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
+                        onClick={e => { e.stopPropagation(); setEditingLoginProvision(true); }}
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                        Edit
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
 
             <div className="border rounded-lg p-3 bg-emerald-50/40 border-emerald-200">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -837,7 +892,7 @@ export default function CentersPage() {
 
       const centerHeaders = exportCenterDetails ? [
         'Center Name', 'Organisation Type', 'Contact Person', 'Email', 'Phone',
-        'City', 'State', 'Address', 'Fee Structure', 'Assigned Counselor',
+        'City', 'State', 'Address', 'Login Status', 'Fee Structure', 'Assigned Counselor',
         'Programs', 'Streams', 'Experience', 'Team Size', 'Monthly Enquiries',
         'Coverage', 'Timeline', 'Website', 'Active', 'Login Emails',
       ] : ['Center Name'];
@@ -868,6 +923,7 @@ export default function CentersPage() {
           center.city || '',
           center.state || '',
           center.address || '',
+          center.loginProvisionStatus || 'Login Not Provided',
           center.feeStructureType || 'Normal',
           center.assignedCounselor?.name || '',
           joinList(center.programInterest),
