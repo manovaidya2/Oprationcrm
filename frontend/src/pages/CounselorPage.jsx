@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, RotateCcw, Loader2, Send, Eye, Search,
   Building2, GraduationCap, FileText, ChevronRight, Users, Paperclip, RefreshCw, Download,
-  IndianRupee, AlertTriangle,
+  IndianRupee, AlertTriangle, Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { studentsApi, docsApi, centersApi, paymentsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -701,6 +703,8 @@ function PaidToAccountBox({ tx, accMap }) {
 
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function CounselorPage() {
+  const { user } = useAuth();
+  const { dismiss, isDismissed } = usePanelDismissals(user, 'counselor');
   const navigate = useNavigate();
   const [allStudents, setAllStudents] = useState([]);
   const [docs, setDocs] = useState([]);
@@ -778,11 +782,6 @@ export default function CounselorPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => {
-    const onFocus = () => load();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [load]);
   useEffect(() => { load(); }, [load]);
 
   async function doAction() {
@@ -865,12 +864,14 @@ export default function CounselorPage() {
     } catch(e) { toast.error(e.message); }
   }
 
-  const pending           = allStudents.filter(s => s.applicationStatus === 'Submitted');
-  const acctRejected      = allStudents.filter(s => s.applicationStatus === 'Accountant_Rejected');
-  const newDocs           = docs.filter(d => d.status === 'Requested');
-  const fromDisp          = docs.filter(d => d.status === 'Counselor_Received');
-  const deliveryPending   = docs.filter(d => d.status === 'Dispatched');
-  const paymentPending    = docs.filter(d => d.status === 'Payment_Submitted');
+  const pending           = allStudents.filter(s => s.applicationStatus === 'Submitted' && !isDismissed(`student:${s._id}:review`));
+  const acctRejected      = allStudents.filter(s => s.applicationStatus === 'Accountant_Rejected' && !isDismissed(`student:${s._id}:acctreject`));
+  const newDocs           = docs.filter(d => d.status === 'Requested' && !isDismissed(`doc:${d._id}:request`));
+  const fromDisp          = docs.filter(d => d.status === 'Counselor_Received' && !isDismissed(`doc:${d._id}:dispatch`));
+  const deliveryPending   = docs.filter(d => d.status === 'Dispatched' && !isDismissed(`doc:${d._id}:delivery`));
+  const paymentPending    = docs.filter(d => d.status === 'Payment_Submitted' && !isDismissed(`doc:${d._id}:payment`));
+  const visibleSettlementQueue = settlementQueue.filter(s => !isDismissed(`student:${s._id}:settlement`));
+  const visibleFeePayments = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
   const q = search.toLowerCase();
   const filtered = allStudents.filter(s =>
     !q ||
@@ -922,7 +923,7 @@ export default function CounselorPage() {
         {[
           { label:'Pending Review',  value: pending.length,        color:'text-blue-600',   bg:'bg-blue-50 border-blue-200',    dot:'bg-blue-400'   },
           { label:'Acct Rejected',   value: acctRejected.length,   color:'text-red-600',    bg:'bg-red-50 border-red-200',      dot:'bg-red-400'    },
-          { label:'Fee Payments',    value: feePayments.length,    color:'text-orange-600', bg:'bg-orange-50 border-orange-200',dot:'bg-orange-400' },
+          { label:'Fee Payments',    value: visibleFeePayments.length,    color:'text-orange-600', bg:'bg-orange-50 border-orange-200',dot:'bg-orange-400' },
           { label:'From Dispatch',   value: fromDisp.length,       color:'text-violet-600', bg:'bg-violet-50 border-violet-200',dot:'bg-violet-400' },
           { label:'Delivery Pending',value: deliveryPending.length, color:'text-rose-600',   bg:'bg-rose-50 border-rose-200',    dot:'bg-rose-400'   },
         ].map(({ label, value, color, bg, dot }) => (
@@ -945,11 +946,11 @@ export default function CounselorPage() {
             { val:'review',    label:'Review',           count: pending.length,          dot:'bg-blue-500' },
             { val:'acctreject',label:'Acct Rejected',     count: acctRejected.length,     dot:'bg-red-500'  },
             { val:'docs',      label:'Doc Requests',      count: newDocs.length,          dot:'bg-indigo-500'},
-            { val:'feepay',    label:'Fee Payments',      count: feePayments.length,      dot:'bg-orange-500'},
+            { val:'feepay',    label:'Fee Payments',      count: visibleFeePayments.length,      dot:'bg-orange-500'},
             { val:'payment',   label:'Doc Payments',      count: paymentPending.length,   dot:'bg-emerald-500'},
             { val:'dispatch',  label:'From Dispatch',     count: fromDisp.length,         dot:'bg-violet-500'},
             { val:'delipend',  label:'Delivery Pending',  count: deliveryPending.length,  dot:'bg-rose-500'},
-            { val:'settlement',label:'Settlement',        count: settlementQueue.length,  dot:'bg-amber-500'},
+            { val:'settlement',label:'Settlement',        count: visibleSettlementQueue.length,  dot:'bg-amber-500'},
             { val:'students',  label:'All Students',      count: allStudents.length,      dot:'' },
             { val:'centers',   label:'Centers',           count: centers.length,          dot:'' },
           ].map(({ val, label, count, dot }) => (
@@ -984,6 +985,10 @@ export default function CounselorPage() {
               <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'reject'});setNote('');}}>
                 Reject
+              </Button>
+              <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-8 text-xs"
+                onClick={(e)=>{e.stopPropagation(); dismiss(`student:${s._id}:review`);}}>
+                <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
               </Button>
             </StudentCard>
           ))}
@@ -1058,6 +1063,10 @@ export default function CounselorPage() {
                     onClick={e=>{e.stopPropagation();forwardDoc(d);}}>
                     <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
                   </Button>
+                  <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+                    onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:request`);}}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
                 </div>
               )}
             </DocCard>
@@ -1067,8 +1076,8 @@ export default function CounselorPage() {
         {/* ── Fee Payments Tab ───────────────────────────── */}
         <TabsContent value="feepay" className="space-y-2 mt-4">
           <TabHint>Center has submitted fee payment — review and forward to accountant for verification.</TabHint>
-          {feePayments.length===0 ? <EmptyState icon={IndianRupee} message="No fee payments pending review"/> :
-          feePayments.map(({student, payment, tx})=>(
+          {visibleFeePayments.length===0 ? <EmptyState icon={IndianRupee} message="No fee payments pending review"/> :
+          visibleFeePayments.map(({student, payment, tx})=>(
             <div key={tx._id} className="bg-white rounded-xl border border-orange-200 shadow-sm hover:shadow transition-shadow">
               <div className="p-4 flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={()=>setStudentModal(student)}>
@@ -1124,6 +1133,10 @@ export default function CounselorPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+                    onClick={()=>dismiss(`fee-payment:${student._id}:${tx._id}`)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
                   <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 text-xs h-8"
                     onClick={()=>{ setRejectFeeDialog({studentId:student._id, txId:tx._id, studentName:student.name, amount:tx.amount}); setRejectFeeNote(''); }}>
                     <XCircle className="h-3.5 w-3.5 mr-1"/>Reject
@@ -1172,9 +1185,13 @@ export default function CounselorPage() {
                   className="h-4 w-4 accent-indigo-600"
                   aria-label={`Select ${d.name}`}
                 />
-                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8"
+                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8"
                   onClick={e=>{e.stopPropagation();forwardPaymentToAccountant(d);}}>
                   <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
+                </Button>
+                <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+                  onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:payment`);}}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
                 </Button>
               </div>
             </DocCard>
@@ -1219,6 +1236,10 @@ export default function CounselorPage() {
                   onClick={e=>{e.stopPropagation();forwardDocToCenter(d);}}>
                   <Send className="h-3.5 w-3.5 mr-1.5"/>Forward to Center
                 </Button>
+                <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+                  onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:dispatch`);}}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                </Button>
               </div>
             </DocCard>
           ))}
@@ -1243,6 +1264,10 @@ export default function CounselorPage() {
             {[d.courierInfo.company, d.courierInfo.trackingNo, d.courierInfo.dispatchDate ? new Date(d.courierInfo.dispatchDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : ''].filter(Boolean).join(' · ')}
           </span>
         )}
+        <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+          onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:delivery`);}}>
+          <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+        </Button>
       </div>
     </DocCard>
   ))}
@@ -1256,15 +1281,22 @@ export default function CounselorPage() {
               Centers have requested settlement for these cancelled applications. Review each case and forward to accountant if the refund/adjustment should be processed.
             </p>
           </div>
-          {settlementQueue.length === 0
+          {visibleSettlementQueue.length === 0
             ? <EmptyState icon={CheckCircle2} message="No pending settlement requests"/>
-            : settlementQueue.map(s => (
-              <SettlementRequestCard
-                key={s._id}
-                student={s}
-                saving={saving}
-                onForward={handleForwardSettlement}
-              />
+            : visibleSettlementQueue.map(s => (
+              <div key={s._id} className="space-y-2">
+                <div className="flex justify-end">
+                  <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50"
+                    onClick={() => dismiss(`student:${s._id}:settlement`)}>
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
+                </div>
+                <SettlementRequestCard
+                  student={s}
+                  saving={saving}
+                  onForward={handleForwardSettlement}
+                />
+              </div>
             ))
           }
         </TabsContent>

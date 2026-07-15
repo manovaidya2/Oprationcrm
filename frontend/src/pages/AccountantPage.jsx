@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Loader2, IndianRupee, CheckCircle2, XCircle, Clock, Eye,
-  Paperclip, History, User, Calendar, Hash, Search, X, Send,Download
+  Paperclip, History, User, Calendar, Hash, Search, X, Send, Download, Trash2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { studentsApi, docsApi, paymentsApi, paymentAccountsApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
@@ -320,6 +322,8 @@ function PaidToAccountBox({ tx, accMap }) {
 
 // ── Main Page ─────────────────────────────────────────────────
 export default function AccountantPage() {
+  const { user } = useAuth();
+  const { dismiss, isDismissed } = usePanelDismissals(user, 'accountant');
   const [students,    setStudents]    = useState([]);
   const [uniRejected, setUniRejected] = useState([]);
   const [amountSettleQueue, setAmountSettleQueue] = useState([]);
@@ -626,12 +630,12 @@ export default function AccountantPage() {
   const matchFP = fp => !q || fp.student?.name?.toLowerCase().includes(q) || fp.tx?.utrRef?.toLowerCase().includes(q) || fp.student?.center?.name?.toLowerCase().includes(q);
   const matchH  = h  => !q || h.studentName?.toLowerCase().includes(q) || h.centerName?.toLowerCase().includes(q) || h.utrRef?.toLowerCase().includes(q) || h.entityName?.toLowerCase().includes(q) || h.enrollmentNumber?.toLowerCase().includes(q) || h.universityName?.toLowerCase().includes(q) || h.note?.toLowerCase().includes(q) || h.actionConfig?.label?.toLowerCase().includes(q);
 
-  const filtStudents       = students.filter(matchS);
+  const filtStudents       = students.filter(s => !isDismissed(`student:${s._id}:admission`)).filter(matchS);
   const filtUniRejected    = uniRejected.filter(matchS);
   const filtAmountSettle   = amountSettleQueue.filter(matchS);
-  const filtDocs           = docs.filter(matchD);
-  const filtPayDocs     = payDocs.filter(matchD);
-  const filtFeePayments    = feePayments.filter(matchFP);
+  const filtDocs           = docs.filter(d => !isDismissed(`doc:${d._id}:fee`)).filter(matchD);
+  const filtPayDocs     = payDocs.filter(d => !isDismissed(`doc:${d._id}:payment`)).filter(matchD);
+  const filtFeePayments    = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`)).filter(matchFP);
   const filtAllFeePayments = allFeePayments.filter(matchFP);
   const filtAllPayDocs     = allPayDocs.filter(matchD);
   const filtHistory     = history.filter(matchH);
@@ -685,12 +689,12 @@ export default function AccountantPage() {
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
             { val:'scans',       label:'Scan Review',    count: scanDocs.length,                                         dot:'bg-violet-500' },
-            { val:'admissions',  label:'Admissions',     count: search ? filtStudents.length : students.length,          dot:'bg-blue-500'   },
+            { val:'admissions',  label:'Admissions',     count: filtStudents.length,          dot:'bg-blue-500'   },
             { val:'unireject',   label:'Uni Rejected',   count: search ? filtUniRejected.length : uniRejected.length,    dot:'bg-orange-500' },
             { val:'amountsettle',label:'Amount Settle',  count: search ? filtAmountSettle.length : amountSettleQueue.length, dot:'bg-emerald-500', badge: pendingSettleCount },
-            { val:'feepay',      label:'Fee Payments',   count: search ? filtFeePayments.length : feePayments.length,    dot:'bg-amber-500'  },
-            { val:'docs',        label:'Doc Request',    count: search ? filtDocs.length : docs.length,                  dot:'bg-indigo-500' },
-            { val:'payments',    label:'Doc Payments',   count: search ? filtPayDocs.length : payDocs.length,            dot:'bg-teal-500'   },
+            { val:'feepay',      label:'Fee Payments',   count: filtFeePayments.length,    dot:'bg-amber-500'  },
+            { val:'docs',        label:'Doc Request',    count: filtDocs.length,                  dot:'bg-indigo-500' },
+            { val:'payments',    label:'Doc Payments',   count: filtPayDocs.length,            dot:'bg-teal-500'   },
             { val:'history',     label:'History',        count: search ? filtHistory.length : history.length,            dot:''              },
           ].map(({ val, label, count, dot, badge }) => (
             <TabsTrigger key={val} value={val}
@@ -855,6 +859,9 @@ export default function AccountantPage() {
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="ghost" onClick={() => setDetailStudent(s)}><Eye className="h-3.5 w-3.5"/></Button>
+                  <Button size="sm" variant="outline" onClick={() => dismiss(`student:${s._id}:admission`)} className="text-red-600 hover:text-red-700">
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
                   <Button size="sm" onClick={() => { setDialog({type:'adm',item:s}); setNote(''); }}>Review</Button>
                 </div>
               </CardContent>
@@ -917,6 +924,9 @@ export default function AccountantPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => dismiss(`fee-payment:${student._id}:${tx._id}`)} className="text-red-600 hover:text-red-700">
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
                   <Button size="sm" variant="destructive"
                     onClick={() => setDialog({type:'feeReject', studentId:student._id, txId:tx._id, student, tx})}>
                     Reject
@@ -1127,7 +1137,12 @@ export default function AccountantPage() {
                   ))}
                   
                 </div>
-                <Button size="sm" onClick={() => { setDialog({type:'doc',item:d}); setNote(''); }}>Review</Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}:fee`)} className="text-red-600 hover:text-red-700">
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
+                  <Button size="sm" onClick={() => { setDialog({type:'doc',item:d}); setNote(''); }}>Review</Button>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -1206,6 +1221,9 @@ export default function AccountantPage() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}:payment`)} className="text-red-600 hover:text-red-700">
+                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => { setDialog({type:'pay',item:d,approved:false}); setNote(''); }}>Reject</Button>
                   <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => { setDialog({type:'pay',item:d,approved:true}); setNote(''); }}>Verify</Button>
                 </div>

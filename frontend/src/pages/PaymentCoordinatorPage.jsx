@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, FileText, History, Loader2, Phone, Search, Send, TriangleAlert } from 'lucide-react';
+import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, FileText, History, Loader2, Phone, Search, Send, Trash2, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -10,6 +10,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { docsApi, paymentsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { usePanelDismissals } from '@/lib/usePanelDismissals';
 import { toast } from 'sonner';
 
 const fmt = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
@@ -91,6 +93,8 @@ function PaymentProofList({ payments, emptyText = 'No payment recorded yet' }) {
 }
 
 export default function PaymentCoordinatorPage() {
+  const { user } = useAuth();
+  const { dismiss, isDismissed } = usePanelDismissals(user, 'payment-coordinator');
   const [rows, setRows] = useState([]);
   const [docRows, setDocRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -139,22 +143,24 @@ export default function PaymentCoordinatorPage() {
   const students = useMemo(() => {
     const q = search.trim().toLowerCase();
     return groupRows(rows.filter(row => {
+      if (isDismissed(`installment:${row.studentId}`) || isDismissed(`installment-row:${row.installment?._id}`)) return false;
       if (bucket !== 'all' && row.bucket !== bucket) return false;
       if (!q) return true;
       return [row.studentName, row.centerName, row.courseName, row.enrollmentNumber, row.phone, row.counselorName, row.universityName]
         .some(v => String(v || '').toLowerCase().includes(q));
     }));
-  }, [rows, bucket, search]);
+  }, [rows, bucket, search, isDismissed]);
 
   const docPaymentRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return docRows.filter(row => {
+      if (isDismissed(`doc-payment:${row.documentId}`)) return false;
       if (docBucket !== 'all' && row.bucket !== docBucket) return false;
       if (!q) return true;
       return [row.studentName, row.centerName, row.documentName, row.enrollmentNumber, row.phone, row.courseName, row.counselorName]
         .some(v => String(v || '').toLowerCase().includes(q));
     });
-  }, [docRows, docBucket, search]);
+  }, [docRows, docBucket, search, isDismissed]);
 
   function openPay(student, row) {
     const inst = row.installment || {};
@@ -329,6 +335,9 @@ export default function PaymentCoordinatorPage() {
                       <Button size="sm" onClick={() => openDocFollow(row)} className="gap-1">
                         <History className="h-3.5 w-3.5" /> Mark Call
                       </Button>
+                      <Button size="sm" variant="outline" onClick={() => dismiss(`doc-payment:${row.documentId}`)} className="gap-1 text-red-600 hover:text-red-700">
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </Button>
                     </div>
                   );
                 })}
@@ -390,7 +399,19 @@ export default function PaymentCoordinatorPage() {
                     </div>
                     <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(student.paidAmount)}</div></div>
                     <div><div className="text-xs text-muted-foreground">Balance</div><div className="font-semibold text-amber-700">{fmt(totalDue)}</div></div>
-                    <ChevronDown className={cn('h-5 w-5 justify-self-end transition-transform', open && 'rotate-180')} />
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-red-600 hover:text-red-700"
+                        onClick={e => { e.stopPropagation(); dismiss(`installment:${student.studentId}`); }}
+                        title="Delete from my panel"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                      <ChevronDown className={cn('h-5 w-5 transition-transform', open && 'rotate-180')} />
+                    </div>
                   </button>
 
                   {open && (

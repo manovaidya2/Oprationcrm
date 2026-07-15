@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Loader2, Package, Scan, Truck, CheckCircle2, Download,
   History, Eye, Search, X, Clock, Building2, User, Hash,
-  GraduationCap, FileText,
+  GraduationCap, FileText, Trash2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { docsApi, documentInventoryApi } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
 const MEDIA  = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 
@@ -183,7 +185,7 @@ function DocDetailModal({ doc, onClose }) {
 }
 
 // ── Doc Card ─────────────────────────────────────────────────
-function DocCard({ doc, action, onViewDetail, alreadyInInventory = false }) {
+function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = false }) {
   const st = STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
   return (
     <Card className="hover:border-primary/40 transition-colors">
@@ -223,6 +225,11 @@ function DocCard({ doc, action, onViewDetail, alreadyInInventory = false }) {
           </div>
           <div className="flex gap-2 flex-shrink-0">
             <Button size="sm" variant="ghost" onClick={() => onViewDetail(doc)}><Eye className="h-3.5 w-3.5"/></Button>
+            {onDelete && (
+              <Button size="sm" variant="outline" onClick={onDelete} className="text-red-600 hover:text-red-700">
+                <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+              </Button>
+            )}
             {action}
           </div>
         </div>
@@ -233,6 +240,8 @@ function DocCard({ doc, action, onViewDetail, alreadyInInventory = false }) {
 
 // ── Main Page ─────────────────────────────────────────────────
 export default function DispatchPage() {
+  const { user } = useAuth();
+  const { dismiss, isDismissed } = usePanelDismissals(user, 'dispatch');
   const [all,     setAll]     = useState([]);
   const [inventoryReceivedKeys, setInventoryReceivedKeys] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
@@ -275,16 +284,17 @@ export default function DispatchPage() {
     d.student?.enrollmentNumber?.toLowerCase().includes(q) ||
     d.courierInfo?.trackingNo?.toLowerCase().includes(q);
 
-  const incoming    = all.filter(d => ['University_Dispatched', 'Sent_To_University'].includes(d.status)).filter(filter);
-  const scanPending = all.filter(d => d.status === 'Dispatch_Received').filter(filter);
+  const visibleAll = all.filter(d => !isDismissed(`doc:${d._id}`));
+  const incoming    = visibleAll.filter(d => ['University_Dispatched', 'Sent_To_University'].includes(d.status)).filter(filter);
+  const scanPending = visibleAll.filter(d => d.status === 'Dispatch_Received').filter(filter);
 
   // University Records = ALL docs that have courierInfo (came from university)
   // This NEVER removes a doc — stays visible at every stage permanently
-  const uniRecords  = all.filter(d => d.courierInfo?.trackingNo || ['Sent_To_University','University_Dispatched'].includes(d.status)).filter(filter);
+  const uniRecords  = visibleAll.filter(d => d.courierInfo?.trackingNo || ['Sent_To_University','University_Dispatched'].includes(d.status)).filter(filter);
 
-  const ready       = all.filter(d => d.status === 'Payment_Verified').filter(filter);
-  const inProgress  = all.filter(d => ['Counselor_Received','Center_Notified','Payment_Submitted','Scanned'].includes(d.status)).filter(filter);
-  const dispatched  = all.filter(d => ['Dispatched','Delivered'].includes(d.status)).filter(filter);
+  const ready       = visibleAll.filter(d => d.status === 'Payment_Verified').filter(filter);
+  const inProgress  = visibleAll.filter(d => ['Counselor_Received','Center_Notified','Payment_Submitted','Scanned'].includes(d.status)).filter(filter);
+  const dispatched  = visibleAll.filter(d => ['Dispatched','Delivered'].includes(d.status)).filter(filter);
 
   async function confirmReceipt(id) {
     try { await docsApi.dispatchReceive(id); toast.success('Request processed'); load(); }
@@ -536,6 +546,10 @@ export default function DispatchPage() {
                       View Details
                     </button>
                     <div className="flex gap-2 items-center">
+                      <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+                        onClick={() => dismiss(`doc:${d._id}`)}>
+                        <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                      </Button>
                       {isAwaiting && (
                         <Button size="sm" className="bg-purple-600 hover:bg-purple-700 text-xs h-8"
                           onClick={() => confirmReceipt(d._id)}>
@@ -573,6 +587,7 @@ export default function DispatchPage() {
             : incoming.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
                 alreadyInInventory={isAlreadyInInventory(d)}
+                onDelete={() => dismiss(`doc:${d._id}`)}
                 action={<Button size="sm" onClick={() => confirmReceipt(d._id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Process Request</Button>}
               />
             ))
@@ -586,6 +601,7 @@ export default function DispatchPage() {
             ? <div className="text-center py-10 text-muted-foreground">No documents to scan</div>
             : scanPending.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
+                onDelete={() => dismiss(`doc:${d._id}`)}
                 action={
                   <Button size="sm" onClick={() => { setDialog({type:'scan', item:d}); setScanFile(null); if (fileRef.current) fileRef.current.value = ''; }}>
                     <Scan className="h-3.5 w-3.5 mr-1"/>Upload Scan
@@ -619,6 +635,7 @@ export default function DispatchPage() {
             ? <div className="text-center py-10 text-muted-foreground">No documents ready for dispatch</div>
             : ready.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
+                onDelete={() => dismiss(`doc:${d._id}`)}
                 action={
                   <div className="flex items-center gap-2">
                     <input
@@ -646,7 +663,7 @@ export default function DispatchPage() {
           <p className="text-xs text-muted-foreground">Waiting for center payment or accountant verification.</p>
           {inProgress.length === 0
             ? <div className="text-center py-10 text-muted-foreground">Nothing in progress</div>
-            : inProgress.map(d => <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc} action={null}/>)
+            : inProgress.map(d => <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc} onDelete={() => dismiss(`doc:${d._id}`)} action={null}/>)
           }
         </TabsContent>
 
@@ -688,7 +705,12 @@ export default function DispatchPage() {
                       )}
                       <ScannedFilesList doc={d} className="mt-1.5"/>
                     </div>
-                    <div className="flex-shrink-0"><Eye className="h-4 w-4 text-muted-foreground"/></div>
+                    <div className="flex flex-shrink-0 items-center gap-2" onClick={e => e.stopPropagation()}>
+                      <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}`)} className="text-red-600 hover:text-red-700">
+                        <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                      </Button>
+                      <Eye className="h-4 w-4 text-muted-foreground"/>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
