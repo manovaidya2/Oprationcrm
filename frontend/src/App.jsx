@@ -47,8 +47,8 @@ const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
   Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/chat'],
   University: ['/university', '/students/', '/chat'],
-  Dispatch:   ['/dispatch', '/students/', '/document-inventory', '/chat'],
-  PaymentCoordinator: ['/payment-coordinator', '/students/', '/document-inventory', '/chat'],
+  Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
+  PaymentCoordinator: ['/payment-coordinator', '/students', '/students/', '/document-inventory', '/chat'],
   Counselor:  ['/counselor', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
 };
 

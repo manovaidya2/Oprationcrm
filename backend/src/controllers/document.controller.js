@@ -773,7 +773,7 @@ exports.inventoryList = asyncHandler(async (req, res) => {
 });
 
 exports.inventoryAddDoc = asyncHandler(async (req, res) => {
-  const { name, names, received, urgent, requestedDate, receivedDate, urgentDate } = req.body;
+  const { name, names, received, urgent, dispatched, delivered, requestedDate, receivedDate, urgentDate, dispatchedDate, deliveredDate } = req.body;
   const rawNames = Array.isArray(names) ? names : String(name || '').split('\n');
   const docNames = rawNames.map(n => String(n || '').trim()).filter(Boolean);
   if (docNames.length === 0) { const e = new Error('Document name required'); e.status = 400; throw e; }
@@ -783,9 +783,16 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
 
   const created = [];
   for (const docName of docNames) {
-    const actionDate = received ? asActionDate(receivedDate) : asActionDate(requestedDate || urgentDate);
+    const actionDate = delivered
+      ? asActionDate(deliveredDate)
+      : dispatched
+        ? asActionDate(dispatchedDate)
+        : received
+          ? asActionDate(receivedDate)
+          : asActionDate(requestedDate || urgentDate);
     let doc = await StudentDoc.findOne({ student: student._id, origin: 'Inventory', name: new RegExp(`^${docName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') });
     if (!doc) {
+      const initialStatus = delivered ? 'Delivered' : dispatched ? 'Dispatched' : received ? 'Dispatch_Received' : 'Sent_To_University';
       doc = new StudentDoc({
         student: student._id,
         center: student.center,
@@ -794,17 +801,30 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
         name: docName,
         origin: 'Inventory',
         uploadedBy: req.user._id,
-        status: received ? 'Dispatch_Received' : 'Sent_To_University',
+        status: initialStatus,
         statusHistory: [{
-          status: received ? 'Dispatch_Received' : 'Sent_To_University',
+          status: initialStatus,
           changedBy: req.user._id,
           at: actionDate,
-          note: received ? 'Added to inventory as received from university' : 'Added to inventory and requested',
+          note: delivered
+            ? 'Added to inventory as already received by center'
+            : dispatched
+              ? 'Added to inventory as already dispatched to center'
+              : received
+                ? 'Added to inventory as received from university'
+                : 'Added to inventory and requested',
         }],
       });
       if (!received && urgent) {
         addHistoryOnly(doc, 'Urgent_Requested', req.user, 'Urgent document request', asActionDate(urgentDate || requestedDate));
       }
+    } else if (delivered && doc.status !== 'Delivered') {
+      if (doc.status !== 'Dispatched') {
+        addHistoryOnly(doc, 'Dispatched', req.user, 'Already dispatched to center', actionDate);
+      }
+      pushHistory(doc, 'Delivered', req.user, 'Already received by center', actionDate);
+    } else if (dispatched && !['Dispatched','Delivered'].includes(doc.status)) {
+      pushHistory(doc, 'Dispatched', req.user, 'Already dispatched to center', actionDate);
     } else if (received && !INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
       pushHistory(doc, 'Dispatch_Received', req.user, 'Received from university', actionDate);
     } else if (!received && !INVENTORY_RECEIVED_OR_DONE_STATUSES.includes(doc.status)) {
@@ -818,7 +838,7 @@ exports.inventoryAddDoc = asyncHandler(async (req, res) => {
       }
     }
     await doc.save();
-    if (!received && doc.university) {
+    if (!received && !dispatched && !delivered && doc.university) {
       const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
       await notify(uniUsers.map(u => u._id), {
         message: `Document requested by Dispatch: "${doc.name}" - Student: ${student.name}`,
@@ -909,6 +929,38 @@ exports.inventoryUrgentRequestDoc = asyncHandler(async (req, res) => {
       role: 'University',
     });
   }
+  res.json(doc);
+});
+
+exports.inventoryMarkDispatchedDoc = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  await assertInventoryStudentAccess(req, doc.student);
+  if (!['Admin','Dispatch'].includes(req.user.role)) {
+    const e = new Error('Only Dispatch/Admin can mark documents dispatched'); e.status = 403; throw e;
+  }
+  if (doc.status === 'Delivered' || doc.status === 'Dispatched') {
+    return res.json(doc);
+  }
+  pushHistory(doc, 'Dispatched', req.user, 'Already dispatched to center', asActionDate(req.body.dispatchedDate));
+  await doc.save();
+  res.json(doc);
+});
+
+exports.inventoryMarkDeliveredDoc = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  await assertInventoryStudentAccess(req, doc.student);
+  if (!['Admin','Dispatch'].includes(req.user.role)) {
+    const e = new Error('Only Dispatch/Admin can mark documents received by center'); e.status = 403; throw e;
+  }
+  const actionDate = asActionDate(req.body.deliveredDate);
+  if (doc.status === 'Delivered') {
+    return res.json(doc);
+  }
+  if (doc.status !== 'Dispatched') {
+    addHistoryOnly(doc, 'Dispatched', req.user, 'Already dispatched to center', actionDate);
+  }
+  pushHistory(doc, 'Delivered', req.user, 'Already received by center', actionDate);
+  await doc.save();
   res.json(doc);
 });
 

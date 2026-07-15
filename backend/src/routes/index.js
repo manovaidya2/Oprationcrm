@@ -124,6 +124,8 @@ router.post  ('/document-inventory/:studentId/docs',    protect, requireRole('Ad
 router.patch ('/document-inventory/docs/:id/receive',   protect, requireRole('Admin','Dispatch'), docC.inventoryReceiveDoc);
 router.patch ('/document-inventory/docs/:id/request',   protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryRequestDoc);
 router.patch ('/document-inventory/docs/:id/urgent',    protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryUrgentRequestDoc);
+router.patch ('/document-inventory/docs/:id/dispatched', protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDispatchedDoc);
+router.patch ('/document-inventory/docs/:id/delivered',  protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDeliveredDoc);
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);

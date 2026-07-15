@@ -48,6 +48,7 @@ const NAV_CONFIG = {
   ],
   Dispatch: [
     { to: '/dispatch', label: 'Documents', icon: Package },
+    { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],

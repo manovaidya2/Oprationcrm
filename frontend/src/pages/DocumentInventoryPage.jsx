@@ -327,12 +327,26 @@ export default function DocumentInventoryPage() {
           } else {
             await documentInventoryApi.urgentDoc(target.doc._id, { urgentDate: actionDate, requestedDate: actionDate });
           }
+        } else if (type === 'dispatched') {
+          if (target.doc.catalog) {
+            await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], dispatched: true, dispatchedDate: actionDate });
+          } else {
+            await documentInventoryApi.markDispatched(target.doc._id, { dispatchedDate: actionDate });
+          }
+        } else if (type === 'delivered') {
+          if (target.doc.catalog) {
+            await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], delivered: true, deliveredDate: actionDate });
+          } else {
+            await documentInventoryApi.markDelivered(target.doc._id, { deliveredDate: actionDate });
+          }
         }
       }
       const count = targets.length;
       if (type === 'receive') toast.success(count > 1 ? `${count} documents marked received` : 'Marked received');
       if (type === 'request') toast.success(count > 1 ? `${count} requests sent to university` : 'Request sent to university');
       if (type === 'urgent') toast.success(count > 1 ? `${count} urgent requests sent` : 'Urgent request sent');
+      if (type === 'dispatched') toast.success(count > 1 ? `${count} documents marked dispatched` : 'Marked dispatched');
+      if (type === 'delivered') toast.success(count > 1 ? `${count} documents marked received by center` : 'Marked received by center');
       setActionTarget(null);
       load();
     } catch (e) {
@@ -352,6 +366,14 @@ export default function DocumentInventoryPage() {
 
   function urgentRequestDoc(doc, studentId) {
     openAction('urgent', doc, studentId);
+  }
+
+  function markAlreadyDispatched(doc, studentId) {
+    openAction('dispatched', doc, studentId);
+  }
+
+  function markAlreadyDelivered(doc, studentId) {
+    openAction('delivered', doc, studentId);
   }
 
   if (loading) {
@@ -490,6 +512,16 @@ export default function DocumentInventoryPage() {
                               <AlertTriangle className="h-3.5 w-3.5"/>Urgent Request
                             </Button>
                           )}
+                          {canReceive && !['Dispatched', 'Delivered'].includes(doc.status) && (
+                            <Button size="sm" variant="outline" onClick={() => markAlreadyDispatched(doc, student._id)} disabled={saving} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50">
+                              <Truck className="h-3.5 w-3.5"/>Already Dispatched
+                            </Button>
+                          )}
+                          {canReceive && doc.status !== 'Delivered' && (
+                            <Button size="sm" variant="outline" onClick={() => markAlreadyDelivered(doc, student._id)} disabled={saving} className="gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                              <CheckCircle2 className="h-3.5 w-3.5"/>Already Received by Center
+                            </Button>
+                          )}
                         </div>
                       </div>
                     );
@@ -542,6 +574,16 @@ export default function DocumentInventoryPage() {
                           {!isReceived && canRequest && (
                             <Button size="sm" variant="outline" onClick={() => urgentRequestDoc(doc, student._id)} disabled={saving} className="gap-1 border-red-200 text-red-700 hover:bg-red-50">
                               <AlertTriangle className="h-3.5 w-3.5"/>Urgent Request
+                            </Button>
+                          )}
+                          {canReceive && !['Dispatched', 'Delivered'].includes(doc.status) && (
+                            <Button size="sm" variant="outline" onClick={() => markAlreadyDispatched(doc, student._id)} disabled={saving} className="gap-1 border-blue-200 text-blue-700 hover:bg-blue-50">
+                              <Truck className="h-3.5 w-3.5"/>Already Dispatched
+                            </Button>
+                          )}
+                          {canReceive && doc.status !== 'Delivered' && (
+                            <Button size="sm" variant="outline" onClick={() => markAlreadyDelivered(doc, student._id)} disabled={saving} className="gap-1 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+                              <CheckCircle2 className="h-3.5 w-3.5"/>Already Received by Center
                             </Button>
                           )}
                         </div>
@@ -703,7 +745,11 @@ export default function DocumentInventoryPage() {
                 ? 'Mark Document Received'
                 : actionTarget?.type === 'urgent'
                   ? 'Urgent Document Request'
-                  : 'Request Document'}
+                  : actionTarget?.type === 'dispatched'
+                    ? 'Mark Already Dispatched'
+                    : actionTarget?.type === 'delivered'
+                      ? 'Mark Received by Center'
+                      : 'Request Document'}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -725,7 +771,11 @@ export default function DocumentInventoryPage() {
                   ? 'Received date'
                   : actionTarget?.type === 'urgent'
                     ? 'Urgent request date'
-                    : 'Requested date'}
+                    : actionTarget?.type === 'dispatched'
+                      ? 'Dispatched date'
+                      : actionTarget?.type === 'delivered'
+                        ? 'Received by center date'
+                        : 'Requested date'}
               </Label>
               <Input type="date" value={actionDate} onChange={e => setActionDate(e.target.value)} />
             </div>
@@ -734,7 +784,15 @@ export default function DocumentInventoryPage() {
             <Button variant="outline" onClick={() => setActionTarget(null)}>Cancel</Button>
             <Button onClick={confirmAction} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
-              {actionTarget?.type === 'receive' ? 'Save Received' : actionTarget?.type === 'urgent' ? 'Send Urgent Request' : 'Send Request'}
+              {actionTarget?.type === 'receive'
+                ? 'Save Received'
+                : actionTarget?.type === 'urgent'
+                  ? 'Send Urgent Request'
+                  : actionTarget?.type === 'dispatched'
+                    ? 'Save Dispatched'
+                    : actionTarget?.type === 'delivered'
+                      ? 'Save Center Received'
+                      : 'Send Request'}
             </Button>
           </DialogFooter>
         </DialogContent>
