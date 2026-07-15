@@ -68,6 +68,13 @@ exports.list = asyncHandler(async (req, res) => {
       andConditions.push({ university: universityId });
     }
     andConditions.push({ applicationStatus: { $in: ['Sent_To_University','Enrolled','Cancelled'] } });
+  } else if (role === 'PaymentCoordinator') {
+    const paymentRows = await Payment.find({ 'installments.0': { $exists: true } }).select('student').lean();
+    const studentIdsWithInstallments = paymentRows.map(row => row.student).filter(Boolean);
+    andConditions.push({
+      _id: { $in: studentIdsWithInstallments },
+      applicationStatus: { $ne: 'Draft' },
+    });
   }
 
   if (req.query.status)       andConditions.push({ applicationStatus: req.query.status });

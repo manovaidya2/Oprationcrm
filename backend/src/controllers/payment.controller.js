@@ -95,6 +95,7 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
   const rows = [];
   for (const payment of payments) {
     if (!payment.student) continue;
+    if (payment.student.applicationStatus === 'Draft') continue;
     const feeTransactions = (payment.transactions || [])
       .filter(t => t.type === 'Fee')
       .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
