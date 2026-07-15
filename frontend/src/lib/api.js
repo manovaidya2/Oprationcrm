@@ -150,7 +150,9 @@ export const docsApi = {
   requestDispatch:  (id)        => request(`/documents/${id}/request-dispatch`, { method: 'PATCH' }),
   forwardPayment:   (id)        => request(`/documents/${id}/forward-payment`, { method: 'PATCH' }),
   updatePayment:    (id, payId, data) => request(`/documents/${id}/payments/${payId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  confirmDelivery:  (id)        => request(`/documents/${id}/confirm-delivery`, { method: 'PATCH' })
+  confirmDelivery:  (id)        => request(`/documents/${id}/confirm-delivery`, { method: 'PATCH' }),
+  paymentFollowups: ()          => request('/document-payment-followups'),
+  markPaymentFollowup: (id, data) => request(`/documents/${id}/payment-followup`, { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const documentInventoryApi = {

@@ -38,6 +38,15 @@ const courierSchema = new mongoose.Schema({
   sentAt:        { type: Date, default: Date.now },
 }, { _id: false });
 
+const coordinatorFollowupSchema = new mongoose.Schema({
+  contactWith:         { type: String, enum: ['Center', 'Dispatch'], default: 'Center' },
+  note:                { type: String, trim: true },
+  outcome:             { type: String, trim: true },
+  expectedPaymentDate: { type: Date },
+  contactedAt:         { type: Date, default: Date.now },
+  contactedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+}, { _id: true });
+
 const studentDocSchema = new mongoose.Schema({
   student:    { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   center:     { type: mongoose.Schema.Types.ObjectId, ref: 'Center',  required: true },
@@ -96,6 +105,9 @@ const studentDocSchema = new mongoose.Schema({
 
   // Full status history
   statusHistory: [historyEntrySchema],
+  coordinatorFollowups: [coordinatorFollowupSchema],
+  lastCoordinatorFollowupAt: { type: Date },
+  nextCoordinatorFollowupDate: { type: Date },
 
   uploadedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   verifiedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

@@ -590,6 +590,111 @@ exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
   res.json(doc);
 });
 
+function latestStatusAt(doc, status) {
+  const found = [...(doc.statusHistory || [])].reverse().find(h => h.status === status);
+  return found?.at || null;
+}
+
+function docPaymentBucket(doc) {
+  const due = Math.max(0, (doc.chargeFee || 0) - (doc.totalPaid || 0));
+  if (doc.status === 'Delivered') return 'delivered';
+  if (doc.status === 'Dispatched') return 'dispatched';
+  if (doc.status === 'Payment_Verified') return 'ready_dispatch';
+  if (doc.status === 'Payment_Submitted') return 'submitted';
+  if (['Center_Notified', 'Fee_Rejected'].includes(doc.status) && due > 0) return 'needs_call';
+  if (['Center_Notified', 'Fee_Rejected'].includes(doc.status)) return 'submitted';
+  return 'tracking';
+}
+
+exports.documentPaymentTimeline = asyncHandler(async (req, res) => {
+  const docs = await StudentDoc.find({
+    origin: { $ne: 'Inventory' },
+    status: { $in: ['Center_Notified', 'Fee_Rejected', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered'] },
+  })
+    .populate('student', 'name phone email courseName courseYear enrollmentNumber')
+    .populate('center', 'name organisationName city')
+    .populate('counselor', 'name')
+    .populate('university', 'name shortName')
+    .sort('-updatedAt')
+    .lean();
+
+  const rows = docs.map(doc => {
+    const dueAmount = Math.max(0, (doc.chargeFee || 0) - (doc.totalPaid || 0));
+    const followups = Array.isArray(doc.coordinatorFollowups) ? doc.coordinatorFollowups : [];
+    const lastFollowup = followups[followups.length - 1] || null;
+    return {
+      documentId: doc._id,
+      documentName: doc.name,
+      status: doc.status,
+      chargeFee: doc.chargeFee || 0,
+      totalPaid: doc.totalPaid || 0,
+      dueAmount,
+      bucket: docPaymentBucket(doc),
+      scanReceivedAt: latestStatusAt(doc, 'Center_Notified') || latestStatusAt(doc, 'Counselor_Received') || latestStatusAt(doc, 'Accountant_Received'),
+      paymentSubmittedAt: latestStatusAt(doc, 'Payment_Submitted'),
+      paymentVerifiedAt: latestStatusAt(doc, 'Payment_Verified'),
+      dispatchedAt: latestStatusAt(doc, 'Dispatched'),
+      deliveredAt: latestStatusAt(doc, 'Delivered'),
+      followups,
+      lastFollowup,
+      nextFollowupDate: doc.nextCoordinatorFollowupDate || lastFollowup?.expectedPaymentDate || null,
+      payments: doc.payments || [],
+      student: doc.student,
+      studentId: doc.student?._id,
+      studentName: doc.student?.name || '',
+      phone: doc.student?.phone || '',
+      email: doc.student?.email || '',
+      courseName: doc.student?.courseName || '',
+      courseYear: doc.student?.courseYear || '',
+      enrollmentNumber: doc.student?.enrollmentNumber || '',
+      centerName: doc.center?.name || doc.center?.organisationName || '',
+      centerCity: doc.center?.city || '',
+      counselorName: doc.counselor?.name || '',
+      universityName: doc.university?.name || doc.university?.shortName || '',
+    };
+  });
+
+  rows.sort((a, b) => {
+    const rank = { needs_call: 0, submitted: 1, ready_dispatch: 2, dispatched: 3, tracking: 4, delivered: 5 };
+    return ((rank[a.bucket] ?? 9) - (rank[b.bucket] ?? 9))
+      || (new Date(a.nextFollowupDate || a.scanReceivedAt || a.paymentSubmittedAt || 0) - new Date(b.nextFollowupDate || b.scanReceivedAt || b.paymentSubmittedAt || 0))
+      || String(a.studentName).localeCompare(String(b.studentName));
+  });
+
+  res.json(rows);
+});
+
+exports.documentPaymentFollowup = asyncHandler(async (req, res) => {
+  const doc = await loadDoc(req.params.id);
+  const note = String(req.body.note || '').trim();
+  const outcome = String(req.body.outcome || '').trim();
+  const contactWith = ['Center', 'Dispatch'].includes(req.body.contactWith) ? req.body.contactWith : 'Center';
+  const expectedPaymentDate = req.body.expectedPaymentDate ? new Date(req.body.expectedPaymentDate) : undefined;
+  if (!note && !outcome && !expectedPaymentDate) {
+    const e = new Error('Add note, outcome, or expected payment date'); e.status = 400; throw e;
+  }
+
+  doc.coordinatorFollowups.push({
+    contactWith,
+    note,
+    outcome,
+    expectedPaymentDate,
+    contactedAt: new Date(),
+    contactedBy: req.user._id,
+  });
+  doc.lastCoordinatorFollowupAt = new Date();
+  doc.nextCoordinatorFollowupDate = expectedPaymentDate;
+  doc.statusHistory.push({
+    status: 'Coordinator_Followup',
+    changedBy: req.user._id,
+    at: new Date(),
+    note: [`Talked to ${contactWith}`, outcome, note, expectedPaymentDate ? `Expected payment: ${expectedPaymentDate.toLocaleDateString('en-IN')}` : ''].filter(Boolean).join(' - '),
+  });
+  await doc.save();
+  await audit('doc_payment_followup', 'StudentDocument', doc._id, req.user, { contactWith, note, outcome, expectedPaymentDate }, `Document payment follow-up`);
+  res.json(await loadDoc(doc._id));
+});
+
 async function assertInventoryStudentAccess(req, student) {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   if (req.user.role === 'Counselor') {

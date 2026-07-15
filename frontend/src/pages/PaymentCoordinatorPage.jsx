@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Loader2, Phone, Search, Send, TriangleAlert } from 'lucide-react';
+import { CalendarClock, CheckCircle2, ChevronDown, Clock3, FileText, History, Loader2, Phone, Search, Send, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -8,13 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { paymentsApi } from '@/lib/api';
+import { docsApi, paymentsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
 const fmt = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const today = () => new Date().toISOString().split('T')[0];
+const todayFrom = d => d ? new Date(d).toISOString().split('T')[0] : '';
 
 const BUCKETS = {
   all: { label: 'All', icon: CalendarClock },
@@ -32,6 +33,7 @@ const STATUS_CLASS = {
 };
 
 const EMPTY_PAY = { amount: '', mode: 'UPI', utrRef: '', upiId: '', bankName: '', accountHolder: '', paidAt: today(), note: '', paymentScreenshot: null };
+const EMPTY_DOC_FOLLOWUP = { contactWith: 'Center', outcome: 'Called center', expectedPaymentDate: '', note: '' };
 
 function groupRows(rows) {
   const map = new Map();
@@ -54,20 +56,30 @@ function groupRows(rows) {
 
 export default function PaymentCoordinatorPage() {
   const [rows, setRows] = useState([]);
+  const [docRows, setDocRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('installments');
   const [bucket, setBucket] = useState('all');
+  const [docBucket, setDocBucket] = useState('needs_call');
   const [search, setSearch] = useState('');
   const [openId, setOpenId] = useState('');
   const [payTarget, setPayTarget] = useState(null);
   const [payForm, setPayForm] = useState({ ...EMPTY_PAY });
+  const [docFollowTarget, setDocFollowTarget] = useState(null);
+  const [docFollowForm, setDocFollowForm] = useState({ ...EMPTY_DOC_FOLLOWUP });
   const [saving, setSaving] = useState(false);
 
   async function load() {
     try {
       setLoading(true);
-      setRows(await paymentsApi.installmentTimeline());
+      const [installments, docs] = await Promise.all([
+        paymentsApi.installmentTimeline(),
+        docsApi.paymentFollowups(),
+      ]);
+      setRows(installments);
+      setDocRows(docs);
     } catch (e) {
-      toast.error(e.message || 'Failed to load installment timeline');
+      toast.error(e.message || 'Failed to load payment coordinator timeline');
     } finally {
       setLoading(false);
     }
@@ -81,6 +93,13 @@ export default function PaymentCoordinatorPage() {
     return acc;
   }, { all: 0, overdue: 0, week: 0, upcoming: 0, paid: 0 }), [rows]);
 
+  const docCounts = useMemo(() => docRows.reduce((acc, row) => {
+    acc.all += 1;
+    acc[row.bucket] = (acc[row.bucket] || 0) + 1;
+    return acc;
+  }, { all: 0, needs_call: 0, submitted: 0, ready_dispatch: 0, dispatched: 0, tracking: 0, delivered: 0 }), [docRows]);
+  const activeDocCount = docCounts.needs_call + docCounts.submitted + docCounts.ready_dispatch + docCounts.dispatched;
+
   const students = useMemo(() => {
     const q = search.trim().toLowerCase();
     return groupRows(rows.filter(row => {
@@ -90,6 +109,16 @@ export default function PaymentCoordinatorPage() {
         .some(v => String(v || '').toLowerCase().includes(q));
     }));
   }, [rows, bucket, search]);
+
+  const docPaymentRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return docRows.filter(row => {
+      if (docBucket !== 'all' && row.bucket !== docBucket) return false;
+      if (!q) return true;
+      return [row.studentName, row.centerName, row.documentName, row.enrollmentNumber, row.phone, row.courseName, row.counselorName]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }, [docRows, docBucket, search]);
 
   function openPay(student, row) {
     const inst = row.installment || {};
@@ -118,6 +147,36 @@ export default function PaymentCoordinatorPage() {
     }
   }
 
+  function openDocFollow(row) {
+    const defaultContact = ['ready_dispatch', 'dispatched'].includes(row.bucket) ? 'Dispatch' : 'Center';
+    setDocFollowTarget(row);
+    setDocFollowForm({
+      ...EMPTY_DOC_FOLLOWUP,
+      contactWith: defaultContact,
+      outcome: defaultContact === 'Dispatch' ? 'Called dispatch' : 'Called center',
+      expectedPaymentDate: row.nextFollowupDate ? todayFrom(row.nextFollowupDate) : '',
+    });
+  }
+
+  async function submitDocFollowup() {
+    if (!docFollowTarget) return;
+    if (!docFollowForm.note.trim() && !docFollowForm.expectedPaymentDate && !docFollowForm.outcome.trim()) {
+      return toast.error('Add call note, outcome, or expected payment date');
+    }
+    setSaving(true);
+    try {
+      await docsApi.markPaymentFollowup(docFollowTarget.documentId, docFollowForm);
+      toast.success('Document payment follow-up saved');
+      setDocFollowTarget(null);
+      setDocFollowForm({ ...EMPTY_DOC_FOLLOWUP });
+      await load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
   }
@@ -126,11 +185,117 @@ export default function PaymentCoordinatorPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold"><CalendarClock className="h-5 w-5" /> Installment Timeline</h1>
-          <p className="text-sm text-muted-foreground">Student-wise installment follow-up and payment tracking.</p>
+          <h1 className="flex items-center gap-2 text-xl font-semibold"><CalendarClock className="h-5 w-5" /> Payment Coordinator</h1>
+          <p className="text-sm text-muted-foreground">Student fee installments and document payment follow-up tracking.</p>
         </div>
         <Button variant="outline" onClick={load}>Refresh</Button>
       </div>
+
+      <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/20 p-1">
+        <Button type="button" variant={view === 'installments' ? 'default' : 'ghost'} onClick={() => setView('installments')} className="gap-2">
+          <CalendarClock className="h-4 w-4" /> Installments
+        </Button>
+        <Button type="button" variant={view === 'documents' ? 'default' : 'ghost'} onClick={() => setView('documents')} className="gap-2">
+          <FileText className="h-4 w-4" /> Document Payments
+          <span className="rounded-full bg-background/80 px-2 text-xs text-foreground">{activeDocCount}</span>
+        </Button>
+      </div>
+
+      {view === 'documents' ? (
+        <>
+          <div className="grid gap-3 sm:grid-cols-5">
+            {[
+              ['Need Call', docCounts.needs_call, 'border-red-200 bg-red-50 text-red-700'],
+              ['Payment Submitted', docCounts.submitted, 'border-amber-200 bg-amber-50 text-amber-700'],
+              ['Ready / Dispatch Pending', docCounts.ready_dispatch, 'border-blue-200 bg-blue-50 text-blue-700'],
+              ['Dispatched / Not Received', docCounts.dispatched, 'border-purple-200 bg-purple-50 text-purple-700'],
+              ['Received by Center', docCounts.delivered, 'border-emerald-200 bg-emerald-50 text-emerald-700'],
+            ].map(([label, value, tone]) => (
+              <div key={label} className={cn('rounded-lg border p-3', tone)}>
+                <div className="text-2xl font-bold">{value}</div>
+                <div className="text-xs font-semibold uppercase tracking-wide">{label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Tabs value={docBucket} onValueChange={setDocBucket}>
+              <TabsList className="flex h-auto flex-wrap">
+                {[
+                  ['all', 'All', docCounts.all],
+                  ['needs_call', 'Need Call', docCounts.needs_call],
+                  ['submitted', 'Payment Submitted', docCounts.submitted],
+                  ['ready_dispatch', 'Ready Dispatch', docCounts.ready_dispatch],
+                  ['dispatched', 'Awaiting Center', docCounts.dispatched],
+                  ['tracking', 'Tracking', docCounts.tracking],
+                  ['delivered', 'Received by Center', docCounts.delivered],
+                ].map(([key, label, count]) => (
+                  <TabsTrigger key={key} value={key}>{label}<span className="rounded-full bg-background px-1.5 text-[10px]">{count || 0}</span></TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <div className="relative ml-auto min-w-[260px]">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={search} onChange={e => setSearch(e.target.value)} className="pl-9" placeholder="Search student, center, document..." />
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-lg border bg-card">
+            {docPaymentRows.length === 0 ? (
+              <div className="py-16 text-center text-sm text-muted-foreground">No document payment follow-up records found</div>
+            ) : (
+              <div className="divide-y">
+                {docPaymentRows.map(row => {
+                  const needsCall = row.bucket === 'needs_call';
+                  return (
+                    <div key={row.documentId} className="grid gap-3 p-4 lg:grid-cols-[1.2fr_.9fr_.8fr_auto] lg:items-center">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link to={`/students/${row.studentId}`} className="font-semibold text-foreground hover:text-primary">{row.studentName}</Link>
+                          {row.enrollmentNumber && <Badge variant="outline" className="font-mono">{row.enrollmentNumber}</Badge>}
+                          <Badge variant="outline" className={cn('border', needsCall ? 'border-red-200 bg-red-50 text-red-700' : row.bucket === 'submitted' ? 'border-amber-200 bg-amber-50 text-amber-700' : row.bucket === 'ready_dispatch' ? 'border-blue-200 bg-blue-50 text-blue-700' : row.bucket === 'dispatched' ? 'border-purple-200 bg-purple-50 text-purple-700' : row.bucket === 'delivered' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700')}>
+                            {String(row.status || '').replace(/_/g, ' ')}
+                          </Badge>
+                        </div>
+                        <div className="mt-1 text-sm text-muted-foreground">{row.documentName} · {row.centerName || 'Center'}</div>
+                        <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                          {row.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{row.phone}</span>}
+                          {row.courseName && <span>{row.courseName} {row.courseYear || ''}</span>}
+                          {row.scanReceivedAt && <span>Scan to center: {fmtDt(row.scanReceivedAt)}</span>}
+                          {row.paymentVerifiedAt && <span>Payment verified: {fmtDt(row.paymentVerifiedAt)}</span>}
+                          {row.dispatchedAt && <span>Dispatched: {fmtDt(row.dispatchedAt)}</span>}
+                          {row.deliveredAt && <span>Center received: {fmtDt(row.deliveredAt)}</span>}
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div><div className="text-xs text-muted-foreground">Charge</div><div className="font-semibold">{fmt(row.chargeFee)}</div></div>
+                        <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(row.totalPaid)}</div></div>
+                        <div><div className="text-xs text-muted-foreground">Due</div><div className="font-semibold text-amber-700">{fmt(row.dueAmount)}</div></div>
+                      </div>
+                      <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+                        <div className="text-xs text-muted-foreground">Last follow-up</div>
+                        <div className="font-medium">{row.lastFollowup ? fmtDt(row.lastFollowup.contactedAt) : 'Not called yet'}</div>
+                        {row.lastFollowup?.contactWith && (
+                          <div className="mt-0.5 text-xs font-semibold text-indigo-700">Talked to: {row.lastFollowup.contactWith}</div>
+                        )}
+                        {row.lastFollowup?.outcome && (
+                          <div className="mt-0.5 text-xs font-semibold text-slate-700">{row.lastFollowup.outcome}</div>
+                        )}
+                        {row.nextFollowupDate && <div className="text-xs text-blue-700">Expected: {fmtDt(row.nextFollowupDate)}</div>}
+                        {row.lastFollowup?.note && <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{row.lastFollowup.note}</div>}
+                      </div>
+                      <Button size="sm" onClick={() => openDocFollow(row)} className="gap-1">
+                        <History className="h-3.5 w-3.5" /> Mark Call
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
 
       <div className="grid gap-3 sm:grid-cols-4">
         {[
@@ -227,6 +392,8 @@ export default function PaymentCoordinatorPage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       <Dialog open={Boolean(payTarget)} onOpenChange={v => { if (!v) setPayTarget(null); }}>
         <DialogContent className="max-w-lg">
@@ -247,6 +414,86 @@ export default function PaymentCoordinatorPage() {
             <div><Label>Note</Label><Textarea rows={2} value={payForm.note} onChange={e => setPayForm(p => ({ ...p, note: e.target.value }))} /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setPayTarget(null)}>Cancel</Button><Button onClick={submitPaid} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Save Payment</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(docFollowTarget)} onOpenChange={v => { if (!v) setDocFollowTarget(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Document Payment Follow-up</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+              <div className="font-semibold">{docFollowTarget?.studentName}</div>
+              <div className="text-muted-foreground">{docFollowTarget?.documentName} · Due {fmt(docFollowTarget?.dueAmount)}</div>
+              {docFollowTarget?.centerName && <div className="text-xs text-muted-foreground">Center: {docFollowTarget.centerName}</div>}
+              {docFollowTarget?.phone && <div className="text-xs text-muted-foreground">Phone: {docFollowTarget.phone}</div>}
+            </div>
+            <div>
+              <Label>Contacted party</Label>
+              <select
+                value={docFollowForm.contactWith}
+                onChange={e => setDocFollowForm(p => ({
+                  ...p,
+                  contactWith: e.target.value,
+                  outcome: e.target.value === 'Dispatch' ? 'Called dispatch' : 'Called center',
+                }))}
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                <option value="Center">Center</option>
+                <option value="Dispatch">Dispatch Department</option>
+              </select>
+            </div>
+            <div>
+              <Label>Call outcome</Label>
+              <select
+                value={docFollowForm.outcome}
+                onChange={e => setDocFollowForm(p => ({ ...p, outcome: e.target.value }))}
+                className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                {docFollowForm.contactWith === 'Dispatch' ? (
+                  <>
+                    <option>Called dispatch</option>
+                    <option>Dispatch will send courier</option>
+                    <option>Dispatch already sent</option>
+                    <option>No response</option>
+                    <option>Need admin help</option>
+                  </>
+                ) : (
+                  <>
+                    <option>Called center</option>
+                    <option>Center promised payment</option>
+                    <option>No response</option>
+                    <option>Wrong number</option>
+                    <option>Payment already done</option>
+                    <option>Need counselor help</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div>
+              <Label>Expected payment date</Label>
+              <Input type="date" value={docFollowForm.expectedPaymentDate} onChange={e => setDocFollowForm(p => ({ ...p, expectedPaymentDate: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Note</Label>
+              <Textarea rows={3} value={docFollowForm.note} onChange={e => setDocFollowForm(p => ({ ...p, note: e.target.value }))} placeholder="Add the discussion summary and next action..." />
+            </div>
+            {docFollowTarget?.followups?.length > 0 && (
+              <div className="max-h-40 overflow-y-auto rounded-lg border p-2">
+                <div className="mb-1 text-xs font-semibold text-muted-foreground">Previous follow-ups</div>
+                {[...docFollowTarget.followups].reverse().map(f => (
+                  <div key={f._id || f.contactedAt} className="rounded-md bg-muted/30 px-2 py-1.5 text-xs">
+                    <div className="font-medium">{fmtDt(f.contactedAt)} - {f.contactWith ? `${f.contactWith} - ` : ''}{f.outcome || 'Follow-up'}</div>
+                    {f.expectedPaymentDate && <div className="text-blue-700">Expected: {fmtDt(f.expectedPaymentDate)}</div>}
+                    {f.note && <div className="text-muted-foreground">{f.note}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDocFollowTarget(null)}>Cancel</Button>
+            <Button onClick={submitDocFollowup} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Save Follow-up</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
