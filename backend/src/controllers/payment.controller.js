@@ -88,11 +88,31 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
       ],
     })
     .populate('center', 'name organisationName city')
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role')
     .lean();
 
   const rows = [];
   for (const payment of payments) {
     if (!payment.student) continue;
+    const feeTransactions = (payment.transactions || [])
+      .filter(t => t.type === 'Fee')
+      .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
+    const orderedInstallments = [...(payment.installments || [])].sort((a, b) => {
+      const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);
+      return byDate || (a.installmentNumber || 0) - (b.installmentNumber || 0);
+    });
+    const paidDateByInstallment = {};
+    let requiredTotal = 0;
+    for (const planned of orderedInstallments) {
+      requiredTotal += Number(planned.amount || 0);
+      let paidTotal = 0;
+      const coveringTx = feeTransactions.find(tx => {
+        paidTotal += Number(tx.amount || 0);
+        return paidTotal >= requiredTotal;
+      });
+      if (coveringTx) paidDateByInstallment[String(planned._id)] = coveringTx.paidAt || coveringTx.createdAt;
+    }
     for (const inst of payment.installments || []) {
       const due = inst.paymentDate ? new Date(inst.paymentDate) : null;
       if (!due || Number.isNaN(due.getTime())) continue;
@@ -115,9 +135,10 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
         netFee: payment.netFee || 0,
         paidAmount: payment.paidAmount || 0,
         dueAmount: payment.dueAmount || 0,
-        transactions: (payment.transactions || []).filter(t => t.type === 'Fee'),
-        installment: inst,
+        transactions: feeTransactions,
+        installment: { ...inst, actualPaidAt: paidDateByInstallment[String(inst._id)] || null },
         paymentDate: inst.paymentDate,
+        actualPaidAt: paidDateByInstallment[String(inst._id)] || null,
         daysLeft,
         bucket: inst.status === 'Paid'
           ? 'paid'

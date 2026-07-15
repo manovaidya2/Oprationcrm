@@ -619,6 +619,7 @@ exports.documentPaymentTimeline = asyncHandler(async (req, res) => {
     .populate('center', 'name organisationName city')
     .populate('counselor', 'name')
     .populate('university', 'name shortName')
+    .populate('payments.recordedBy', 'name role')
     .sort('-updatedAt')
     .lean();
 

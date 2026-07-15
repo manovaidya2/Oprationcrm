@@ -53,6 +53,7 @@ const NAV_CONFIG = {
   ],
   PaymentCoordinator: [
     { to: '/payment-coordinator', label: 'Installments', icon: CalendarClock },
+    { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/document-inventory', label: 'Doc Inventory', icon: BookOpen },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],

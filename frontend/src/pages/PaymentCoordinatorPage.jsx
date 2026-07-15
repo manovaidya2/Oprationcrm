@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, CheckCircle2, ChevronDown, Clock3, FileText, History, Loader2, Phone, Search, Send, TriangleAlert } from 'lucide-react';
+import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, FileText, History, Loader2, Phone, Search, Send, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -16,6 +16,7 @@ const fmt = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const today = () => new Date().toISOString().split('T')[0];
 const todayFrom = d => d ? new Date(d).toISOString().split('T')[0] : '';
+const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 
 const BUCKETS = {
   all: { label: 'All', icon: CalendarClock },
@@ -52,6 +53,41 @@ function groupRows(rows) {
     item.bucket = item.installments.reduce((best, r) => rank[r.bucket] < rank[best] ? r.bucket : best, item.installments[0]?.bucket || 'upcoming');
     return item;
   });
+}
+
+function PaymentProofList({ payments, emptyText = 'No payment recorded yet' }) {
+  const list = Array.isArray(payments) ? payments : [];
+  if (list.length === 0) return <div className="text-sm text-muted-foreground">{emptyText}</div>;
+
+  return (
+    <div className="space-y-2">
+      {[...list].reverse().map(tx => (
+        <div key={tx._id || `${tx.amount}-${tx.paidAt || tx.createdAt}`} className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-semibold text-emerald-700">{fmt(tx.amount)}</span>
+              <span className="ml-2 text-muted-foreground">{tx.mode || 'Payment'}{tx.utrRef ? ` - ${tx.utrRef}` : ' - No ref'}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">{fmtDt(tx.paidAt || tx.createdAt)}</div>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {tx.upiId && <span>UPI: {tx.upiId}</span>}
+            {tx.bankName && <span>Bank: {tx.bankName}</span>}
+            {tx.accountHolder && <span>Account holder: {tx.accountHolder}</span>}
+            {tx.paidToAccountLabel && <span>Paid to: {tx.paidToAccountLabel}</span>}
+            {tx.recordedBy?.name && <span>Added by: {tx.recordedBy.name} ({tx.recordedBy.role})</span>}
+            {tx.verificationStatus && <span>Status: {String(tx.verificationStatus).replace(/_/g, ' ')}</span>}
+          </div>
+          {tx.note && <div className="mt-1 text-xs text-muted-foreground">{tx.note}</div>}
+          {tx.paymentScreenshot && (
+            <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-700 underline">
+              <Download className="h-3 w-3" /> View payment screenshot
+            </a>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function PaymentCoordinatorPage() {
@@ -266,6 +302,12 @@ export default function PaymentCoordinatorPage() {
                           {row.dispatchedAt && <span>Dispatched: {fmtDt(row.dispatchedAt)}</span>}
                           {row.deliveredAt && <span>Center received: {fmtDt(row.deliveredAt)}</span>}
                         </div>
+                        {(row.payments || []).length > 0 && (
+                          <div className="mt-3">
+                            <div className="mb-1 text-xs font-semibold text-muted-foreground">Center Payment Details</div>
+                            <PaymentProofList payments={row.payments} />
+                          </div>
+                        )}
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-sm">
                         <div><div className="text-xs text-muted-foreground">Charge</div><div className="font-semibold">{fmt(row.chargeFee)}</div></div>
@@ -359,10 +401,19 @@ export default function PaymentCoordinatorPage() {
                           const due = Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0));
                           const paid = row.bucket === 'paid';
                           const overdue = row.bucket === 'overdue';
+                          const actualPaidAt = row.actualPaidAt || inst.actualPaidAt || inst.paidAt;
                           return (
                             <div key={inst._id} className="grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-[.8fr_1fr_.9fr_.8fr_auto] lg:items-center">
                               <div><div className="text-xs text-muted-foreground">Installment</div><div className="font-semibold">#{inst.installmentNumber}</div>{inst.reasonOrRequirement && <div className="text-xs text-muted-foreground">{inst.reasonOrRequirement}</div>}</div>
-                              <div className={cn('rounded-md border px-3 py-2 text-sm', overdue ? 'border-red-200 bg-red-50 text-red-700' : paid ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50')}><div className="text-xs font-medium opacity-80">Payment Date</div><div className="font-semibold">{fmtDt(row.paymentDate)}</div>{!paid && <div className="text-xs">{row.daysLeft < 0 ? `${Math.abs(row.daysLeft)} days overdue` : `${row.daysLeft} days left`}</div>}</div>
+                              <div className={cn('rounded-md border px-3 py-2 text-sm', overdue ? 'border-red-200 bg-red-50 text-red-700' : paid ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50')}>
+                                <div className="text-xs font-medium opacity-80">{paid ? 'Last Date' : 'Payment Date'}</div>
+                                <div className="font-semibold">{fmtDt(row.paymentDate)}</div>
+                                {paid ? (
+                                  <div className="mt-1 text-xs font-semibold text-emerald-700">Paid on: {fmtDt(actualPaidAt)}</div>
+                                ) : (
+                                  <div className="text-xs">{row.daysLeft < 0 ? `${Math.abs(row.daysLeft)} days overdue` : `${row.daysLeft} days left`}</div>
+                                )}
+                              </div>
                               <div className="grid grid-cols-3 gap-2 text-sm"><div><div className="text-xs text-muted-foreground">Fee</div><div className="font-semibold">{fmt(inst.amount)}</div></div><div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(inst.paidAmount)}</div></div><div><div className="text-xs text-muted-foreground">Due</div><div className="font-semibold text-amber-700">{fmt(due)}</div></div></div>
                               <Badge className={cn('w-fit border', STATUS_CLASS[inst.status] || STATUS_CLASS.Pending)} variant="outline">{String(inst.status || 'Pending').replace(/_/g, ' ')}</Badge>
                               {!paid && <Button size="sm" onClick={() => openPay(student, row)}><Send className="mr-1 h-3.5 w-3.5" />Mark Paid</Button>}
@@ -373,7 +424,8 @@ export default function PaymentCoordinatorPage() {
 
                       <div className="rounded-lg border bg-card p-3">
                         <div className="mb-2 text-sm font-semibold">Payment History</div>
-                        {(student.transactions || []).length === 0 ? <div className="text-sm text-muted-foreground">No payment recorded yet</div> : (
+                        <PaymentProofList payments={student.transactions || []} />
+                        {false && (
                           <div className="space-y-2">
                             {[...student.transactions].reverse().map(tx => (
                               <div key={tx._id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-sm">
