@@ -25,7 +25,8 @@ function wantsCenterFlow(req) {
   return req.body.actingAsCenter === true || req.body.actingAsCenter === 'true';
 }
 
-async function counselorCanActForStudentCenter(req, student) {
+async function canActForStudentCenter(req, student) {
+  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
   if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(centerId => String(centerId) === String(student.center));
@@ -44,13 +45,13 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   const { totalFee, discount, notes } = req.body;
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
-  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
-  const centerOriginated = req.user.role === 'Center' || counselorActingAsCenter;
+  const userActingAsCenter = await canActForStudentCenter(req, student);
+  const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
 
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
+  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
@@ -60,7 +61,7 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   }
 
   // Center can only set fees in Draft or Changes_Requested state
-  if (centerOriginated && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
+  if (centerOriginated && req.user.role !== 'PaymentCoordinator' && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
     const e = new Error('Fee structure cannot be changed after submission. Contact Admin/Counselor.'); e.status = 403; throw e;
   }
 
@@ -222,12 +223,12 @@ exports.addTransaction = asyncHandler(async (req, res) => {
 
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
-  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
-  const centerOriginated = req.user.role === 'Center' || counselorActingAsCenter;
+  const userActingAsCenter = await canActForStudentCenter(req, student);
+  const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
+  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
@@ -319,11 +320,11 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
   if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
-  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
+  const userActingAsCenter = await canActForStudentCenter(req, student);
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
+  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   const tx = payment.transactions.id(req.params.txId);

@@ -41,6 +41,7 @@ function wantsCenterFlow(req) {
 
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
+  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
   if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));

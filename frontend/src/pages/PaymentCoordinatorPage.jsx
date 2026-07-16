@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, FileText, History, Loader2, Phone, Search, Send, Trash2, TriangleAlert } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Building2, CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, FileText, History, Loader2, Phone, Search, Send, Trash2, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -8,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { docsApi, paymentsApi } from '@/lib/api';
+import { centersApi, docsApi, paymentsApi } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
@@ -93,7 +94,8 @@ function PaymentProofList({ payments, emptyText = 'No payment recorded yet' }) {
 }
 
 export default function PaymentCoordinatorPage() {
-  const { user } = useAuth();
+  const { user, switchToCenter } = useAuth();
+  const navigate = useNavigate();
   const { dismiss, isDismissed } = usePanelDismissals(user, 'payment-coordinator');
   const [rows, setRows] = useState([]);
   const [docRows, setDocRows] = useState([]);
@@ -108,6 +110,9 @@ export default function PaymentCoordinatorPage() {
   const [docFollowTarget, setDocFollowTarget] = useState(null);
   const [docFollowForm, setDocFollowForm] = useState({ ...EMPTY_DOC_FOLLOWUP });
   const [saving, setSaving] = useState(false);
+  const [centerSwitchOpen, setCenterSwitchOpen] = useState(false);
+  const [centerSwitchSearch, setCenterSwitchSearch] = useState('');
+  const [centers, setCenters] = useState([]);
 
   async function load() {
     try {
@@ -126,6 +131,10 @@ export default function PaymentCoordinatorPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    centersApi.getAll().then(setCenters).catch(() => {});
+  }, []);
 
   const counts = useMemo(() => rows.reduce((acc, row) => {
     acc.all += 1;
@@ -200,6 +209,19 @@ export default function PaymentCoordinatorPage() {
     });
   }
 
+  const filteredCenters = useMemo(() => {
+    const q = centerSwitchSearch.trim().toLowerCase();
+    if (!q) return centers;
+    return centers.filter(center => [
+      center.name,
+      center.organisationName,
+      center.city,
+      center.state,
+      center.email,
+      center.phone,
+    ].some(v => String(v || '').toLowerCase().includes(q)));
+  }, [centers, centerSwitchSearch]);
+
   async function submitDocFollowup() {
     if (!docFollowTarget) return;
     if (!docFollowForm.note.trim() && !docFollowForm.expectedPaymentDate && !docFollowForm.outcome.trim()) {
@@ -230,7 +252,12 @@ export default function PaymentCoordinatorPage() {
           <h1 className="flex items-center gap-2 text-xl font-semibold"><CalendarClock className="h-5 w-5" /> Payment Coordinator</h1>
           <p className="text-sm text-muted-foreground">Student fee installments and document payment follow-up tracking.</p>
         </div>
-        <Button variant="outline" onClick={load}>Refresh</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setCenterSwitchOpen(true)} className="gap-2">
+            <Building2 className="h-4 w-4" /> Switch Center
+          </Button>
+          <Button variant="outline" onClick={load}>Refresh</Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/20 p-1">
@@ -566,6 +593,52 @@ export default function PaymentCoordinatorPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDocFollowTarget(null)}>Cancel</Button>
             <Button onClick={submitDocFollowup} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Save Follow-up</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={centerSwitchOpen} onOpenChange={setCenterSwitchOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Switch to Center Dashboard</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={centerSwitchSearch}
+                onChange={e => setCenterSwitchSearch(e.target.value)}
+                className="pl-9"
+                placeholder="Search center name, city, phone..."
+              />
+            </div>
+            <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
+              {filteredCenters.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No center found</div>
+              ) : filteredCenters.map(center => (
+                <button
+                  key={center._id}
+                  type="button"
+                  onClick={() => {
+                    switchToCenter(center);
+                    setCenterSwitchOpen(false);
+                    navigate('/center');
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg border bg-card px-4 py-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50"
+                >
+                  <div>
+                    <div className="font-semibold">{center.name || center.organisationName || 'Center'}</div>
+                    <div className="mt-0.5 text-sm text-muted-foreground">
+                      {[center.city, center.state].filter(Boolean).join(', ') || center.email || center.phone || 'Center'}
+                    </div>
+                  </div>
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                </button>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCenterSwitchOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

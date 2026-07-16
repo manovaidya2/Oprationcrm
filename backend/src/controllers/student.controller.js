@@ -62,6 +62,7 @@ function wantsCenterFlow(req) {
 
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
+  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
   if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
@@ -114,7 +115,7 @@ exports.list = asyncHandler(async (req, res) => {
       andConditions.push({ university: universityId });
     }
     andConditions.push({ applicationStatus: { $in: ['Sent_To_University','Enrolled','Cancelled'] } });
-  } else if (role === 'PaymentCoordinator') {
+  } else if (role === 'PaymentCoordinator' && !req.query.centerId) {
     const paymentRows = await Payment.find({ 'installments.0': { $exists: true } }).select('student').lean();
     const studentIdsWithInstallments = paymentRows.map(row => row.student).filter(Boolean);
     andConditions.push({
@@ -189,6 +190,18 @@ exports.create = asyncHandler(async (req, res) => {
     const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
     if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
     body.counselor = req.user.counselorId;
+    body.applicationStatus = 'Draft';
+  } else if (role === 'PaymentCoordinator') {
+    if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
+    if (!body.counselor) {
+      const linked = await Counselor.find({ centers: body.center }).lean();
+      if (linked.length > 0) body.counselor = linked[0]._id;
+      else {
+        const any = await Counselor.findOne({ isActive: true }).lean();
+        if (any) body.counselor = any._id;
+        else { const e = new Error('No counselor assigned to this center. Contact admin.'); e.status = 400; throw e; }
+      }
+    }
     body.applicationStatus = 'Draft';
   }
 

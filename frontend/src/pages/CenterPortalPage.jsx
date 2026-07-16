@@ -46,10 +46,26 @@ function validateInstallments(rows = []) {
   return '';
 }
 
+function dateInputValue(value) {
+  if (!value) return '';
+  const raw = String(value);
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) {
+    const [, d, m, y] = slash;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
 function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
   const update = (idx, key, value) => setRows(prev => prev.map((row, i) => i === idx ? { ...row, [key]: value } : row));
   const add = () => setRows(prev => [...prev, blankInstallment((Number(prev.at(-1)?.installmentNumber) || prev.length || 0) + 1)]);
   const remove = idx => setRows(prev => prev.length <= 1 ? [blankInstallment(1)] : prev.filter((_, i) => i !== idx));
+  const openDatePicker = event => {
+    try { event.currentTarget.showPicker?.(); } catch {}
+  };
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -61,17 +77,24 @@ function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
           <Plus className="h-3.5 w-3.5 mr-1" />Add
         </Button>
       </div>
-      <div className="space-y-2">
+      <div className={compact ? 'max-h-[42vh] space-y-2 overflow-y-auto pr-1' : 'space-y-2'}>
         {rows.map((row, idx) => (
           <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-            <div className={compact ? 'grid gap-2 sm:grid-cols-4' : 'grid gap-2 sm:grid-cols-[110px_1fr_1fr_1.5fr_auto]'}>
+            <div className={compact ? 'grid gap-2 sm:grid-cols-[88px_150px_120px_minmax(150px,1fr)_36px]' : 'grid gap-2 sm:grid-cols-[110px_1fr_1fr_1.5fr_auto]'}>
               <div>
                 <Label className="text-[11px] text-slate-500">No. *</Label>
                 <Input type="number" min="1" value={row.installmentNumber || ''} onChange={e => update(idx, 'installmentNumber', e.target.value)} className="mt-1 h-9 border-slate-200" />
               </div>
               <div>
                 <Label className="text-[11px] text-slate-500">Date *</Label>
-                <Input type="date" value={row.paymentDate || ''} onChange={e => update(idx, 'paymentDate', e.target.value)} className="mt-1 h-9 border-slate-200" />
+                <Input
+                  type="date"
+                  value={dateInputValue(row.paymentDate)}
+                  onChange={e => update(idx, 'paymentDate', e.target.value)}
+                  onFocus={openDatePicker}
+                  onClick={openDatePicker}
+                  className="mt-1 h-9 min-w-[140px] cursor-pointer border-slate-200"
+                />
               </div>
               <div>
                 <Label className="text-[11px] text-slate-500">Fees</Label>
@@ -353,7 +376,7 @@ const SBadge = ({status,map}) => {
 // ── Cancelled Application Banner with Settlement Request ──────
 function CancelledBanner({ student, onSettlementRequested }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [requesting, setRequesting] = useState(false);
   const [note,       setNote]       = useState('');
   const [noteOpen,   setNoteOpen]   = useState(false);
@@ -944,7 +967,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 function FeeSection({ studentId, appStatus, student }) {
   
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const isCancelled = appStatus === 'Cancelled';
   const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
@@ -968,7 +991,7 @@ function FeeSection({ studentId, appStatus, student }) {
   const load=useCallback(async()=>{ try{setLoading(true);setData(await paymentsApi.get(studentId));} catch{} finally{setLoading(false);} },[studentId]);
   useEffect(()=>{load();},[load]);
 
-  const canSetFee = !isCancelled && ['Draft', 'Changes_Requested'].includes(appStatus);
+  const canSetFee = !isCancelled && (['Draft', 'Changes_Requested'].includes(appStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch));
   const canAddPayment = !isCancelled;
 
   async function saveFee(){
@@ -1229,16 +1252,18 @@ function FeeSection({ studentId, appStatus, student }) {
       )}
 
       <Dialog open={feeOpen} onOpenChange={setFeeOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle className="text-slate-800">Fee Structure</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+        <DialogContent className="max-h-[88vh] max-w-2xl overflow-hidden p-0">
+          <div className="border-b border-slate-100 px-6 py-4">
+            <DialogHeader><DialogTitle className="text-slate-800">Fee Structure</DialogTitle></DialogHeader>
+          </div>
+          <div className="max-h-[calc(88vh-132px)] space-y-3 overflow-y-auto px-6 py-4">
             <div><Label className="text-xs font-semibold text-slate-600">Total Fee (₹) *</Label><Input type="number" value={ff.totalFee} onChange={e=>setFf(p=>({...p,totalFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             <div><Label className="text-xs font-semibold text-slate-600">Discount (₹)</Label><Input type="number" value={ff.discount} onChange={e=>setFf(p=>({...p,discount:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             {ff.totalFee&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-sm font-semibold text-emerald-700">Net: {fmt(Number(ff.totalFee)-Number(ff.discount||0))}</div>}
             <div><Label className="text-xs font-semibold text-slate-600">Notes</Label><Textarea rows={2} value={ff.notes} onChange={e=>setFf(p=>({...p,notes:e.target.value}))} className="mt-1 border-slate-200 resize-none"/></div>
             <InstallmentTimelineEditor rows={ffInstallments} setRows={setFfInstallments} compact />
           </div>
-          <DialogFooter><Button variant="outline" onClick={()=>setFeeOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={saveFee} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button></DialogFooter>
+          <DialogFooter className="border-t border-slate-100 px-6 py-4"><Button variant="outline" onClick={()=>setFeeOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={saveFee} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1294,7 +1319,7 @@ function FeeSection({ studentId, appStatus, student }) {
 // ── DOCS SECTION ─────────────────────────────────────────────
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1895,7 +1920,7 @@ function PaymentsSection({ studentId }) {
 // ── STUDENT DETAIL ───────────────────────────────────────────
 function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [s,setS]         = useState(student);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
@@ -2320,7 +2345,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
 
           {editTab==='fee'&&(
             <div className="space-y-4">
-              {(['Draft','Changes_Requested'].includes(s.applicationStatus))?(<>
+              {(['Draft','Changes_Requested'].includes(s.applicationStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch))?(<>
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label className="text-xs font-semibold text-slate-600">Total Fee (₹) *</Label><Input type="number" value={feeForm.totalFee} onChange={e=>setFeeForm(p=>({...p,totalFee:e.target.value}))} placeholder="e.g. 50000" className="text-lg font-bold mt-1 h-12 border-slate-200"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Discount (₹)</Label><Input type="number" value={feeForm.discount} onChange={e=>setFeeForm(p=>({...p,discount:e.target.value}))} placeholder="0" className="text-lg font-bold mt-1 h-12 border-slate-200"/></div>
@@ -2479,7 +2504,7 @@ function isPaymentPending(student) {
 export default function CenterPortalPage() {
   const {user, switchedCenter, switchBackToCounselor}=useAuth();
   const navigate = useNavigate();
-  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const centerId = isCounselorSwitch ? switchedCenter._id : user?.centerId;
   const [students,setStudents]=useState([]); const [centerInfo,setCenterInfo]=useState(null);
   const [defCounselor,setDef]=useState(null); const [loading,setLoading]=useState(true);
@@ -2494,7 +2519,7 @@ export default function CenterPortalPage() {
 
   function returnToCounselor() {
     switchBackToCounselor?.();
-    navigate('/counselor');
+    navigate(user?.role === 'PaymentCoordinator' ? '/payment-coordinator' : '/counselor');
   }
 
   async function handleChangePassword() {
@@ -2532,12 +2557,12 @@ export default function CenterPortalPage() {
   },[centerId]);
   useEffect(()=>{loadAll();},[loadAll]);
 
-  if (user?.role === 'Counselor' && !centerId) {
+  if (['Counselor','PaymentCoordinator'].includes(user?.role) && !centerId) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
         <h2 className="text-lg font-semibold">No center selected</h2>
-        <p className="mt-1 text-sm">Please switch from your Counselor dashboard to open a center dashboard.</p>
-        <Button className="mt-4" onClick={() => navigate('/counselor')}>Back to Counselor Dashboard</Button>
+        <p className="mt-1 text-sm">Please switch from your dashboard to open a center dashboard.</p>
+        <Button className="mt-4" onClick={() => navigate(user?.role === 'PaymentCoordinator' ? '/payment-coordinator' : '/counselor')}>Back to Dashboard</Button>
       </div>
     );
   }
@@ -2571,7 +2596,7 @@ export default function CenterPortalPage() {
         <div>
           {isCounselorSwitch && (
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-              Counselor center view
+              {user?.role === 'PaymentCoordinator' ? 'Payment coordinator center view' : 'Counselor center view'}
             </div>
           )}
           <h1 className="text-2xl font-bold text-slate-800">{centerInfo?.name||'Center Portal'}</h1>
