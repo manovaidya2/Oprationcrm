@@ -195,6 +195,7 @@ function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = fal
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium">{doc.name}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.label}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${doc.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{doc.requestType || 'Soft Copy'}</span>
               {alreadyInInventory && (
                 <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                   Already in Inventory

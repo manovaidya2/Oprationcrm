@@ -527,6 +527,7 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm text-slate-800">{d.name}</span>
               {badge && <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${badgeColor}`}>{badge}</span>}
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${d.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{d.requestType || 'Soft Copy'}</span>
             </div>
             <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
   <span>Student: <span className="font-medium text-slate-600">{d.student?.name}</span></span>

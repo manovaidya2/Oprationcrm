@@ -1126,6 +1126,7 @@ export default function AccountantPage() {
                     />
                     <span className="font-medium">{d.name}</span>
                     <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{d.status?.replace(/_/g,' ')}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${d.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{d.requestType || 'Soft Copy'}</span>
                   </div>
                   <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
   Student: {d.student?.name}

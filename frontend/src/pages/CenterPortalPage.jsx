@@ -1292,8 +1292,8 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
   const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
-  const [df,setDf]=useState({name:'',names:[],chargeFee:'',note:'',payAmount:''});
-  const [editDf,setEditDf]=useState({name:'',chargeFee:'',note:''});
+  const [df,setDf]=useState({name:'',names:[],chargeFee:'',note:'',payAmount:'',requestType:'Soft Copy'});
+  const [editDf,setEditDf]=useState({name:'',chargeFee:'',note:'',requestType:'Soft Copy'});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
   const editDocFileRef=useRef();
@@ -1321,6 +1321,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         fd.append('studentId',studentId); fd.append('name',name);
         fd.append('note',df.note);
         fd.append('chargeFee',df.chargeFee||0);
+        fd.append('requestType',df.requestType||'Soft Copy');
         if(df.payAmount&&Number(df.payAmount)>0){
           fd.append('paymentAmount',df.payAmount);
           fd.append('paymentMode',dfPay.mode||'UPI');
@@ -1338,7 +1339,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         await docsApi.create(fd);
       }
       toast.success(names.length > 1 ? `${names.length} document requests submitted` : 'Document request submitted'); setAddOpen(false);
-      setDf({name:'',names:[],chargeFee:'',note:'',payAmount:''}); setDfPay({...EMPTY_PF});
+      setDf({name:'',names:[],chargeFee:'',note:'',payAmount:'',requestType:'Soft Copy'}); setDfPay({...EMPTY_PF});
       setDocFile(null); if(fileRef.current) fileRef.current.value='';
       load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1407,7 +1408,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
 
   function openEditDoc(doc) {
     setEditDoc(doc);
-    setEditDf({ name: doc.name || '', chargeFee: doc.chargeFee || '', note: doc.note || '' });
+    setEditDf({ name: doc.name || '', chargeFee: doc.chargeFee || '', note: doc.note || '', requestType: doc.requestType || 'Soft Copy' });
     setEditDocFile(null);
     if (editDocFileRef.current) editDocFileRef.current.value = '';
   }
@@ -1421,6 +1422,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       fd.append('name', editDf.name);
       fd.append('chargeFee', editDf.chargeFee || 0);
       fd.append('note', editDf.note || '');
+      fd.append('requestType', editDf.requestType || 'Soft Copy');
       if(editDocFile) fd.append('file', editDocFile);
       await docsApi.update(editDoc._id, fd);
       toast.success('Document request updated');
@@ -1496,6 +1498,11 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                     ? <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-300 font-medium">⚡ Pay Required</span>
                     : <SBadge status={d.status} map={DOC_STATUS}/>
                 }
+              </div>
+              <div className="mb-1">
+                <span className={`text-xs px-2.5 py-0.5 rounded-full border font-medium ${d.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>
+                  {d.requestType || 'Soft Copy'}
+                </span>
               </div>
               {d.note&&<p className="text-xs text-slate-400 italic mb-1.5">{d.note}</p>}
               {(() => {
@@ -1676,6 +1683,16 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
               <div className="mt-1 text-xs text-slate-500">{df.names.length} selected</div>
             </div>
             <div className="grid grid-cols-1 gap-3">
+              <div>
+                <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
+                <Select value={df.requestType} onValueChange={v=>setDf(p=>({...p,requestType:v}))}>
+                  <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose request type"/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Soft Copy">Soft Copy</SelectItem>
+                    <SelectItem value="Hard Copy">Hard Copy</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             </div>
             {/* <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={df.note} onChange={e=>setDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div> */}
@@ -1704,6 +1721,16 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                 <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose document"/></SelectTrigger>
                 <SelectContent className="max-h-72">
                   {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
+              <Select value={editDf.requestType} onValueChange={v=>setEditDf(p=>({...p,requestType:v}))}>
+                <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose request type"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Soft Copy">Soft Copy</SelectItem>
+                  <SelectItem value="Hard Copy">Hard Copy</SelectItem>
                 </SelectContent>
               </Select>
             </div>

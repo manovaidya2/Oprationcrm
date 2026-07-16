@@ -31,6 +31,23 @@ function addHistoryOnly(doc, status, user, note = '', at = new Date()) {
   doc.statusHistory.push({ status, changedBy: user._id, at, note });
 }
 
+function isHardCopyRequest(doc) {
+  return String(doc.requestType || 'Soft Copy') === 'Hard Copy';
+}
+
+function markDocPaymentsVerified(doc, user) {
+  let changed = 0;
+  doc.payments.forEach(payment => {
+    if (!payment.verified) {
+      payment.verified = true;
+      payment.verifiedBy = user._id;
+      payment.verifiedAt = new Date();
+      changed += 1;
+    }
+  });
+  return changed;
+}
+
 const INVENTORY_DOC_NAMES = [
   'Marksheet Year One',
   'Marksheet Year Two',
@@ -127,7 +144,7 @@ exports.get = asyncHandler(async (req, res) => {
 // POST /api/documents - Center creates doc request with optional payment
 exports.create = asyncHandler(async (req, res) => {
   const {
-    studentId, name, type, note, chargeFee,
+    studentId, name, type, note, chargeFee, requestType,
     paymentAmount, paymentMode, paymentUtrRef, paymentDate,
     paymentUpiId, paymentBankName, paymentAccountHolder, paymentAccountNumber, paymentIfscCode,
     paymentPaidToAccount, paymentPaidToAccountLabel,
@@ -149,6 +166,7 @@ exports.create = asyncHandler(async (req, res) => {
     student: studentId, center: student.center, counselor: student.counselor,
     university: student.university,
     name: name.trim(), type: type||'', note: note||'',
+    requestType: requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy',
     origin: 'Request',
     chargeFee: Number(chargeFee)||0,
     uploadedBy: req.user._id, status: 'Requested',
@@ -206,6 +224,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.body.name !== undefined)      doc.name      = req.body.name;
   if (req.body.type !== undefined)      doc.type      = req.body.type;
   if (req.body.note !== undefined)      doc.note      = req.body.note;
+  if (req.body.requestType !== undefined) doc.requestType = req.body.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy';
   if (req.body.chargeFee !== undefined) doc.chargeFee = Number(req.body.chargeFee);
   if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
   await doc.save();
@@ -239,14 +258,33 @@ exports.accountantAction = asyncHandler(async (req, res) => {
 
   if (action === 'approve') {
     pushHistory(doc, 'Fee_Approved', req.user, note||'');
-    doc.status = 'Sent_To_University';
-    doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: 'Requested from dispatch inventory - external courier expected' });
+    const verifiedPayments = markDocPaymentsVerified(doc, req.user);
+    const paidTotal = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+    doc.totalPaid = paidTotal;
+    const fullyPaid = doc.chargeFee <= 0 || paidTotal >= doc.chargeFee;
+    if (isHardCopyRequest(doc) && fullyPaid) {
+      doc.status = 'Payment_Verified';
+      doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: verifiedPayments > 0 ? 'Hard copy payment verified - ready for dispatch' : 'Hard copy has no pending fee - ready for dispatch' });
+    } else if (isHardCopyRequest(doc)) {
+      doc.status = 'Center_Notified';
+      doc.statusHistory.push({ status: 'Center_Notified', changedBy: req.user._id, at: new Date(), note: 'Hard copy fee approved - payment required before dispatch' });
+    } else {
+      doc.status = 'Sent_To_University';
+      doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: 'Requested from dispatch inventory - external courier expected' });
+    }
     // University portal is skipped for document requests; Dispatch owns receipt.
     // Also notify Dispatch — courier will arrive from university directly
-    await notifyRole('Dispatch', {
+    if (!isHardCopyRequest(doc) || fullyPaid) await notifyRole('Dispatch', {
       message: `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
       type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
     });
+    if (isHardCopyRequest(doc) && !fullyPaid) {
+      const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
+      if (centerUser) await notify(centerUser._id, {
+        message: `Payment required for hard copy document "${doc.name}" - ${doc.student?.name}`,
+        type: 'doc_payment_required', documentId: doc._id, studentId: doc.student?._id, role: 'Center',
+      });
+    }
   } else if (action === 'reject') {
     pushHistory(doc, 'Fee_Rejected', req.user, note||'Fee rejected by accountant');
     // Notify COUNSELOR — they decide whether to send back to center or re-forward
@@ -518,6 +556,7 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
   if (doc.status !== 'Payment_Submitted') { const e = new Error('Not in payment verification'); e.status = 400; throw e; }
 
   if (approved) {
+    markDocPaymentsVerified(doc, req.user);
     pushHistory(doc, 'Payment_Verified', req.user, note||'Payment verified');
     // Notify Dispatch to send courier to center
     await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
