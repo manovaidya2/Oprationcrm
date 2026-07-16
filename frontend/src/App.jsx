@@ -49,7 +49,7 @@ const ROLE_ALLOWED = {
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/students', '/students/', '/document-inventory', '/chat'],
-  Counselor:  ['/counselor', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
+  Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
 };
 
 function ProtectedRoute({ children }) {

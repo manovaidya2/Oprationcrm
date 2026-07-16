@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const Payment = require('../models/Payment');
 const Student = require('../models/Student');
 const User    = require('../models/User');
+const Counselor = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
 function normalizeInstallments(input) {
@@ -20,6 +21,16 @@ function normalizeInstallments(input) {
     });
 }
 
+function wantsCenterFlow(req) {
+  return req.body.actingAsCenter === true || req.body.actingAsCenter === 'true';
+}
+
+async function counselorCanActForStudentCenter(req, student) {
+  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  return (counselor?.centers || []).some(centerId => String(centerId) === String(student.center));
+}
+
 exports.get = asyncHandler(async (req, res) => {
   const payment = await Payment.findOne({ student: req.params.studentId })
     .populate('transactions.recordedBy', 'name role')
@@ -33,18 +44,23 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   const { totalFee, discount, notes } = req.body;
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
+  const centerOriginated = req.user.role === 'Center' || counselorActingAsCenter;
 
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
+  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
 
   // Cancelled applications are fully locked — no changes allowed
-  if (student.applicationStatus === 'Cancelled' && req.user.role === 'Center') {
+  if (student.applicationStatus === 'Cancelled' && centerOriginated) {
     const e = new Error('This application has been cancelled. No changes are allowed.'); e.status = 403; throw e;
   }
 
   // Center can only set fees in Draft or Changes_Requested state
-  if (req.user.role === 'Center' && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
+  if (centerOriginated && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
     const e = new Error('Fee structure cannot be changed after submission. Contact Admin/Counselor.'); e.status = 403; throw e;
   }
 
@@ -206,19 +222,24 @@ exports.addTransaction = asyncHandler(async (req, res) => {
 
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
+  const centerOriginated = req.user.role === 'Center' || counselorActingAsCenter;
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
   // Cancelled applications are fully locked — no new payments allowed
-  if (student.applicationStatus === 'Cancelled' && req.user.role === 'Center') {
+  if (student.applicationStatus === 'Cancelled' && centerOriginated) {
     const e = new Error('This application has been cancelled. No payments can be added.'); e.status = 403; throw e;
   }
 
   let payment = await Payment.findOne({ student: req.params.studentId });
   if (!payment) { const e = new Error('Set up fee structure first'); e.status = 400; throw e; }
 
-  const needsVerification = req.user.role === 'Center' && (type || 'Fee') === 'Fee';
+  const needsVerification = centerOriginated && (type || 'Fee') === 'Fee';
   const verificationStatus = needsVerification ? 'pending_counselor' : 'not_required';
 
   payment.transactions.push({
@@ -296,6 +317,15 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
 exports.resendTransaction = asyncHandler(async (req, res) => {
   const payment = await Payment.findOne({ student: req.params.studentId });
   if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  const student = await Student.findById(req.params.studentId);
+  if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  const counselorActingAsCenter = await counselorCanActForStudentCenter(req, student);
+  if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (req.user.role === 'Counselor' && wantsCenterFlow(req) && !counselorActingAsCenter) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   const tx = payment.transactions.id(req.params.txId);
   if (!tx) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
   if (tx.verificationStatus === 'verified') {
@@ -313,7 +343,6 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
   tx.verificationStatus = 'pending_counselor';
   await payment.save();
 
-  const student = await Student.findById(req.params.studentId);
   await notifyRole('Counselor', {
     message: `Fee payment resubmitted by center for ${student?.name} — ₹${tx.amount}. Please review.`,
     type: 'fee_payment_resubmitted', studentId: student?._id, role: 'Counselor',

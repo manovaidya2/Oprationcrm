@@ -735,7 +735,7 @@ function PaidToAccountBox({ tx, accMap }) {
 
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function CounselorPage() {
-  const { user } = useAuth();
+  const { user, switchToCenter } = useAuth();
   const { dismiss, isDismissed } = usePanelDismissals(user, 'counselor');
   const navigate = useNavigate();
   const [allStudents, setAllStudents] = useState([]);
@@ -757,6 +757,8 @@ export default function CounselorPage() {
   const [docPayments, setDocPayments] = useState({});
   const [studentFeeMap, setStudentFeeMap] = useState({});
   const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [centerSwitchOpen, setCenterSwitchOpen] = useState(false);
+  const [centerSwitchSearch, setCenterSwitchSearch] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -908,6 +910,10 @@ export default function CounselorPage() {
   const paymentPending    = docs.filter(d => d.status === 'Payment_Submitted' && !isDismissed(`doc:${d._id}:payment`));
   const visibleSettlementQueue = settlementQueue.filter(s => !isDismissed(`student:${s._id}:settlement`));
   const visibleFeePayments = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
+  const switchCenters = centers.filter(c => {
+    const text = `${c.name || ''} ${c.organisationName || ''} ${c.city || ''}`.toLowerCase();
+    return !centerSwitchSearch.trim() || text.includes(centerSwitchSearch.toLowerCase());
+  });
   const q = search.toLowerCase();
   const filtered = allStudents.filter(s =>
     !q ||
@@ -947,11 +953,17 @@ export default function CounselorPage() {
           <h1 className="text-2xl font-bold text-slate-800">Counselor Dashboard</h1>
           <p className="text-xs text-slate-400 mt-0.5">Manage applications, documents and center activity</p>
         </div>
-        <Button variant="outline" size="sm" onClick={load} disabled={loading}
-          className="border-slate-200 text-slate-600 hover:bg-slate-50 gap-1.5">
-          {loading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={()=>setCenterSwitchOpen(true)}
+            className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 gap-1.5">
+            <Building2 className="h-4 w-4"/>Switch Center
+          </Button>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading}
+            className="border-slate-200 text-slate-600 hover:bg-slate-50 gap-1.5">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Stat Cards */}
@@ -1468,6 +1480,51 @@ export default function CounselorPage() {
       {studentModal && <StudentModal student={studentModal} onClose={()=>setStudentModal(null)}/>}
       {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}/>}
       {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts}/>}
+
+      <Dialog open={centerSwitchOpen} onOpenChange={setCenterSwitchOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-indigo-600"/>Switch to Center Dashboard
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400"/>
+              <Input
+                className="pl-9"
+                placeholder="Search center name..."
+                value={centerSwitchSearch}
+                onChange={e=>setCenterSwitchSearch(e.target.value)}
+              />
+            </div>
+            <div className="max-h-80 overflow-y-auto space-y-2">
+              {switchCenters.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-500">
+                  No center found
+                </div>
+              ) : switchCenters.map(center => (
+                <button
+                  key={center._id}
+                  type="button"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left hover:border-indigo-300 hover:bg-indigo-50"
+                  onClick={() => {
+                    switchToCenter(center);
+                    setCenterSwitchOpen(false);
+                    setCenterSwitchSearch('');
+                    navigate('/center');
+                  }}
+                >
+                  <div className="font-semibold text-slate-800">{center.name || center.organisationName}</div>
+                  <div className="text-xs text-slate-500">
+                    {[center.organisationName && center.organisationName !== center.name ? center.organisationName : '', center.city, center.state].filter(Boolean).join(' · ')}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Reject Fee Payment Dialog */}
       <Dialog open={!!rejectFeeDialog} onOpenChange={()=>{ setRejectFeeDialog(null); setRejectFeeNote(''); }}>

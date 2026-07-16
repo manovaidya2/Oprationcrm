@@ -21,6 +21,10 @@ async function apiMe(token) {
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(null);
   const [loading, setLoading] = useState(true);
+  const [switchedCenter, setSwitchedCenter] = useState(() => {
+    try { return JSON.parse(sessionStorage.getItem('crm_switched_center') || 'null'); }
+    catch { return null; }
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('crm_token');
@@ -34,17 +38,33 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (email, password) => {
     const data = await apiLogin(email, password);
     localStorage.setItem('crm_token', data.token);
+    sessionStorage.removeItem('crm_switched_center');
+    setSwitchedCenter(null);
     setUser(data.user);
     return data.user;
   }, []);
 
   const logout = useCallback(() => {
     localStorage.removeItem('crm_token');
+    sessionStorage.removeItem('crm_switched_center');
+    setSwitchedCenter(null);
     setUser(null);
   }, []);
 
   const updateUser = useCallback((nextUser) => {
     setUser(nextUser);
+  }, []);
+
+  const switchToCenter = useCallback((center) => {
+    if (!center) return;
+    const next = { _id: center._id, name: center.name || center.organisationName || 'Center' };
+    sessionStorage.setItem('crm_switched_center', JSON.stringify(next));
+    setSwitchedCenter(next);
+  }, []);
+
+  const switchBackToCounselor = useCallback(() => {
+    sessionStorage.removeItem('crm_switched_center');
+    setSwitchedCenter(null);
   }, []);
 
   if (loading) return (
@@ -53,7 +73,7 @@ export function AuthProvider({ children }) {
     </div>
   );
 
-  return <AuthContext.Provider value={{ user, login, logout, updateUser }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, login, logout, updateUser, switchedCenter, switchToCenter, switchBackToCounselor }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

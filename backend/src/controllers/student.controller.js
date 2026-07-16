@@ -56,6 +56,17 @@ async function verifyPendingFeePaymentsWithAdmission(studentId, user, note = '')
 }
 
 // ── Access helper ────────────────────────────────────────────
+function wantsCenterFlow(req) {
+  return req.body.actingAsCenter === true || req.body.actingAsCenter === 'true';
+}
+
+async function canUseCenterFlow(req, centerId) {
+  if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
+  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  return (counselor?.centers || []).some(id => String(id) === String(centerId));
+}
+
 async function assertStudentAccess(req, student) {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const role = req.user.role;
@@ -172,6 +183,13 @@ exports.create = asyncHandler(async (req, res) => {
       }
     }
     body.applicationStatus = 'Draft';
+  } else if (role === 'Counselor') {
+    if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
+    if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
+    body.counselor = req.user.counselorId;
+    body.applicationStatus = 'Draft';
   }
 
   if (body.universityId) {
@@ -202,12 +220,16 @@ exports.create = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   await assertStudentAccess(req, student);
+  const centerOriginated = await canUseCenterFlow(req, student.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
 
   // Admin can edit all fields even if core is locked; others cannot touch locked fields
   if (student.coreLocked && req.user.role !== 'Admin') {
     ['name','fatherName','motherName','dob','aadharNumber'].forEach(f => delete req.body[f]);
   }
-  if (req.user.role === 'Center') { delete req.body.counselor; delete req.body.center; }
+  if (centerOriginated) { delete req.body.counselor; delete req.body.center; }
   delete req.body.applicationStatus;
   delete req.body.coreLocked;
   // Only Admin can directly update enrollmentNumber (to correct mistakes)
@@ -360,6 +382,10 @@ exports.transferCenter = asyncHandler(async (req, res) => {
 exports.submit = asyncHandler(async (req, res) => {
   const s = await Student.findById(req.params.id).populate('university','name');
   await assertStudentAccess(req, s);
+  const centerOriginated = await canUseCenterFlow(req, s.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   if (!['Draft','Changes_Requested'].includes(s.applicationStatus)) {
     const e = new Error('Application can only be submitted from Draft or Changes_Requested state'); e.status = 400; throw e;
   }
@@ -728,6 +754,10 @@ exports.checkEnrollmentNumber = asyncHandler(async (req, res) => {
     .populate('counselor', 'name')
     .populate('university', 'name shortName');
   await assertStudentAccess(req, s);
+  const centerOriginated = await canUseCenterFlow(req, s.center?._id || s.center);
+  if (req.user.role !== 'Admin' && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
 
   if (!s.enrollmentNumber) {
     const e = new Error('Enrollment number is not assigned yet'); e.status = 400; throw e;
@@ -838,6 +868,10 @@ exports.requestSettlement = asyncHandler(async (req, res) => {
     const e = new Error('Settlement has already been requested'); e.status = 400; throw e;
   }
   if (req.user.role === 'Center' && String(s.center._id || s.center) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  const centerOriginated = await canUseCenterFlow(req, s.center._id || s.center);
+  if (req.user.role !== 'Admin' && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 

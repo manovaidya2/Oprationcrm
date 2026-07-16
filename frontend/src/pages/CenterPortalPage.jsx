@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Plus, Search, Edit2, Phone, Mail, ArrowLeft, Loader2,
   IndianRupee, FileText, CreditCard, PlusCircle, Trash2,
@@ -351,6 +352,8 @@ const SBadge = ({status,map}) => {
 
 // ── Cancelled Application Banner with Settlement Request ──────
 function CancelledBanner({ student, onSettlementRequested }) {
+  const { user, switchedCenter } = useAuth();
+  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
   const [requesting, setRequesting] = useState(false);
   const [note,       setNote]       = useState('');
   const [noteOpen,   setNoteOpen]   = useState(false);
@@ -358,7 +361,7 @@ function CancelledBanner({ student, onSettlementRequested }) {
   async function handleRequest() {
     setRequesting(true);
     try {
-      await studentsApi.requestSettlement(student._id, note);
+      await studentsApi.requestSettlement(student._id, note, { actingAsCenter: isCounselorSwitch });
       toast.success('Settlement request sent');
       setNoteOpen(false);
       setNote('');
@@ -596,7 +599,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
     }
     setSaving(true);
     try {
-      const student = await studentsApi.create({ ...form, counselor: defCounselor });
+      const student = await studentsApi.create({ ...form, counselor: defCounselor, center: centerId });
       if (fee.totalFee && Number(fee.totalFee) > 0) {
         await paymentsApi.upsertFee(student._id, {
           totalFee: Number(fee.totalFee), discount: Number(fee.discount)||0, notes: fee.notes,
@@ -940,6 +943,8 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 // ── FEE SECTION ──────────────────────────────────────────────
 function FeeSection({ studentId, appStatus, student }) {
   
+  const { user, switchedCenter } = useAuth();
+  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
   const isCancelled = appStatus === 'Cancelled';
   const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
@@ -971,7 +976,7 @@ function FeeSection({ studentId, appStatus, student }) {
     const err = validateInstallments(ffInstallments);
     if(err) return toast.error(err);
     setSaving(true);
-    try{ await paymentsApi.upsertFee(studentId,{totalFee:Number(ff.totalFee),discount:Number(ff.discount)||0,notes:ff.notes,installments:cleanInstallments(ffInstallments)}); toast.success('Fee saved'); setFeeOpen(false); load(); }
+    try{ await paymentsApi.upsertFee(studentId,{totalFee:Number(ff.totalFee),discount:Number(ff.discount)||0,notes:ff.notes,installments:cleanInstallments(ffInstallments),actingAsCenter:isCounselorSwitch}); toast.success('Fee saved'); setFeeOpen(false); load(); }
     catch(e){toast.error(e.message);} finally{setSaving(false);}
   }
 
@@ -1000,13 +1005,15 @@ function FeeSection({ studentId, appStatus, student }) {
     fd.append('paidAt', tf.paidAt || '');
     fd.append('paidToAccount', tf.paidToAccount || '');
     fd.append('paidToAccountLabel', tf.paidToAccountLabel || '');
+    if (isCounselorSwitch) fd.append('actingAsCenter', 'true');
     if (tf.paymentScreenshot) fd.append('paymentScreenshot', tf.paymentScreenshot);
 
-    await fetch(`${BASE}/payments/${studentId}/transactions`, {
+    const res = await fetch(`${BASE}/payments/${studentId}/transactions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
       body: fd,
     });
+    if(!res.ok){ const e = await res.json(); throw new Error(e.message || 'Failed'); }
       toast.success('Payment recorded'); setTxOpen(false);
       setTf({...EMPTY_TF}); load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1028,6 +1035,7 @@ function FeeSection({ studentId, appStatus, student }) {
       fd.append('ifscCode',      editTx.ifscCode      || '');
       fd.append('note',          editTx.note          || '');
       fd.append('paidAt',        editTx.paidAt        || '');
+      if(isCounselorSwitch) fd.append('actingAsCenter', 'true');
       if(editTx.paymentScreenshot instanceof File) fd.append('paymentScreenshot', editTx.paymentScreenshot);
       const BASE  = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('crm_token');
@@ -1056,6 +1064,7 @@ function FeeSection({ studentId, appStatus, student }) {
       fd.append('ifscCode',      editTx.ifscCode      || '');
       fd.append('note',          editTx.note          || '');
       fd.append('paidAt',        editTx.paidAt        || '');
+      if(isCounselorSwitch) fd.append('actingAsCenter', 'true');
       if(editTx.paymentScreenshot instanceof File) fd.append('paymentScreenshot', editTx.paymentScreenshot);
       await paymentsApi.resendTransaction(studentId, editTx._id, fd);
       toast.success('Payment sent to counselor for review!'); setEditTx(null); load();
@@ -1284,6 +1293,8 @@ function FeeSection({ studentId, appStatus, student }) {
 
 // ── DOCS SECTION ─────────────────────────────────────────────
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
+  const { user, switchedCenter } = useAuth();
+  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1322,6 +1333,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         fd.append('note',df.note);
         fd.append('chargeFee',df.chargeFee||0);
         fd.append('requestType',df.requestType||'Soft Copy');
+        if(isCounselorSwitch) fd.append('actingAsCenter','true');
         if(df.payAmount&&Number(df.payAmount)>0){
           fd.append('paymentAmount',df.payAmount);
           fd.append('paymentMode',dfPay.mode||'UPI');
@@ -1368,6 +1380,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       fd.append('paidAt', pf.paidAt||'');
       fd.append('paidToAccount', pf.paidToAccount||'');
       fd.append('paidToAccountLabel', pf.paidToAccountLabel||'');
+      if(isCounselorSwitch) fd.append('actingAsCenter','true');
       if(pf.paymentScreenshot instanceof File) fd.append('paymentScreenshot', pf.paymentScreenshot);
       const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       const token = localStorage.getItem('crm_token');
@@ -1397,6 +1410,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   // IMPORTANT
   paidToAccount: editPay.payment.paidToAccount,
   paidToAccountLabel: editPay.payment.paidToAccountLabel,
+  actingAsCenter: isCounselorSwitch,
 });
       toast.success('Payment updated'); setEditPay(null); load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1424,6 +1438,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       fd.append('note', editDf.note || '');
       fd.append('requestType', editDf.requestType || 'Soft Copy');
       if(editDocFile) fd.append('file', editDocFile);
+      if(isCounselorSwitch) fd.append('actingAsCenter','true');
       await docsApi.update(editDoc._id, fd);
       toast.success('Document request updated');
       setEditDoc(null); setEditDocFile(null);
@@ -1434,7 +1449,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
 
   async function requestDispatch(docId){
     try{
-      await docsApi.requestDispatch(docId);
+      await docsApi.requestDispatch(docId, { actingAsCenter: isCounselorSwitch });
       toast.success('Dispatch requested! Counselor has been notified.');
       load();
     } catch(e){toast.error(e.message);}
@@ -1442,7 +1457,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
 
  async function handleConfirmDelivery(docId) {
   try {
-    const result = await docsApi.confirmDelivery(docId);
+    const result = await docsApi.confirmDelivery(docId, { actingAsCenter: isCounselorSwitch });
     console.log('Confirm delivery response:', result);
     toast.success('Courier receipt confirmed! Counselor has been notified.');
     load();
@@ -1879,6 +1894,8 @@ function PaymentsSection({ studentId }) {
 
 // ── STUDENT DETAIL ───────────────────────────────────────────
 function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
+  const { user, switchedCenter } = useAuth();
+  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
   const [s,setS]         = useState(student);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
@@ -1943,7 +1960,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   async function saveDetails(){
     setSaving(true);
     try{
-      const u = await studentsApi.update(s._id, form);
+      const u = await studentsApi.update(s._id, {...form, actingAsCenter: isCounselorSwitch});
       setS(u);
       toast.success('Details updated');
       onRefresh();
@@ -1957,7 +1974,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
     if(err) return toast.error(err);
     setFeeSaving(true);
     try{
-      await paymentsApi.upsertFee(s._id,{totalFee:Number(feeForm.totalFee),discount:Number(feeForm.discount)||0,notes:feeForm.notes,installments:cleanInstallments(feeInstallments)});
+      await paymentsApi.upsertFee(s._id,{totalFee:Number(feeForm.totalFee),discount:Number(feeForm.discount)||0,notes:feeForm.notes,installments:cleanInstallments(feeInstallments),actingAsCenter:isCounselorSwitch});
       toast.success('Fee updated');
     } catch(e){toast.error(e.message);} finally{setFeeSaving(false);}
   }
@@ -1972,6 +1989,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
       fd.append('submissionDocs',JSON.stringify(checked.map(d=>({name:d.name,fileUrl:d.fileUrl||''}))));
       checked.forEach((d,i)=>{ if(d.file) fd.append(`submissionFile_${i}`,d.file); });
       fd.append('submissionDocCount', String(checked.length));
+      if (isCounselorSwitch) fd.append('actingAsCenter', 'true');
       const res=await fetch(`${BASE}/students/${s._id}`,{method:'PUT',headers:{Authorization:`Bearer ${token}`},body:fd});
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||'Failed');}
       const updated=await res.json();
@@ -1998,7 +2016,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
         startEdit('fee');
         return;
       }
-      await studentsApi.submit(s._id, { universityId: uniId });
+      await studentsApi.submit(s._id, { universityId: uniId, actingAsCenter: isCounselorSwitch });
       setS(p=>({...p,applicationStatus:'Submitted'}));
       toast.success('Application submitted to counselor!');
       setSubmitOpen(false); onRefresh();
@@ -2016,7 +2034,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
     onStudentUpdated?.(optimistic);
     setSaving(true);
     try {
-      const updated = await studentsApi.checkEnrollment(s._id);
+      const updated = await studentsApi.checkEnrollment(s._id, '', { actingAsCenter: isCounselorSwitch });
       setS(updated);
       onStudentUpdated?.(updated);
       toast.success('Enrollment number marked as checked');
@@ -2459,7 +2477,10 @@ function isPaymentPending(student) {
 
 // ── MAIN PAGE ────────────────────────────────────────────────
 export default function CenterPortalPage() {
-  const {user}=useAuth(); const centerId=user?.centerId;
+  const {user, switchedCenter, switchBackToCounselor}=useAuth();
+  const navigate = useNavigate();
+  const isCounselorSwitch = user?.role === 'Counselor' && switchedCenter?._id;
+  const centerId = isCounselorSwitch ? switchedCenter._id : user?.centerId;
   const [students,setStudents]=useState([]); const [centerInfo,setCenterInfo]=useState(null);
   const [defCounselor,setDef]=useState(null); const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState(''); const [selected,setSelected]=useState(null);
@@ -2470,6 +2491,11 @@ export default function CenterPortalPage() {
   const [pwdSaving, setPwdSaving]     = useState(false);
   const [pwdForm, setPwdForm]         = useState({ current: '', newPwd: '', confirm: '' });
   const [paidStudentIds, setPaidStudentIds] = useState(new Set());
+
+  function returnToCounselor() {
+    switchBackToCounselor?.();
+    navigate('/counselor');
+  }
 
   async function handleChangePassword() {
     if (!pwdForm.current) return toast.error('Please enter your current password');
@@ -2486,10 +2512,11 @@ export default function CenterPortalPage() {
   }
 
    const loadAll=useCallback(async()=>{
+    if (!centerId) { setLoading(false); return; }
     try{
       setLoading(true);
-      const [studs,center,counselors]=await Promise.all([studentsApi.getAll(),centerId?centersApi.getOne(centerId):Promise.resolve(null),counselorsApi.getAll()]);
-      setStudents(studs);setCenterInfo(center);
+      const [studs,center,counselors]=await Promise.all([studentsApi.getAll({ centerId }),centerId?centersApi.getOne(centerId):Promise.resolve(null),counselorsApi.getAll()]);
+      setStudents(studs.filter(s => String(s.center?._id || s.center) === String(centerId)));setCenterInfo(center);
       const linked=counselors.find(c=>c.centers?.some(cx=>String(cx._id||cx)===String(centerId)));
       setDef(linked?._id||counselors[0]?._id);
       // Check which students have payments
@@ -2504,6 +2531,16 @@ export default function CenterPortalPage() {
     } catch{toast.error('Problem loading data');} finally{setLoading(false);}
   },[centerId]);
   useEffect(()=>{loadAll();},[loadAll]);
+
+  if (user?.role === 'Counselor' && !centerId) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
+        <h2 className="text-lg font-semibold">No center selected</h2>
+        <p className="mt-1 text-sm">Please switch from your Counselor dashboard to open a center dashboard.</p>
+        <Button className="mt-4" onClick={() => navigate('/counselor')}>Back to Counselor Dashboard</Button>
+      </div>
+    );
+  }
 
   const filtered=students.filter(s=>s.name?.toLowerCase().includes(search.toLowerCase())||s.phone?.includes(search)||s.email?.toLowerCase().includes(search.toLowerCase()));
 
@@ -2532,6 +2569,11 @@ export default function CenterPortalPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
+          {isCounselorSwitch && (
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+              Counselor center view
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-slate-800">{centerInfo?.name||'Center Portal'}</h1>
           {(centerInfo?.city||centerInfo?.state) && (
             <p className="text-sm text-slate-400 mt-0.5 flex items-center gap-1">
@@ -2541,9 +2583,15 @@ export default function CenterPortalPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {isCounselorSwitch ? (
+            <Button variant="outline" size="sm" onClick={returnToCounselor} className="border-indigo-200 text-indigo-700 hover:bg-indigo-50">
+              <ArrowLeft className="h-4 w-4 mr-1.5"/>Switch Back
+            </Button>
+          ) : (
           <Button variant="outline" size="sm" onClick={()=>setPwdOpen(true)} className="border-slate-200 text-slate-600 hover:bg-slate-50">
             <KeyRound className="h-4 w-4 mr-1.5"/>Change Password
           </Button>
+          )}
           <Button onClick={()=>setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 shadow-sm shadow-indigo-200">
             <Plus className="h-4 w-4 mr-1.5"/>Add Student
           </Button>

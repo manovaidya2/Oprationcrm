@@ -35,6 +35,17 @@ function isHardCopyRequest(doc) {
   return String(doc.requestType || 'Soft Copy') === 'Hard Copy';
 }
 
+function wantsCenterFlow(req) {
+  return req.body.actingAsCenter === true || req.body.actingAsCenter === 'true';
+}
+
+async function canUseCenterFlow(req, centerId) {
+  if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
+  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  return (counselor?.centers || []).some(id => String(id) === String(centerId));
+}
+
 function markDocPaymentsVerified(doc, user) {
   let changed = 0;
   doc.payments.forEach(payment => {
@@ -151,15 +162,16 @@ exports.create = asyncHandler(async (req, res) => {
   } = req.body;
   const student = await Student.findById(studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  const centerOriginated = await canUseCenterFlow(req, student.center);
 
-  if (req.user.role === 'Center' && student.applicationStatus === 'Cancelled') {
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (centerOriginated && student.applicationStatus === 'Cancelled') {
     const e = new Error('This application has been cancelled. No document requests are allowed.'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Center' && student.applicationStatus !== 'Enrolled') {
+  if (centerOriginated && student.applicationStatus !== 'Enrolled') {
     const e = new Error('Document requests only after enrollment'); e.status = 400; throw e;
-  }
-  if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
-    const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
   const doc = new StudentDoc({
@@ -209,13 +221,14 @@ exports.create = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const doc = await StudentDoc.findById(req.params.id);
   if (!doc) { const e = new Error('Not found'); e.status = 404; throw e; }
-  if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId)) {
+  const centerOriginated = await canUseCenterFlow(req, doc.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Center') {
-    if (String(doc.center) !== String(req.user.centerId)) {
-      const e = new Error('Forbidden'); e.status = 403; throw e;
-    }
+  if (req.user.role === 'Counselor' && !centerOriginated && String(doc.counselor) !== String(req.user.counselorId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (centerOriginated) {
     const editableBeforeScan = ['Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
     if (!editableBeforeScan.includes(doc.status) || doc.scannedUrl) {
       const e = new Error('Document request cannot be edited after scan is uploaded'); e.status = 400; throw e;
@@ -448,6 +461,10 @@ exports.addPayment = asyncHandler(async (req, res) => {
   if (!amount || Number(amount) <= 0) { const e = new Error('Amount must be positive'); e.status = 400; throw e; }
 
   const doc = await loadDoc(req.params.id);
+  const centerOriginated = await canUseCenterFlow(req, doc.center?._id || doc.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   doc.payments.push({
     amount: Number(amount),
     mode: mode || 'UPI',
@@ -500,6 +517,10 @@ exports.addPayment = asyncHandler(async (req, res) => {
 exports.updatePayment = asyncHandler(async (req, res) => {
   const doc = await StudentDoc.findById(req.params.id);
   if (!doc) { const e = new Error('Document not found'); e.status = 404; throw e; }
+  const centerOriginated = await canUseCenterFlow(req, doc.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   const payment = doc.payments.id(req.params.payId);
   if (!payment) { const e = new Error('Payment not found'); e.status = 404; throw e; }
 
@@ -516,6 +537,10 @@ exports.updatePayment = asyncHandler(async (req, res) => {
 // Center requests dispatch when already fully paid (skips payment step)
 exports.requestDispatch = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
+  const centerOriginated = await canUseCenterFlow(req, doc.center?._id || doc.center);
+  if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   if (doc.status !== 'Center_Notified') { const e = new Error('Document must be in Center_Notified status'); e.status = 400; throw e; }
 
   const fullyPaid = doc.chargeFee <= 0 || doc.totalPaid >= doc.chargeFee;
@@ -607,6 +632,10 @@ exports.dispatchToCenter = asyncHandler(async (req, res) => {
 
 exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
+  const centerOriginated = await canUseCenterFlow(req, doc.center?._id || doc.center);
+  if (req.user.role !== 'Admin' && !centerOriginated) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
   if (doc.status !== 'Dispatched') {
     const e = new Error('Document must be in Dispatched status'); e.status = 400; throw e;
   }
