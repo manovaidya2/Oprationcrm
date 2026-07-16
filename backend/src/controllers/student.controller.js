@@ -20,6 +20,41 @@ async function pushHistory(studentId, status, user, note = '') {
   });
 }
 
+async function forwardPendingFeePaymentsToAccountant(studentId, user) {
+  const payment = await Payment.findOne({ student: studentId });
+  if (!payment?.transactions?.length) return 0;
+  let changed = 0;
+  payment.transactions.forEach(tx => {
+    if (tx.type === 'Fee' && tx.verificationStatus === 'pending_counselor') {
+      tx.verificationStatus = 'pending_accountant';
+      changed += 1;
+    }
+  });
+  if (!changed) return 0;
+  await payment.save();
+  await audit('fee_payment_forwarded_with_admission', 'Payment', payment._id, user, { count: changed }, 'Fee payment forwarded with admission approval');
+  return changed;
+}
+
+async function verifyPendingFeePaymentsWithAdmission(studentId, user, note = '') {
+  const payment = await Payment.findOne({ student: studentId });
+  if (!payment?.transactions?.length) return 0;
+  let changed = 0;
+  payment.transactions.forEach(tx => {
+    if (tx.type === 'Fee' && tx.verificationStatus === 'pending_accountant') {
+      tx.verificationStatus = 'verified';
+      tx.verificationNote = note || 'Verified with admission approval';
+      tx.verifiedBy = user?._id;
+      tx.verifiedAt = new Date();
+      changed += 1;
+    }
+  });
+  if (!changed) return 0;
+  await payment.save();
+  await audit('fee_payment_verified_with_admission', 'Payment', payment._id, user, { count: changed, note }, 'Fee payment verified with admission approval');
+  return changed;
+}
+
 // ── Access helper ────────────────────────────────────────────
 async function assertStudentAccess(req, student) {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
@@ -432,6 +467,10 @@ exports.counselorApprove = asyncHandler(async (req, res) => {
   const updated = await Student.findByIdAndUpdate(req.params.id, { applicationStatus: 'Counselor_Approved' }, { new: true })
     .populate('center','name').populate('counselor','name').populate('university','name shortName');
   await pushHistory(req.params.id, 'Counselor_Approved', req.user, '');
+  const forwardedPayments = await forwardPendingFeePaymentsToAccountant(req.params.id, req.user);
+  if (forwardedPayments > 0) {
+    await pushHistory(req.params.id, 'Fee_Payment_Forwarded', req.user, `${forwardedPayments} fee payment${forwardedPayments > 1 ? 's' : ''} forwarded with admission approval`);
+  }
 
   await notifyRole('Accountant', {
     message: `Application approved: ${s.name} | Center: ${s.center?.name} | University: ${s.university?.name||'N/A'} | Course: ${s.courseName} ${s.courseYear} | Verify fee`,
@@ -489,6 +528,10 @@ exports.accountantAction = asyncHandler(async (req, res) => {
   let updateFields = {};
   if (action === 'approve') {
     updateFields = { applicationStatus: 'Sent_To_University' };
+    const verifiedPayments = await verifyPendingFeePaymentsWithAdmission(req.params.id, req.user, note);
+    if (verifiedPayments > 0) {
+      await pushHistory(req.params.id, 'Fee_Payment_Verified', req.user, `${verifiedPayments} fee payment${verifiedPayments > 1 ? 's' : ''} verified with admission approval`);
+    }
 
     const uniId = s.university?._id || s.university;
     if (uniId) {

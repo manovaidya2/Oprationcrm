@@ -50,6 +50,36 @@ function PaymentInfo({ tx, className = '' }) {
   );
 }
 
+function FeePaymentPanel({ payment, status = 'pending_accountant', accMap = {} }) {
+  const txs = (payment?.transactions || []).filter(tx => tx.type === 'Fee' && (!status || tx.verificationStatus === status));
+  if (!txs.length) return null;
+  return (
+    <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50/60 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs font-bold uppercase tracking-wider text-orange-700">Fee payment attached</p>
+        <div className="flex gap-2 flex-wrap">
+          <span className="text-xs bg-white border border-orange-200 rounded-md px-2 py-0.5">Net: <b>{fmt(payment.netFee)}</b></span>
+          <span className="text-xs bg-white border border-emerald-200 rounded-md px-2 py-0.5">Paid: <b className="text-emerald-700">{fmt(payment.paidAmount)}</b></span>
+          {payment.dueAmount > 0 && <span className="text-xs bg-white border border-amber-200 rounded-md px-2 py-0.5">Due: <b className="text-amber-700">{fmt(payment.dueAmount)}</b></span>}
+        </div>
+      </div>
+      {txs.map(tx => (
+        <div key={tx._id} className="rounded-lg border border-orange-100 bg-white p-2.5">
+          <PaymentInfo tx={tx}/>
+          {tx.paymentScreenshot && (
+            <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100"
+              onClick={e => e.stopPropagation()}>
+              <Download className="h-3 w-3"/>View Payment Screenshot
+            </a>
+          )}
+          <PaidToAccountBox tx={tx} accMap={accMap}/>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const STATUS_C = {
   Counselor_Approved:'bg-indigo-100 text-indigo-700',
   Accountant_Pending:'bg-amber-100 text-amber-700',
@@ -336,6 +366,7 @@ export default function AccountantPage() {
   const [history,     setHistory]     = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [studentPayMap, setStudentPayMap] = useState({});
+  const [admissionFeeMap, setAdmissionFeeMap] = useState({});
   const [payAccounts, setPayAccounts] = useState({}); // id → account object
   const [dialog,      setDialog]      = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
@@ -484,9 +515,11 @@ export default function AccountantPage() {
       // 3. Fee payments — ALL transactions (pending + verified + rejected)
       const pending = [];
       const allFeePayments = [];
+      const admissionMap = {};
       await Promise.all(allS.map(async (student) => {
         try {
           const pay = await paymentsApi.get(student._id);
+          if (pay) admissionMap[String(student._id)] = pay;
           if (!pay?.transactions?.length) return;
           const relevantTx = pay.transactions.filter(tx =>
             ['pending_accountant','verified','rejected'].includes(tx.verificationStatus)
@@ -520,6 +553,7 @@ export default function AccountantPage() {
       pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
       setFeePayments(pending);
       setAllFeePayments(allFeePayments);
+      setAdmissionFeeMap(admissionMap);
 
       // Build payment map for doc cards (Doc Request + Doc Payments tabs)
       const allDocStudentIds = [...new Set([
@@ -856,6 +890,7 @@ export default function AccountantPage() {
                   <div className="text-sm text-muted-foreground flex items-center gap-2">{s.center?.name} · {s.courseName}{s.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">{s.enrollmentNumber}</span>}</div>
                   {s.university?.name && <div className="text-xs text-purple-600">🎓 {s.university.name}</div>}
                   {s.submissionDocs?.length > 0 && <div className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Paperclip className="h-3 w-3"/>{s.submissionDocs.length} docs attached</div>}
+                  <FeePaymentPanel payment={admissionFeeMap[String(s._id)]} status="pending_accountant" accMap={payAccounts}/>
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="ghost" onClick={() => setDetailStudent(s)}><Eye className="h-3.5 w-3.5"/></Button>

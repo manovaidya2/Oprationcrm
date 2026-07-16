@@ -49,6 +49,36 @@ function PaymentInfo({ tx, className = '' }) {
   );
 }
 
+function FeePaymentPanel({ payment, status = 'pending_counselor', accMap = {} }) {
+  const txs = (payment?.transactions || []).filter(tx => tx.type === 'Fee' && (!status || tx.verificationStatus === status));
+  if (!txs.length) return null;
+  return (
+    <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50/60 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs font-bold uppercase tracking-wider text-orange-700">Fee payment attached</p>
+        <div className="flex gap-2 flex-wrap">
+          <span className="text-xs bg-white border border-orange-200 rounded-md px-2 py-0.5">Net: <b>{fmt(payment.netFee)}</b></span>
+          <span className="text-xs bg-white border border-emerald-200 rounded-md px-2 py-0.5">Paid: <b className="text-emerald-700">{fmt(payment.paidAmount)}</b></span>
+          {payment.dueAmount > 0 && <span className="text-xs bg-white border border-amber-200 rounded-md px-2 py-0.5">Due: <b className="text-amber-700">{fmt(payment.dueAmount)}</b></span>}
+        </div>
+      </div>
+      {txs.map(tx => (
+        <div key={tx._id} className="rounded-lg border border-orange-100 bg-white p-2.5">
+          <PaymentInfo tx={tx}/>
+          {tx.paymentScreenshot && (
+            <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100"
+              onClick={e => e.stopPropagation()}>
+              <Download className="h-3 w-3"/>View Payment Screenshot
+            </a>
+          )}
+          <PaidToAccountBox tx={tx} accMap={accMap}/>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const STATUS_COLORS = {
   Draft:              'bg-slate-100 text-slate-600 border border-slate-200',
   Submitted:          'bg-blue-50 text-blue-700 border border-blue-200',
@@ -437,7 +467,7 @@ function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment
 }
 
 // ── Student Card (Review/Reject tabs) ─────────────────────────
-function StudentCard({ s, accent = 'border-blue-200', children, onClick }) {
+function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePayment, accMap }) {
   return (
     <div className={`bg-white rounded-xl border ${accent} shadow-sm hover:shadow transition-shadow`}>
       <div className="p-4 flex items-start justify-between gap-3">
@@ -473,6 +503,7 @@ function StudentCard({ s, accent = 'border-blue-200', children, onClick }) {
                 ))}
               </div>
             )}
+            <FeePaymentPanel payment={feePayment} status="pending_counselor" accMap={accMap}/>
           </div>
         </div>
         <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
@@ -723,6 +754,7 @@ export default function CounselorPage() {
   const [centerModal, setCenterModal] = useState(null);
   const [docModal, setDocModal] = useState(null);
   const [docPayments, setDocPayments] = useState({});
+  const [studentFeeMap, setStudentFeeMap] = useState({});
   const [selectedDocIds, setSelectedDocIds] = useState([]);
 
   const load = useCallback(async () => {
@@ -763,9 +795,11 @@ export default function CounselorPage() {
       setDocPayments(payMap);
 
       const pending = [];
+      const feeMap = {};
       Promise.all(ss.map(async (student) => {
         try {
           const pay = await paymentsApi.get(student._id);
+          if (pay) feeMap[String(student._id)] = pay;
           if (pay?.transactions) {
             pay.transactions.forEach(tx => {
               if (tx.verificationStatus === 'pending_counselor') {
@@ -776,6 +810,7 @@ export default function CounselorPage() {
         } catch {}
       })).then(() => {
   pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
+  setStudentFeeMap(feeMap);
   setFeePayments([...pending]);
 }).catch(() => {});
     } catch (e) { toast.error('Failed to load: ' + e.message); }
@@ -970,7 +1005,7 @@ export default function CounselorPage() {
         <TabsContent value="review" className="space-y-2 mt-4">
           {pending.length===0 ? <EmptyState icon={CheckCircle2} message="No applications pending review"/> :
           pending.map(s=>(
-            <StudentCard key={s._id} s={s} accent="border-blue-200" onClick={()=>setStudentModal(s)}>
+            <StudentCard key={s._id} s={s} accent="border-blue-200" onClick={()=>setStudentModal(s)} feePayment={studentFeeMap[String(s._id)]} accMap={payAccounts}>
               <Button size="sm" variant="ghost" onClick={()=>setStudentModal(s)} className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600">
                 <Eye className="h-4 w-4"/>
               </Button>
