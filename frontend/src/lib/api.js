@@ -138,6 +138,7 @@ export const docsApi = {
   delete:         (id)          => request(`/documents/${id}`, { method: 'DELETE' }),
   // Flow
   forward:        (id)          => request(`/documents/${id}/forward`, { method: 'PATCH' }),
+  requestChanges: (id, note)    => request(`/documents/${id}/request-changes`, { method: 'PATCH', body: JSON.stringify({ note }) }),
   accountantAction:(id, action, note) => request(`/documents/${id}/accountant-action`, { method: 'PATCH', body: JSON.stringify({ action, note }) }),
   dispatchReceive:(id)          => request(`/documents/${id}/dispatch-receive`, { method: 'PATCH' }),
   uploadScan:     (id, fd)      => uploadRequest(`/documents/${id}/upload-scan`, 'PATCH', fd),

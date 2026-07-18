@@ -80,6 +80,7 @@ const studentDocSchema = new mongoose.Schema({
     type: String,
     enum: [
       'Requested',          // center raised request
+      'Changes_Requested',  // sent back to center for correction
       'Forwarded',          // counselor forwarded to accountant
       'Fee_Pending',        // accountant checking fees
       'Fee_Rejected',       // accountant rejected

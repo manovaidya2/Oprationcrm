@@ -135,6 +135,7 @@ router.delete('/documents/:id',                   protect, requireRole('Admin','
 
 // Document flow
 router.patch('/documents/:id/forward',            protect, requireRole('Admin','Counselor'), docC.forward);
+router.patch('/documents/:id/request-changes',    protect, requireRole('Admin','Counselor','Accountant'), docC.requestChanges);
 router.patch('/documents/:id/accountant-action',  protect, requireRole('Admin','Accountant'), docC.accountantAction);
 router.patch('/documents/:id/dispatch-receive',     protect, requireRole('Admin','Dispatch'), docC.dispatchReceive);
 router.patch('/documents/:id/upload-scan',          protect, requireRole('Admin','Dispatch'), upload.single('file'), docC.uploadScan);

@@ -127,6 +127,7 @@ const STATUS_COLORS = {
 };
 const DOC_COLORS = {
   Requested:          'bg-blue-50 text-blue-700 border border-blue-200',
+  Changes_Requested:  'bg-amber-50 text-amber-700 border border-amber-300',
   Forwarded:          'bg-indigo-50 text-indigo-700 border border-indigo-200',
   Fee_Approved:       'bg-green-50 text-green-700 border border-green-200',
   Fee_Rejected:       'bg-red-50 text-red-600 border border-red-200',
@@ -583,7 +584,7 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
             {paySummary && (
               <div className="flex gap-2 flex-wrap mt-1">
                 <span className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5">
-                  Adm Fee: <span className="font-bold text-slate-700">{fmt(paySummary.netFee)}</span>
+                  Total Fee: <span className="font-bold text-slate-700">{fmt(paySummary.totalFee ?? paySummary.netFee)}</span>
                 </span>
                 <span className="text-xs bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
                   Paid: <span className="font-bold text-emerald-700">{fmt(paySummary.paidAmount)}</span>
@@ -829,7 +830,7 @@ export default function CounselorPage() {
       await Promise.all(uniqueStudentIds.map(async (sid) => {
         try {
           const pay = await paymentsApi.get(sid);
-          if (pay) payMap[sid] = { netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
+          if (pay) payMap[sid] = { totalFee: pay.totalFee||0, netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
         } catch {}
       }));
       setDocPayments(payMap);
@@ -929,6 +930,8 @@ export default function CounselorPage() {
 
   const [rejectFeeDialog, setRejectFeeDialog] = useState(null); // {studentId, txId, studentName, amount}
   const [rejectFeeNote, setRejectFeeNote]     = useState('');
+  const [docChangeDialog, setDocChangeDialog] = useState(null);
+  const [docChangeNote, setDocChangeNote] = useState('');
 
   async function rejectFeePayment() {
     if (!rejectFeeDialog) return;
@@ -937,6 +940,18 @@ export default function CounselorPage() {
       toast.success('Payment rejected — center notified to resubmit');
       setRejectFeeDialog(null); setRejectFeeNote(''); load();
     } catch(e) { toast.error(e.message); }
+  }
+
+  async function requestDocChanges() {
+    if (!docChangeDialog) return;
+    if (!docChangeNote.trim()) return toast.error('Note required');
+    try {
+      await docsApi.requestChanges(docChangeDialog._id, docChangeNote);
+      toast.success('Sent back to center for changes');
+      setDocChangeDialog(null);
+      setDocChangeNote('');
+      load();
+    } catch (e) { toast.error(e.message); }
   }
 
   const pending           = allStudents.filter(s => s.applicationStatus === 'Submitted' && !isDismissed(`student:${s._id}:review`));
@@ -1148,6 +1163,10 @@ export default function CounselorPage() {
                     onClick={e=>{e.stopPropagation();forwardDoc(d);}}>
                     <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
                   </Button>
+                  <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 text-xs h-8"
+                    onClick={e=>{e.stopPropagation(); setDocChangeDialog(d); setDocChangeNote('');}}>
+                    Changes
+                  </Button>
                   <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
                     onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:request`);}}>
                     <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
@@ -1261,7 +1280,7 @@ export default function CounselorPage() {
           )}
           {paymentPending.length===0 ? <EmptyState icon={IndianRupee} message="No payments pending review"/> :
           paymentPending.map(d=>(
-            <DocCard key={d._id} d={d} accMap={payAccounts}
+            <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
               accent="border-emerald-200"
               badge="Payment Submitted"
               badgeColor="bg-emerald-50 text-emerald-700 border border-emerald-200"
@@ -1308,7 +1327,7 @@ export default function CounselorPage() {
           )}
           {fromDisp.length===0 ? <EmptyState icon={Download} message="No documents from dispatch"/> :
           fromDisp.map(d=>(
-            <DocCard key={d._id} d={d} accMap={payAccounts}
+            <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
               accent="border-violet-200"
               badge="Scan Ready"
               badgeColor="bg-violet-50 text-violet-700 border border-violet-200"
@@ -1521,6 +1540,35 @@ export default function CounselorPage() {
       {studentModal && <StudentModal student={studentModal} onClose={()=>setStudentModal(null)}/>}
       {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}/>}
       {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts}/>}
+
+      <Dialog open={!!docChangeDialog} onOpenChange={()=>{ setDocChangeDialog(null); setDocChangeNote(''); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send Document Request Back</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {docChangeDialog?.name} {docChangeDialog?.student?.name ? `- ${docChangeDialog.student.name}` : ''}
+            </div>
+            <div>
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Changes Required *</Label>
+              <Textarea
+                className="mt-1 border-slate-200"
+                rows={3}
+                placeholder="Explain what the center needs to correct..."
+                value={docChangeNote}
+                onChange={e => setDocChangeNote(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>{ setDocChangeDialog(null); setDocChangeNote(''); }}>Cancel</Button>
+            <Button className="bg-amber-500 hover:bg-amber-600" onClick={requestDocChanges} disabled={!docChangeNote.trim()}>
+              Send Back
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={centerSwitchOpen} onOpenChange={setCenterSwitchOpen}>
         <DialogContent className="max-w-xl">

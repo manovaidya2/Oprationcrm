@@ -384,6 +384,7 @@ const FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejecte
 
 const DOC_STATUS = {
   Requested:{label:'Requested',color:'bg-blue-50 text-blue-700 border border-blue-200'},
+  Changes_Requested:{label:'Changes Needed',color:'bg-amber-50 text-amber-700 border border-amber-300'},
   Forwarded:{label:'Forwarded',color:'bg-indigo-50 text-indigo-700 border border-indigo-200'},
   Fee_Approved:{label:'Fee Approved',color:'bg-green-50 text-green-700 border border-green-200'},
   Fee_Rejected:{label:'Fee Rejected',color:'bg-red-50 text-red-600 border border-red-200'},
@@ -1470,7 +1471,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   }
 
   function canEditDocRequest(doc) {
-    return !isCancelled && ['Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'].includes(doc.status) && !doc.scannedUrl;
+    return !isCancelled && ['Requested', 'Changes_Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'].includes(doc.status) && !doc.scannedUrl;
   }
 
   function openEditDoc(doc) {
@@ -1574,7 +1575,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
               </div>
               {d.note&&<p className="text-xs text-slate-400 italic mb-1.5">{d.note}</p>}
               {(() => {
-                if (!['Requested','Forwarded','Fee_Approved','Center_Notified'].includes(d.status)) return null;
+                if (!['Requested','Changes_Requested','Forwarded','Fee_Approved','Center_Notified'].includes(d.status)) return null;
                 if (!d.chargeFee || d.chargeFee <= 0) return null;
                 if (d.totalPaid >= d.chargeFee) return null;
                 const created = d.createdAt ? new Date(d.createdAt) : null;

@@ -118,7 +118,7 @@ exports.list = asyncHandler(async (req, res) => {
   if (role === 'Counselor')  {
     filter.counselor = counselorId;
     if (!req.query.studentId && !req.query.all) {
-      filter.status = { $in: ['Requested','Forwarded','Fee_Pending','Fee_Rejected','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'] };
+      filter.status = { $in: ['Requested','Changes_Requested','Forwarded','Fee_Pending','Fee_Rejected','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'] };
     }
   }
   // HARD ISOLATION: University user only sees documents for their own university
@@ -230,7 +230,7 @@ exports.update = asyncHandler(async (req, res) => {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   if (centerOriginated) {
-    const editableBeforeScan = ['Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
+    const editableBeforeScan = ['Requested', 'Changes_Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
     if (!editableBeforeScan.includes(doc.status) || doc.scannedUrl) {
       const e = new Error('Document request cannot be edited after scan is uploaded'); e.status = 400; throw e;
     }
@@ -241,7 +241,36 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.body.requestType !== undefined) doc.requestType = req.body.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy';
   if (req.body.chargeFee !== undefined) doc.chargeFee = Number(req.body.chargeFee);
   if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
+  if (centerOriginated && doc.status === 'Changes_Requested') {
+    pushHistory(doc, 'Requested', req.user, 'Center updated document request after changes were requested');
+  }
   await doc.save();
+  res.json(await loadDoc(doc._id));
+});
+
+exports.requestChanges = asyncHandler(async (req, res) => {
+  const { note } = req.body;
+  if (!String(note || '').trim()) { const e = new Error('Note is required'); e.status = 400; throw e; }
+  const doc = await loadDoc(req.params.id);
+  const allowedStatuses = req.user.role === 'Accountant'
+    ? ['Forwarded', 'Fee_Pending']
+    : ['Requested', 'Forwarded', 'Fee_Pending'];
+  if (!allowedStatuses.includes(doc.status)) {
+    const e = new Error('Document request cannot be sent back at this stage'); e.status = 400; throw e;
+  }
+
+  pushHistory(doc, 'Changes_Requested', req.user, note.trim());
+  await doc.save();
+
+  const centerUser = await User.findOne({ centerId: doc.center?._id || doc.center, role: 'Center', isActive: true });
+  if (centerUser) await notify(centerUser._id, {
+    message: `Changes requested for document "${doc.name}" - ${doc.student?.name}: ${note.trim()}`,
+    type: 'doc_changes_requested',
+    documentId: doc._id,
+    studentId: doc.student?._id,
+    role: 'Center',
+  });
+  await audit('doc_changes_requested', 'StudentDocument', doc._id, req.user, { note }, `Document request sent back to center`);
   res.json(await loadDoc(doc._id));
 });
 

@@ -589,16 +589,13 @@ export default function AccountantPage() {
       setAllFeePayments(allFeePayments);
       setAdmissionFeeMap(admissionMap);
 
-      // Build payment map for doc cards (Doc Request + Doc Payments tabs)
-      const allDocStudentIds = [...new Set([
-        ...allD.filter(d => ['Forwarded','Fee_Pending','Payment_Submitted'].includes(d.status))
-               .map(d => d.student?._id).filter(Boolean)
-      ])];
+      // Build payment map for document cards.
+      const allDocStudentIds = [...new Set(allD.map(d => d.student?._id).filter(Boolean))];
       const payMap = {};
       await Promise.all(allDocStudentIds.map(async (sid) => {
         try {
           const pay = await paymentsApi.get(sid);
-          if (pay) payMap[sid] = { netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
+          if (pay) payMap[sid] = { totalFee: pay.totalFee||0, netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
         } catch {}
       }));
       setStudentPayMap(payMap);
@@ -637,6 +634,18 @@ export default function AccountantPage() {
     setSaving(true);
     try { await docsApi.accountantAction(dialog.item._id, action, note); toast.success('Done'); setDialog(null); setNote(''); load(); }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function doDocChanges() {
+    if (!note.trim()) return toast.error('Note required');
+    setSaving(true);
+    try {
+      await docsApi.requestChanges(dialog.item._id, note);
+      toast.success('Sent back to center for changes');
+      setDialog(null);
+      setNote('');
+      load();
+    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   function toggleDocSelection(id) {
@@ -1186,7 +1195,7 @@ export default function AccountantPage() {
                   {studentPayMap[d.student?._id] && (
                     <div className="flex gap-2 flex-wrap mt-1.5">
                       <span className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5">
-                        Adm Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].netFee)}</span>
+                        Total Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].totalFee ?? studentPayMap[d.student._id].netFee)}</span>
                       </span>
                       <span className="text-xs bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
                         Paid: <span className="font-bold text-emerald-700">{fmt(studentPayMap[d.student._id].paidAmount)}</span>
@@ -1217,6 +1226,10 @@ export default function AccountantPage() {
                 <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}:fee`)} className="text-red-600 hover:text-red-700">
                     <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
+                  </Button>
+                  <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                    onClick={() => { setDialog({type:'docChanges', item:d}); setNote(''); }}>
+                    Send Back
                   </Button>
                   <Button size="sm" onClick={() => { setDialog({type:'doc',item:d}); setNote(''); }}>Review</Button>
                 </div>
@@ -1284,7 +1297,7 @@ export default function AccountantPage() {
                   {studentPayMap[d.student?._id] && (
                     <div className="flex gap-2 flex-wrap mt-1.5">
                       <span className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5">
-                        Adm Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].netFee)}</span>
+                        Total Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].totalFee ?? studentPayMap[d.student._id].netFee)}</span>
                       </span>
                       <span className="text-xs bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
                         Paid: <span className="font-bold text-emerald-700">{fmt(studentPayMap[d.student._id].paidAmount)}</span>
@@ -1562,6 +1575,7 @@ export default function AccountantPage() {
             <DialogTitle>
               {dialog?.type==='adm'     && `Review Admission: ${dialog.item?.name}`}
               {dialog?.type==='doc'     && `Review Doc Fee: ${dialog.item?.name}`}
+              {dialog?.type==='docChanges' && `Send Back Document Request: ${dialog.item?.name}`}
               {dialog?.type==='pay'     && `${dialog?.approved?'Verify':'Reject'} Payment: ${dialog.item?.name}`}
               {dialog?.type==='feeReject' && `Reject Fee Payment — ${dialog?.student?.name} · ${fmt(dialog?.tx?.amount)}`}
             </DialogTitle>
@@ -1572,13 +1586,16 @@ export default function AccountantPage() {
           {dialog?.type==='doc' && (
             <div className="text-sm">Charge: <b>{fmt(dialog.item?.chargeFee)}</b> · Paid: <span className="text-emerald-600"><b>{fmt(dialog.item?.totalPaid)}</b></span></div>
           )}
+          {dialog?.type==='docChanges' && (
+            <div className="text-sm text-muted-foreground">Student: {dialog.item?.student?.name || 'Student'} - Center will be able to edit and resubmit this document request.</div>
+          )}
           {dialog?.type==='feeReject' && (
             <div className="text-sm space-y-1">
               <div>Amount: <b className="text-emerald-700">{fmt(dialog.tx?.amount)}</b> · Mode: {dialog.tx?.mode||'—'}</div>
               <PaymentInfo tx={dialog.tx}/>
             </div>
           )}
-          <div><Label>Note</Label><Textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Optional reason…"/></div>
+          <div><Label>Note{dialog?.type==='docChanges' ? ' *' : ''}</Label><Textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder={dialog?.type==='docChanges' ? 'Explain what the center needs to correct...' : 'Optional reason...'}/></div>
           <DialogFooter className="flex-wrap gap-2">
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
             {dialog?.type==='adm' && <>
@@ -1599,6 +1616,11 @@ export default function AccountantPage() {
                 {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}<CheckCircle2 className="h-4 w-4 mr-1"/>Approve → University
               </Button>
             </>}
+            {dialog?.type==='docChanges' && (
+              <Button className="bg-amber-500 hover:bg-amber-600" onClick={doDocChanges} disabled={saving || !note.trim()}>
+                {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Send Back to Center
+              </Button>
+            )}
             {dialog?.type==='pay' && (
               <Button className={dialog.approved?'bg-green-600 hover:bg-green-700':'bg-red-600 hover:bg-red-700'}
                 onClick={() => doPayVerify(dialog.approved)} disabled={saving}>
