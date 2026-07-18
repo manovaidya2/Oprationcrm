@@ -20,6 +20,22 @@ const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 const fmtD  = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
 
+const getStudentSubmittedAt = student => {
+  const submittedEntry = [...(student?.statusHistory || [])].reverse().find(h => h.status === 'Submitted');
+  return submittedEntry?.at || student?.submittedAt || student?.createdAt;
+};
+
+const getPaymentSubmittedAt = tx => tx?.createdAt || tx?.submittedAt || tx?.paidAt;
+
+function CardRequestDate({ date, label = 'Submitted' }) {
+  if (!date) return null;
+  return (
+    <div className="mt-3 flex justify-end text-xs font-medium text-muted-foreground">
+      {label}: {fmtD(date)}
+    </div>
+  );
+}
+
 // Full payment detail display
 function PaymentInfo({ tx, className = '' }) {
   if (!tx) return null;
@@ -881,7 +897,8 @@ export default function AccountantPage() {
           {filtStudents.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No admissions matching "${search}"` : 'No pending admissions'}</div>
           : filtStudents.map(s => (
             <Card key={s._id}>
-              <CardContent className="p-4 flex items-start justify-between gap-3">
+              <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 cursor-pointer" onClick={() => setDetailStudent(s)}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-medium">{s.name}</span>
@@ -899,6 +916,8 @@ export default function AccountantPage() {
                   </Button>
                   <Button size="sm" onClick={() => { setDialog({type:'adm',item:s}); setNote(''); }}>Review</Button>
                 </div>
+              </div>
+              <CardRequestDate date={getStudentSubmittedAt(s)}/>
               </CardContent>
             </Card>
           ))}
@@ -910,7 +929,8 @@ export default function AccountantPage() {
           {filtFeePayments.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No fee payments matching "${search}"` : 'No fee payments pending verification'}</div>
           : filtFeePayments.map(({student, payment, tx}) => (
             <Card key={tx._id} className="border-orange-200">
-              <CardContent className="p-4 flex items-start justify-between gap-3">
+              <CardContent className="p-4">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 cursor-pointer space-y-2" onClick={() => setDetailStudent(student)}>
 
                   {/* Student info */}
@@ -971,6 +991,8 @@ export default function AccountantPage() {
                     Verify ✓
                   </Button>
                 </div>
+              </div>
+              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted"/>
               </CardContent>
             </Card>
           ))}

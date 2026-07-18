@@ -21,6 +21,22 @@ const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').repl
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
+const getStudentSubmittedAt = student => {
+  const submittedEntry = [...(student?.statusHistory || [])].reverse().find(h => h.status === 'Submitted');
+  return submittedEntry?.at || student?.submittedAt || student?.createdAt;
+};
+
+const getPaymentSubmittedAt = tx => tx?.createdAt || tx?.submittedAt || tx?.paidAt;
+
+function CardRequestDate({ date, label = 'Submitted' }) {
+  if (!date) return null;
+  return (
+    <div className="mt-3 flex justify-end text-xs font-medium text-slate-400">
+      {label}: {fmtDt(date)}
+    </div>
+  );
+}
+
 function PaymentInfo({ tx, className = '' }) {
   if (!tx) return null;
   const isUPI  = tx.mode === 'UPI';
@@ -467,10 +483,11 @@ function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment
 }
 
 // ── Student Card (Review/Reject tabs) ─────────────────────────
-function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePayment, accMap }) {
+function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePayment, accMap, requestDate, requestDateLabel }) {
   return (
     <div className={`bg-white rounded-xl border ${accent} shadow-sm hover:shadow transition-shadow`}>
-      <div className="p-4 flex items-start justify-between gap-3">
+      <div className="p-4">
+      <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={onClick}>
           <div className="h-10 w-10 rounded-xl bg-indigo-100 flex items-center justify-center text-sm font-bold text-indigo-700 flex-shrink-0 mt-0.5">
             {s.name?.charAt(0)?.toUpperCase() || '?'}
@@ -509,6 +526,8 @@ function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePaym
         <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
           {children}
         </div>
+      </div>
+      <CardRequestDate date={requestDate} label={requestDateLabel}/>
       </div>
     </div>
   );
@@ -1018,7 +1037,7 @@ export default function CounselorPage() {
         <TabsContent value="review" className="space-y-2 mt-4">
           {pending.length===0 ? <EmptyState icon={CheckCircle2} message="No applications pending review"/> :
           pending.map(s=>(
-            <StudentCard key={s._id} s={s} accent="border-blue-200" onClick={()=>setStudentModal(s)} feePayment={studentFeeMap[String(s._id)]} accMap={payAccounts}>
+            <StudentCard key={s._id} s={s} accent="border-blue-200" onClick={()=>setStudentModal(s)} feePayment={studentFeeMap[String(s._id)]} accMap={payAccounts} requestDate={getStudentSubmittedAt(s)}>
               <Button size="sm" variant="ghost" onClick={()=>setStudentModal(s)} className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600">
                 <Eye className="h-4 w-4"/>
               </Button>
@@ -1127,7 +1146,8 @@ export default function CounselorPage() {
           {visibleFeePayments.length===0 ? <EmptyState icon={IndianRupee} message="No fee payments pending review"/> :
           visibleFeePayments.map(({student, payment, tx})=>(
             <div key={tx._id} className="bg-white rounded-xl border border-orange-200 shadow-sm hover:shadow transition-shadow">
-              <div className="p-4 flex items-start justify-between gap-3">
+              <div className="p-4">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer" onClick={()=>setStudentModal(student)}>
                   <div className="h-10 w-10 rounded-xl bg-orange-100 flex items-center justify-center text-sm font-bold text-orange-700 flex-shrink-0 mt-0.5">
                     {student.name?.charAt(0)?.toUpperCase() || '?'}
@@ -1194,6 +1214,8 @@ export default function CounselorPage() {
                     <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
                   </Button>
                 </div>
+              </div>
+              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted"/>
               </div>
             </div>
           ))}
