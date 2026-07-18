@@ -4,6 +4,7 @@ const Student = require('../models/Student');
 const User    = require('../models/User');
 const Counselor = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
+const { enrichPaymentDuplicateUtrs } = require('../utils/utrDuplicate');
 
 const CENTER_FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejected', 'University_Rejected'];
 
@@ -52,7 +53,7 @@ exports.get = asyncHandler(async (req, res) => {
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
     .populate('transactions.documentRef', 'name');
-  res.json(payment || null);
+  res.json(await enrichPaymentDuplicateUtrs(payment));
 });
 
 // PUT - lock fee after first submission for Center role
@@ -105,7 +106,8 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   }
 
   await audit('fee_updated', 'Payment', payment._id, req.user, { totalFee, discount, installments: installments?.length }, `Fee updated`);
-  res.json(await Payment.findById(payment._id).populate('transactions.recordedBy', 'name role'));
+  const saved = await Payment.findById(payment._id).populate('transactions.recordedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 exports.installmentTimeline = asyncHandler(async (req, res) => {
@@ -228,9 +230,10 @@ exports.markInstallmentPaid = asyncHandler(async (req, res) => {
   });
   await payment.save();
   await audit('installment_paid', 'Payment', payment._id, req.user, { installmentId: inst._id, amount }, `Installment payment recorded`);
-  res.json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 // POST /api/payments/:studentId/transactions - add payment
@@ -298,9 +301,10 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   }
 
   await audit('payment_added', 'Payment', payment._id, req.user, { amount, utrRef, verificationStatus }, `Payment ₹${amount} recorded`);
-  res.status(201).json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.status(201).json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 // PATCH /api/payments/:studentId/transactions/:txId - update transaction details
@@ -329,9 +333,10 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
 
   if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
   await payment.save();
-  res.json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 // PATCH /api/payments/:studentId/transactions/:txId/resend
@@ -424,9 +429,10 @@ exports.counselorForwardFeePayment = asyncHandler(async (req, res) => {
   });
 
   await audit('fee_payment_forwarded', 'Payment', payment._id, req.user, { txId: req.params.txId }, `Counselor forwarded fee payment to accountant`);
-  res.json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 // PATCH /api/payments/:studentId/transactions/:txId/account-verify
@@ -468,9 +474,10 @@ exports.accountantVerifyFeePayment = asyncHandler(async (req, res) => {
   }
 
   await audit('fee_payment_verified', 'Payment', payment._id, req.user, { approved, note }, `Accountant ${approved ? 'verified' : 'rejected'} fee payment of ₹${tx.amount}`);
-  res.json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
 // GET /api/payments-rejected — Admin only: all rejected transactions
@@ -520,7 +527,8 @@ exports.deleteTransaction = asyncHandler(async (req, res) => {
 
   payment.transactions.splice(idx, 1);
   await payment.save();
-  res.json(await Payment.findById(payment._id)
+  const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role'));
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
 });

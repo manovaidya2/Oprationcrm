@@ -297,6 +297,17 @@ function PaymentFields({ form, setForm, showAmount = true, showDate = true, show
 }
 
 // ── Payment display helper ─────────────────────────────────────
+function UtrDuplicateWarning({ tx }) {
+  const matches = tx?.duplicateUtrMatches || [];
+  if (!tx?.utrDuplicate || !matches.length) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div className="font-bold">UTR matched with existing payment. Payment not valid.</div>
+      <div className="mt-0.5">This UTR already exists in the system. Please verify the UTR before resubmitting.</div>
+    </div>
+  );
+}
+
 function PaymentDetail({ tx, accMap }) {
   if (!tx) return null;
   const isUPI  = tx.mode === 'UPI';
@@ -316,6 +327,7 @@ function PaymentDetail({ tx, accMap }) {
       {isBank && tx.accountNumber  && <div>Account No: <span className="font-mono font-semibold text-slate-700">{tx.accountNumber}</span></div>}
       {isBank && tx.ifscCode       && <div>IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
       {tx.note && <div className="italic text-slate-400">"{tx.note}"</div>}
+      <UtrDuplicateWarning tx={tx}/>
       {tx.paymentScreenshot && (
   <div className="mt-1.5">
     <a

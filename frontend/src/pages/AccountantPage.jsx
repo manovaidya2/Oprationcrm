@@ -36,6 +36,23 @@ function CardRequestDate({ date, label = 'Submitted' }) {
   );
 }
 
+function UtrDuplicateWarning({ tx }) {
+  const matches = tx?.duplicateUtrMatches || [];
+  if (!tx?.utrDuplicate || !matches.length) return null;
+  const match = matches[0];
+  return (
+    <div className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+      <div className="font-bold">UTR matched with existing payment. Payment not valid.</div>
+      <div className="mt-0.5">
+        Matched student: <span className="font-semibold">{match.studentName}</span>
+        {match.courseName ? ` · ${match.courseName}` : ''}
+        {match.source ? ` · ${match.source}` : ''}
+        {match.amount ? ` · ${fmt(match.amount)}` : ''}
+      </div>
+    </div>
+  );
+}
+
 // Full payment detail display
 function PaymentInfo({ tx, className = '' }) {
   if (!tx) return null;
@@ -56,6 +73,7 @@ function PaymentInfo({ tx, className = '' }) {
       {isBank && tx.accountNumber  && <div className="text-xs text-muted-foreground">Account No: <b>{tx.accountNumber}</b></div>}
       {isBank && tx.ifscCode       && <div className="text-xs text-muted-foreground">IFSC: <b>{tx.ifscCode}</b></div>}
       {tx.note && <div className="text-xs text-muted-foreground">Note: {tx.note}</div>}
+      <UtrDuplicateWarning tx={tx}/>
       {tx.paidToAccountLabel && (
         <div className="mt-1 bg-indigo-50 border border-indigo-200 rounded px-2.5 py-1.5">
           <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mr-1.5">Paid To</span>
@@ -976,6 +994,7 @@ export default function AccountantPage() {
   </div>
 )}
                     <PaidToAccountBox tx={tx} accMap={payAccounts}/>
+                    <UtrDuplicateWarning tx={tx}/>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
