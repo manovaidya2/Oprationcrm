@@ -368,6 +368,8 @@ const APP_STATUS = {
   Enrolled:           {label:'✓ Enrolled',         color:'bg-emerald-50 text-emerald-700 border border-emerald-200'},
   Cancelled:          {label:'Cancelled',           color:'bg-slate-100 text-slate-500 border border-slate-300'},
 };
+const FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejected', 'University_Rejected'];
+
 const DOC_STATUS = {
   Requested:{label:'Requested',color:'bg-blue-50 text-blue-700 border border-blue-200'},
   Forwarded:{label:'Forwarded',color:'bg-indigo-50 text-indigo-700 border border-indigo-200'},
@@ -996,7 +998,7 @@ function FeeSection({ studentId, appStatus, student }) {
   const load=useCallback(async()=>{ try{setLoading(true);setData(await paymentsApi.get(studentId));} catch{} finally{setLoading(false);} },[studentId]);
   useEffect(()=>{load();},[load]);
 
-  const canSetFee = !isCancelled && (['Draft', 'Changes_Requested'].includes(appStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch));
+  const canSetFee = !isCancelled && (FEE_EDITABLE_STATUSES.includes(appStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch));
   const canAddPayment = !isCancelled;
 
   async function saveFee(){
@@ -1198,7 +1200,7 @@ function FeeSection({ studentId, appStatus, student }) {
               <span className="text-base">🚫</span> This application is cancelled. Fee records are read-only.
             </div>
           )}
-          {!isCancelled && !canSetFee && <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>Fee structure locked. Only Admin/Counselor can modify fees at this stage.</div>}
+          {!isCancelled && !canSetFee && <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0"/>Fee structure is locked at this stage. It can be edited only while correction is pending.</div>}
           {!isCancelled && data && (data.paidAmount === 0 || data.paidAmount == null) && (() => {
             const expiry = getAdmissionExpiry(studentForExpiry);
             if (!expiry) return null;
@@ -2140,8 +2142,14 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
       </div>
 
       {s.applicationStatus==='Changes_Requested'&&s.changesRequested&&(
-        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-          <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-500"/><div><b className="font-semibold">Changes Requested:</b> {s.changesRequested}</div>
+        <div className="flex flex-col gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-amber-500"/>
+            <div><b className="font-semibold">Changes Requested:</b> {s.changesRequested}</div>
+          </div>
+          <Button size="sm" variant="outline" onClick={()=>startEdit('fee')} className="border-amber-300 bg-white text-amber-700 hover:bg-amber-100">
+            <IndianRupee className="h-3.5 w-3.5 mr-1.5"/>Edit Fee & Installments
+          </Button>
         </div>
       )}
       {s.applicationStatus==='Rejected'&&s.rejectionReason&&(
@@ -2367,7 +2375,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
 
           {editTab==='fee'&&(
             <div className="space-y-4">
-              {(['Draft','Changes_Requested'].includes(s.applicationStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch))?(<>
+              {(FEE_EDITABLE_STATUSES.includes(s.applicationStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch))?(<>
                 <div className="grid grid-cols-2 gap-4">
                   <div><Label className="text-xs font-semibold text-slate-600">Total Fee (₹) *</Label><Input type="number" value={feeForm.totalFee} onChange={e=>setFeeForm(p=>({...p,totalFee:e.target.value}))} placeholder="e.g. 50000" className="text-lg font-bold mt-1 h-12 border-slate-200"/></div>
                   <div><Label className="text-xs font-semibold text-slate-600">Discount (₹)</Label><Input type="number" value={feeForm.discount} onChange={e=>setFeeForm(p=>({...p,discount:e.target.value}))} placeholder="0" className="text-lg font-bold mt-1 h-12 border-slate-200"/></div>
@@ -2388,7 +2396,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
               </>):(
                 <div className="flex items-start gap-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-4">
                   <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5"/>
-                  Fee structure is locked after submission. Contact Admin/Counselor to modify.
+                  Fee structure is locked at this stage. It can be edited only while correction is pending.
                 </div>
               )}
             </div>

@@ -5,6 +5,8 @@ const User    = require('../models/User');
 const Counselor = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
+const CENTER_FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejected', 'University_Rejected'];
+
 function normalizeInstallments(input) {
   if (!Array.isArray(input)) return undefined;
   return input
@@ -73,8 +75,8 @@ exports.upsertFee = asyncHandler(async (req, res) => {
     const e = new Error('This application has been cancelled. No changes are allowed.'); e.status = 403; throw e;
   }
 
-  // Center can only set fees in Draft or Changes_Requested state
-  if (centerOriginated && req.user.role !== 'PaymentCoordinator' && !['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
+  // Center can edit fees while the application is still in a center-correction stage.
+  if (centerOriginated && req.user.role !== 'PaymentCoordinator' && !CENTER_FEE_EDITABLE_STATUSES.includes(student.applicationStatus)) {
     const e = new Error('Fee structure cannot be changed after submission. Contact Admin/Counselor.'); e.status = 403; throw e;
   }
 

@@ -14,6 +14,7 @@ const notificationSchema = new mongoose.Schema({
       'doc_requested', 'doc_forwarded', 'doc_fee_approved', 'doc_fee_rejected',
       'doc_scanned', 'doc_payment_received', 'doc_dispatched',
       'payment_verified', 'doc_delivered',
+      'installment_updated',
       'help_ticket', 'ticket_message', 'chat_message',
       'general',
     ],
