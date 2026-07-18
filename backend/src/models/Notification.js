@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const notificationSchema = new mongoose.Schema({
   // recipient
   userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  role:     { type: String, required: true }, // which role this is for (quick filter)
+  role:     { type: String, default: '' }, // which role this is for (quick filter)
 
   message:  { type: String, required: true },
   type:     {
@@ -13,7 +13,9 @@ const notificationSchema = new mongoose.Schema({
       'changes_requested', 'enrollment_assigned',
       'doc_requested', 'doc_forwarded', 'doc_fee_approved', 'doc_fee_rejected',
       'doc_scanned', 'doc_payment_received', 'doc_dispatched',
-      'payment_verified', 'doc_delivered', 'general',
+      'payment_verified', 'doc_delivered',
+      'help_ticket', 'ticket_message', 'chat_message',
+      'general',
     ],
     default: 'general',
   },

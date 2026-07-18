@@ -83,6 +83,7 @@ export function AppLayout() {
     ? [...baseNavItems, { to: '/chat', label: 'Team Chat', icon: MessageSquare }]
     : baseNavItems;
   const unread = notifs.filter(n => !n.read).length;
+  const chatUnread = notifs.filter(n => !n.read && ['help_ticket', 'ticket_message', 'chat_message'].includes(n.type)).length;
 
   useEffect(() => {
     notifApi.list().then(setNotifs).catch(() => {});
@@ -150,6 +151,14 @@ export function AppLayout() {
                 )}>
                 <item.icon className="h-4 w-4 flex-shrink-0" />
                 {item.label}
+                {['/chat', '/help'].includes(item.to) && chatUnread > 0 && (
+                  <span className={cn(
+                    'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold',
+                    active ? 'bg-white text-primary' : 'bg-red-500 text-white'
+                  )}>
+                    {chatUnread > 9 ? '9+' : chatUnread}
+                  </span>
+                )}
                 {active && <ChevronRight className="h-3.5 w-3.5 ml-auto" />}
               </Link>
             );

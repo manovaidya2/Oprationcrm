@@ -16,6 +16,7 @@ const conversationSchema = new mongoose.Schema({
     priority: { type: String, enum: ['Low', 'Normal', 'High', 'Urgent'], default: 'Normal' },
     status: { type: String, enum: ['Open', 'In_Progress', 'Resolved', 'Closed'], default: 'Open', index: true },
     center: { type: mongoose.Schema.Types.ObjectId, ref: 'Center', index: true },
+    student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student', index: true },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     acceptedAt: Date,
     resolutionNote: { type: String, trim: true },

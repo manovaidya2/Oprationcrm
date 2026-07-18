@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { authApi, chatApi } from '@/lib/api';
+import { authApi, chatApi, studentsApi } from '@/lib/api';
 import { AVATAR_OPTIONS, avatarForSeed } from '@/lib/avatarOptions';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
@@ -60,7 +60,10 @@ function isDirectChat(conversation) {
 
 function membersText(conversation, user) {
   if (!conversation) return '';
-  if (conversation.kind === 'ticket') return `${conversation.ticket?.center?.name || 'Center'} - ${conversation.ticket?.priority || 'Normal'} priority`;
+  if (conversation.kind === 'ticket') {
+    const student = conversation.ticket?.student?.name ? ` - Student: ${conversation.ticket.student.name}` : '';
+    return `${conversation.ticket?.center?.name || 'Center'}${student} - ${conversation.ticket?.priority || 'Normal'} priority`;
+  }
   const others = otherParticipants(conversation, user);
   if (isDirectChat(conversation)) return others[0]?.role || 'Team member';
   return `${(conversation.participants || []).length} members: ${(conversation.participants || []).map(p => p.name).join(', ')}`;
@@ -92,11 +95,12 @@ export default function ChatPage() {
   const [saving, setSaving] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [centerStudents, setCenterStudents] = useState([]);
   const [statusDialog, setStatusDialog] = useState(null);
   const [statusNote, setStatusNote] = useState('');
   const [avatarOpen, setAvatarOpen] = useState(false);
   const [chatForm, setChatForm] = useState({ title: '', participantIds: [] });
-  const [ticketForm, setTicketForm] = useState({ subject: '', priority: 'Normal', message: '' });
+  const [ticketForm, setTicketForm] = useState({ subject: '', priority: 'Normal', studentId: '', message: '' });
   const bottomRef = useRef(null);
 
   const loadConversations = useCallback(async () => {
@@ -110,11 +114,13 @@ export default function ChatPage() {
     (async () => {
       try {
         setLoading(true);
-        const [rows, users] = await Promise.all([
+        const [rows, users, students] = await Promise.all([
           loadConversations(),
           isCenter ? Promise.resolve([]) : chatApi.users(),
+          isCenter ? studentsApi.getAll({ centerId: user?.centerId || '' }) : Promise.resolve([]),
         ]);
         setTeamUsers(users);
+        setCenterStudents(students);
         if (rows[0]?._id) setActiveId(prev => prev || rows[0]._id);
       } catch (e) {
         toast.error(e.message || 'Failed to load chat');
@@ -130,7 +136,10 @@ export default function ChatPage() {
     async function loadMessages() {
       try {
         const rows = await chatApi.messages(activeId);
-        if (!cancelled) setMessages(rows);
+        if (!cancelled) {
+          setMessages(rows);
+          setConversations(prev => prev.map(c => c._id === activeId ? { ...c, unreadCount: 0 } : c));
+        }
       } catch (e) {
         if (!cancelled) toast.error(e.message || 'Failed to load messages');
       }
@@ -139,6 +148,13 @@ export default function ChatPage() {
     const iv = setInterval(loadMessages, 5000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [activeId]);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      loadConversations().catch(() => {});
+    }, 10000);
+    return () => clearInterval(iv);
+  }, [loadConversations]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -156,6 +172,9 @@ export default function ChatPage() {
       c.kind,
       c.ticket?.status,
       c.ticket?.center?.name,
+      c.ticket?.student?.name,
+      c.ticket?.student?.enrollmentNumber,
+      c.ticket?.student?.courseName,
       c.lastMessagePreview,
     ].some(v => String(v || '').toLowerCase().includes(q));
   }), [conversations, q, user]);
@@ -185,7 +204,7 @@ export default function ChatPage() {
       const conversation = await chatApi.createTicket(ticketForm);
       toast.success('Ticket raised');
       setTicketOpen(false);
-      setTicketForm({ subject: '', priority: 'Normal', message: '' });
+      setTicketForm({ subject: '', priority: 'Normal', studentId: '', message: '' });
       await loadConversations();
       setActiveId(conversation._id);
     } catch (e) {
@@ -331,12 +350,14 @@ export default function ChatPage() {
               </div>
             ) : filtered.map(c => {
               const other = otherParticipants(c, user)[0] || (c.participants || [])[0];
+              const unreadCount = Number(c.unreadCount || 0);
               return (
               <button
                 key={c._id}
                 onClick={() => setActiveId(c._id)}
                 className={cn(
                   'w-full text-left border-b px-3 py-3 hover:bg-accent transition-colors',
+                  unreadCount > 0 && activeId !== c._id && 'bg-indigo-50 border-l-4 border-l-indigo-500',
                   activeId === c._id && 'bg-accent'
                 )}
               >
@@ -350,12 +371,24 @@ export default function ChatPage() {
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <div className="font-medium text-sm line-clamp-1">{titleFor(c, user)}</div>
-                      {c.kind === 'ticket' && <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold', STATUS_TONE[c.ticket?.status])}>{c.ticket?.status?.replace(/_/g, ' ')}</span>}
+                      <div className={cn('font-medium text-sm line-clamp-1', unreadCount > 0 && 'font-bold text-indigo-900')}>{titleFor(c, user)}</div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {unreadCount > 0 && (
+                          <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                            {unreadCount > 9 ? '9+' : unreadCount}
+                          </span>
+                        )}
+                        {c.kind === 'ticket' && <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', STATUS_TONE[c.ticket?.status])}>{c.ticket?.status?.replace(/_/g, ' ')}</span>}
+                      </div>
                     </div>
                     <div className="text-xs text-muted-foreground mt-1 line-clamp-1">
                       {membersText(c, user)}
                     </div>
+                    {c.kind === 'ticket' && c.ticket?.student?.name && (
+                      <div className="mt-1 text-xs font-medium text-indigo-700 line-clamp-1">
+                        Student: {c.ticket.student.name}{c.ticket.student.enrollmentNumber ? ` - ${c.ticket.student.enrollmentNumber}` : ''}
+                      </div>
+                    )}
                     {c.lastMessagePreview && <div className="text-xs text-muted-foreground mt-1 line-clamp-1">{c.lastMessagePreview}</div>}
                     <div className="text-[11px] text-muted-foreground mt-1">{fmtTime(c.lastMessageAt || c.updatedAt)}</div>
                   </div>
@@ -395,6 +428,11 @@ export default function ChatPage() {
                           <div className="mt-1 flex flex-wrap gap-2 text-xs">
                             <span className="rounded-full border bg-slate-50 px-2 py-0.5 text-slate-600">{active.ticket?.center?.name || 'Center'}</span>
                             <span className="rounded-full border bg-amber-50 px-2 py-0.5 text-amber-700">Priority: {active.ticket?.priority || 'Normal'}</span>
+                            {active.ticket?.student?.name && (
+                              <span className="rounded-full border bg-indigo-50 px-2 py-0.5 text-indigo-700">
+                                Student: {active.ticket.student.name}{active.ticket.student.enrollmentNumber ? ` - ${active.ticket.student.enrollmentNumber}` : ''}
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <div className="text-sm text-muted-foreground">
@@ -549,6 +587,21 @@ export default function ChatPage() {
                   {['Low', 'Normal', 'High', 'Urgent'].map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Student Reference</Label>
+              <Select value={ticketForm.studentId || 'none'} onValueChange={v => setTicketForm(p => ({ ...p, studentId: v === 'none' ? '' : v }))}>
+                <SelectTrigger><SelectValue placeholder="Select student if this query is student-related"/></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No student reference</SelectItem>
+                  {centerStudents.map(s => (
+                    <SelectItem key={s._id} value={s._id}>
+                      {s.name}{s.enrollmentNumber ? ` - ${s.enrollmentNumber}` : ''}{s.courseName ? ` - ${s.courseName}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">Select a student only when the query is related to a specific student.</p>
             </div>
             <div><Label>Message *</Label><Textarea rows={5} value={ticketForm.message} onChange={e => setTicketForm(p => ({ ...p, message: e.target.value }))} placeholder="Describe the issue clearly..."/></div>
           </div>

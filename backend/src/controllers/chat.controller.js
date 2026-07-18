@@ -4,6 +4,7 @@ const ChatMessage = require('../models/ChatMessage');
 const User = require('../models/User');
 const Center = require('../models/Center');
 const Counselor = require('../models/Counselor');
+const Student = require('../models/Student');
 const { notify, audit } = require('../utils/helpers');
 
 function userId(req) {
@@ -29,6 +30,7 @@ async function populateConversation(query) {
     .populate('participants', 'name email role avatarColor avatarSeed centerId counselorId universityId')
     .populate('createdBy', 'name role')
     .populate('ticket.center', 'name organisationName city')
+    .populate('ticket.student', 'name phone courseName enrollmentNumber applicationStatus')
     .populate('ticket.assignedTo', 'name email role avatarSeed')
     .populate('ticket.resolvedBy', 'name email role avatarSeed')
     .populate('ticket.closedBy', 'name email role avatarSeed');
@@ -88,7 +90,19 @@ exports.list = asyncHandler(async (req, res) => {
   const conversations = await populateConversation(
     Conversation.find(filter).sort('-lastMessageAt -updatedAt')
   );
-  res.json(conversations);
+  const unreadRows = await ChatMessage.aggregate([
+    { $match: {
+      conversation: { $in: conversations.map(c => c._id) },
+      sender: { $ne: req.user._id },
+      readBy: { $ne: req.user._id },
+    } },
+    { $group: { _id: '$conversation', count: { $sum: 1 } } },
+  ]);
+  const unreadMap = new Map(unreadRows.map(row => [String(row._id), row.count]));
+  res.json(conversations.map(c => ({
+    ...c.toObject(),
+    unreadCount: unreadMap.get(String(c._id)) || 0,
+  })));
 });
 
 exports.createInternal = asyncHandler(async (req, res) => {
@@ -149,6 +163,16 @@ exports.createTicket = asyncHandler(async (req, res) => {
   const center = await Center.findById(req.user.centerId).select('name assignedCounselor').lean();
   if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
 
+  let student = null;
+  if (req.body.studentId) {
+    student = await Student.findOne({ _id: req.body.studentId, center: center._id })
+      .select('name enrollmentNumber courseName')
+      .lean();
+    if (!student) {
+      const e = new Error('Selected student was not found for this center'); e.status = 400; throw e;
+    }
+  }
+
   let counselorId = center.assignedCounselor;
   if (!counselorId) {
     const counselor = await Counselor.findOne({ centers: center._id, isActive: true }).select('_id').lean();
@@ -173,6 +197,7 @@ exports.createTicket = asyncHandler(async (req, res) => {
       priority: req.body.priority || 'Normal',
       status: 'Open',
       center: center._id,
+      student: student?._id,
       assignedTo: counselorUser._id,
     },
     lastMessagePreview: body.slice(0, 120),
@@ -187,11 +212,11 @@ exports.createTicket = asyncHandler(async (req, res) => {
   });
 
   await notify(counselorUser._id, {
-    message: `New help ticket from ${center.name}: ${subject}`,
+    message: `New help ticket from ${center.name}${student ? ` for ${student.name}` : ''}: ${subject}`,
     type: 'help_ticket',
     role: 'Counselor',
   });
-  await audit('ticket_created', 'Conversation', conversation._id, req.user, { subject }, `Help ticket created`);
+  await audit('ticket_created', 'Conversation', conversation._id, req.user, { subject, studentId: student?._id }, `Help ticket created`);
   conversation = await populateConversation(Conversation.findById(conversation._id));
   res.status(201).json(conversation);
 });
