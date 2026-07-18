@@ -1,6 +1,7 @@
 const asyncHandler  = require('express-async-handler');
 const StudentDoc    = require('../models/StudentDocument');
 const Student       = require('../models/Student');
+const Payment       = require('../models/Payment');
 const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
@@ -106,6 +107,60 @@ const INVENTORY_RECEIVED_OR_DONE_STATUSES = [
   'Center_Notified', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered',
 ];
 
+const normalizeInventoryDocName = value => String(value || '').trim().toLowerCase();
+
+function latestHistoryEntry(doc, status) {
+  return [...(doc?.statusHistory || [])].reverse().find(h => h.status === status);
+}
+
+function bestDispatchSource(current, next) {
+  if (!current) return next;
+  const rank = doc => {
+    if (doc.status === 'Delivered' || latestHistoryEntry(doc, 'Delivered')) return 4;
+    if (doc.status === 'Dispatched' || latestHistoryEntry(doc, 'Dispatched')) return 3;
+    if (doc.centerCourierInfo?.trackingNo || doc.centerCourierInfo?.company) return 2;
+    return 1;
+  };
+  const currentRank = rank(current);
+  const nextRank = rank(next);
+  if (nextRank !== currentRank) return nextRank > currentRank ? next : current;
+  return new Date(next.updatedAt || next.createdAt || 0) > new Date(current.updatedAt || current.createdAt || 0) ? next : current;
+}
+
+function mergeInventoryDispatchStatus(inventoryDoc, requestDoc) {
+  if (!requestDoc) return inventoryDoc;
+
+  const dispatched = latestHistoryEntry(requestDoc, 'Dispatched');
+  const delivered = latestHistoryEntry(requestDoc, 'Delivered');
+  const requestStatus = delivered || requestDoc.status === 'Delivered'
+    ? 'Delivered'
+    : dispatched || requestDoc.status === 'Dispatched' || requestDoc.centerCourierInfo
+      ? 'Dispatched'
+      : null;
+
+  if (!requestStatus) return inventoryDoc;
+
+  const merged = {
+    ...inventoryDoc,
+    centerCourierInfo: requestDoc.centerCourierInfo || inventoryDoc.centerCourierInfo,
+    linkedRequestDocumentId: requestDoc._id,
+    linkedRequestDocumentStatus: requestDoc.status,
+  };
+
+  if (merged.status !== 'Delivered') {
+    merged.status = requestStatus === 'Delivered' ? 'Delivered' : 'Dispatched';
+  }
+
+  const existingHistory = Array.isArray(merged.statusHistory) ? merged.statusHistory : [];
+  const hasStatus = status => existingHistory.some(h => h.status === status);
+  const syncedHistory = [...existingHistory];
+  if (dispatched && !hasStatus('Dispatched')) syncedHistory.push(dispatched);
+  if (delivered && !hasStatus('Delivered')) syncedHistory.push(delivered);
+  merged.statusHistory = syncedHistory.sort((a, b) => new Date(a.at || 0) - new Date(b.at || 0));
+
+  return merged;
+}
+
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
   const filter = req.user.role === 'University' ? {} : { origin: { $ne: 'Inventory' } };
@@ -145,8 +200,28 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('center', 'name')
     .populate('university', 'name shortName')
     .populate('payments.recordedBy', 'name role')
-    .sort('-createdAt');
-  res.json(docs);
+    .sort('-createdAt')
+    .lean();
+
+  const studentIds = [...new Set(docs.map(doc => String(doc.student?._id || doc.student)).filter(Boolean))];
+  const payments = await Payment.find({ student: { $in: studentIds } })
+    .select('student totalFee discount netFee paidAmount dueAmount')
+    .lean();
+  const paymentMap = payments.reduce((acc, payment) => {
+    acc[String(payment.student)] = {
+      totalFee: payment.totalFee || 0,
+      discount: payment.discount || 0,
+      netFee: payment.netFee || 0,
+      paidAmount: payment.paidAmount || 0,
+      dueAmount: payment.dueAmount || 0,
+    };
+    return acc;
+  }, {});
+
+  res.json(docs.map(doc => ({
+    ...doc,
+    courseFeeSummary: paymentMap[String(doc.student?._id || doc.student)] || null,
+  })));
 });
 
 exports.get = asyncHandler(async (req, res) => {
@@ -851,19 +926,28 @@ exports.inventoryList = asyncHandler(async (req, res) => {
     docs: (() => {
       const studentDocs = docsByStudent[String(student._id)] || [];
       const inventoryDocs = studentDocs.filter(d => d.origin === 'Inventory');
+      const requestDocsByName = studentDocs
+        .filter(d => d.origin !== 'Inventory')
+        .reduce((acc, doc) => {
+          const key = normalizeInventoryDocName(doc.name);
+          acc[key] = bestDispatchSource(acc[key], doc);
+          return acc;
+        }, {});
       const byName = {};
-      inventoryDocs.forEach(d => { byName[d.name.toLowerCase()] = d; });
+      inventoryDocs.forEach(d => { byName[normalizeInventoryDocName(d.name)] = mergeInventoryDispatchStatus(d, requestDocsByName[normalizeInventoryDocName(d.name)]); });
       const catalogDocs = INVENTORY_DOC_NAMES.map((name, idx) => (
-        byName[name.toLowerCase()] || {
+        byName[normalizeInventoryDocName(name)] || mergeInventoryDispatchStatus({
           _id: `catalog-${student._id}-${idx}`,
           catalog: true,
           studentId: student._id,
           name,
           status: 'Not_Requested',
           origin: 'Inventory',
-        }
+        }, requestDocsByName[normalizeInventoryDocName(name)])
       ));
-      const extraDocs = inventoryDocs.filter(d => !INVENTORY_DOC_NAMES.some(name => name.toLowerCase() === d.name.toLowerCase()));
+      const extraDocs = inventoryDocs
+        .filter(d => !INVENTORY_DOC_NAMES.some(name => normalizeInventoryDocName(name) === normalizeInventoryDocName(d.name)))
+        .map(d => mergeInventoryDispatchStatus(d, requestDocsByName[normalizeInventoryDocName(d.name)]));
       return [...catalogDocs, ...extraDocs];
     })(),
     requestedDocs: (docsByStudent[String(student._id)] || []).filter(d => d.origin !== 'Inventory'),

@@ -47,6 +47,8 @@ function ScannedFilesList({ doc, className = '' }) {
 const fmtDt  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const fmtFull= d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
 
+const fmtMoney = value => `₹${Number(value || 0).toLocaleString('en-IN')}`;
+
 const STATUS_INFO = {
   Sent_To_University:    { label:'Requested / Awaiting Receipt', color:'bg-amber-100 text-amber-700' },
   University_Dispatched: { label:'Incoming Courier',         color:'bg-purple-100 text-purple-700' },
@@ -68,6 +70,7 @@ const POST_SCAN_STATUSES = ['Scanned','Accountant_Received','Counselor_Received'
 function DocDetailModal({ doc, onClose }) {
   if (!doc) return null;
   const st = STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
+  const courseFee = doc.courseFeeSummary;
   return (
     <Dialog open={true} onOpenChange={onClose}>
       <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
@@ -129,6 +132,20 @@ function DocDetailModal({ doc, onClose }) {
               </div>
             </div>
           )}
+          {courseFee && (
+            <div className="border rounded-lg p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Course Fee</p>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-muted/30 rounded px-2 py-1.5"><div className="text-xs text-muted-foreground">Total</div><div className="font-bold">{fmtMoney(courseFee.totalFee ?? courseFee.netFee)}</div></div>
+                <div className="bg-blue-50 rounded px-2 py-1.5"><div className="text-xs text-muted-foreground">Net</div><div className="font-bold text-blue-700">{fmtMoney(courseFee.netFee)}</div></div>
+                <div className="bg-emerald-50 rounded px-2 py-1.5"><div className="text-xs text-muted-foreground">Paid</div><div className="font-bold text-emerald-700">{fmtMoney(courseFee.paidAmount)}</div></div>
+                <div className={`rounded px-2 py-1.5 ${Number(courseFee.dueAmount || 0) > 0 ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                  <div className="text-xs text-muted-foreground">Balance</div>
+                  <div className={`font-bold ${Number(courseFee.dueAmount || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{fmtMoney(courseFee.dueAmount)}</div>
+                </div>
+              </div>
+            </div>
+          )}
           {(doc.chargeFee > 0 || doc.totalPaid > 0) && (
             <div className="border rounded-lg p-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">💳 Payment</p>
@@ -187,6 +204,11 @@ function DocDetailModal({ doc, onClose }) {
 // ── Doc Card ─────────────────────────────────────────────────
 function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = false }) {
   const st = STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
+  const courseFee = doc.courseFeeSummary;
+  const chargeFee = Number(doc.chargeFee || 0);
+  const totalPaid = Number(doc.totalPaid || 0);
+  const dueAmount = Math.max(0, chargeFee - totalPaid);
+  const hasFeeInfo = chargeFee > 0 || totalPaid > 0;
   return (
     <Card className="hover:border-primary/40 transition-colors">
       <CardContent className="p-4">
@@ -207,6 +229,35 @@ function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = fal
               {doc.student?.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 ml-2">{doc.student.enrollmentNumber}</span>}
             </div>
             {doc.center?.name && <div className="text-xs text-muted-foreground">Center: {doc.center.name}</div>}
+            {courseFee && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1">
+                  Course Fee: <b className="text-slate-800">{fmtMoney(courseFee.totalFee ?? courseFee.netFee)}</b>
+                </span>
+                <span className="text-xs rounded-md border border-blue-200 bg-blue-50 px-2 py-1">
+                  Net: <b className="text-blue-700">{fmtMoney(courseFee.netFee)}</b>
+                </span>
+                <span className="text-xs rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1">
+                  Paid: <b className="text-emerald-700">{fmtMoney(courseFee.paidAmount)}</b>
+                </span>
+                <span className={`text-xs rounded-md border px-2 py-1 ${Number(courseFee.dueAmount || 0) > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                  Balance: <b className={Number(courseFee.dueAmount || 0) > 0 ? 'text-amber-700' : 'text-emerald-700'}>{fmtMoney(courseFee.dueAmount)}</b>
+                </span>
+              </div>
+            )}
+            {hasFeeInfo && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1">
+                  Charge: <b className="text-slate-800">{fmtMoney(chargeFee)}</b>
+                </span>
+                <span className="text-xs rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1">
+                  Paid: <b className="text-emerald-700">{fmtMoney(totalPaid)}</b>
+                </span>
+                <span className={`text-xs rounded-md border px-2 py-1 ${dueAmount > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                  Due: <b className={dueAmount > 0 ? 'text-amber-700' : 'text-emerald-700'}>{fmtMoney(dueAmount)}</b>
+                </span>
+              </div>
+            )}
             {(doc.centerCourierInfo?.trackingNo || doc.courierInfo?.trackingNo) && (
               <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                 <Truck className="h-3 w-3"/>
@@ -395,10 +446,9 @@ export default function DispatchPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="uni">
+      <Tabs defaultValue="incoming">
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
-            { val:'uni',      label:'Inventory Records', count: uniRecords.length,  dot:'bg-purple-500', icon: <GraduationCap className="h-3.5 w-3.5"/> },
             { val:'incoming', label:'Incoming',           count: incoming.length,    dot:'bg-blue-500',   icon: null },
             { val:'scan',     label:'Upload Scan',        count: scanPending.length, dot:'bg-amber-500',  icon: null },
             { val:'ready',    label:'Ready to Dispatch',  count: ready.length,       dot:'bg-emerald-500',icon: null },
@@ -582,7 +632,7 @@ export default function DispatchPage() {
 
         {/* Incoming */}
         <TabsContent value="incoming" className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">Couriers from University — process request to proceed to scanning.</p>
+          <p className="text-xs text-muted-foreground">Process request to proceed to scanning.</p>
           {incoming.length === 0
             ? <div className="text-center py-10 text-muted-foreground">No incoming couriers</div>
             : incoming.map(d => (

@@ -48,12 +48,26 @@ function docLabels(doc) {
 }
 
 function showStateBadge(doc, labels) {
-  if (doc.catalog) return true;
+  if (doc.catalog && (!doc.status || doc.status === 'Not_Requested')) return true;
   if (['Sent_To_University', 'University_Dispatched'].includes(doc.status) && labels.some(l => l.key === 'requested')) return false;
   if (doc.status === 'Dispatched' && labels.some(l => l.key === 'dispatched')) return false;
   if (doc.status === 'Delivered' && labels.some(l => l.key === 'delivered')) return false;
   if (RECEIVED_STATUSES.has(doc.status) && labels.some(l => l.key === 'received')) return false;
   return true;
+}
+
+function CenterCourierDetails({ doc }) {
+  const courier = doc.centerCourierInfo;
+  if (!courier || !(courier.company || courier.trackingNo || courier.dispatchDate || courier.documentsDesc)) return null;
+
+  return (
+    <div className="mt-2 grid gap-1 rounded-md border border-blue-100 bg-blue-50/60 px-2 py-1.5 text-xs text-slate-700 sm:grid-cols-2">
+      {courier.company && <span><b>Courier:</b> {courier.company}</span>}
+      {courier.trackingNo && <span><b>Tracking No:</b> {courier.trackingNo}</span>}
+      {courier.dispatchDate && <span><b>Dispatched Date:</b> {fmtDate(courier.dispatchDate)}</span>}
+      {courier.documentsDesc && <span><b>Documents:</b> {courier.documentsDesc}</span>}
+    </div>
+  );
 }
 
 function isPendingDoc(doc) {
@@ -309,35 +323,37 @@ export default function DocumentInventoryPage() {
     setSaving(true);
     try {
       for (const target of targets) {
+        const linkedDocId = target.doc.linkedRequestDocumentId || target.doc._id;
+        const hasRealLinkedDoc = Boolean(target.doc.linkedRequestDocumentId) || !target.doc.catalog;
         if (type === 'receive') {
-          if (target.doc.catalog) {
+          if (!hasRealLinkedDoc) {
             await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: true, receivedDate: actionDate });
           } else {
-            await documentInventoryApi.markReceived(target.doc._id, { receivedDate: actionDate });
+            await documentInventoryApi.markReceived(linkedDocId, { receivedDate: actionDate });
           }
         } else if (type === 'request') {
-          if (target.doc.catalog) {
+          if (!hasRealLinkedDoc) {
             await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: false, requestedDate: actionDate });
           } else {
-            await documentInventoryApi.requestDoc(target.doc._id, { requestedDate: actionDate });
+            await documentInventoryApi.requestDoc(linkedDocId, { requestedDate: actionDate });
           }
         } else if (type === 'urgent') {
-          if (target.doc.catalog) {
+          if (!hasRealLinkedDoc) {
             await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], received: false, urgent: true, requestedDate: actionDate, urgentDate: actionDate });
           } else {
-            await documentInventoryApi.urgentDoc(target.doc._id, { urgentDate: actionDate, requestedDate: actionDate });
+            await documentInventoryApi.urgentDoc(linkedDocId, { urgentDate: actionDate, requestedDate: actionDate });
           }
         } else if (type === 'dispatched') {
-          if (target.doc.catalog) {
+          if (!hasRealLinkedDoc) {
             await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], dispatched: true, dispatchedDate: actionDate });
           } else {
-            await documentInventoryApi.markDispatched(target.doc._id, { dispatchedDate: actionDate });
+            await documentInventoryApi.markDispatched(linkedDocId, { dispatchedDate: actionDate });
           }
         } else if (type === 'delivered') {
-          if (target.doc.catalog) {
+          if (!hasRealLinkedDoc) {
             await documentInventoryApi.addDocs(target.studentId, { names: [target.doc.name], delivered: true, deliveredDate: actionDate });
           } else {
-            await documentInventoryApi.markDelivered(target.doc._id, { deliveredDate: actionDate });
+            await documentInventoryApi.markDelivered(linkedDocId, { deliveredDate: actionDate });
           }
         }
       }
@@ -496,6 +512,7 @@ export default function DocumentInventoryPage() {
                               );
                             })}
                           </div>
+                          <CenterCourierDetails doc={doc} />
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -565,6 +582,7 @@ export default function DocumentInventoryPage() {
                               );
                             })}
                           </div>
+                          <CenterCourierDetails doc={doc} />
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-2">

@@ -1613,7 +1613,7 @@ export default function AccountantPage() {
               </Button>
               <Button variant="outline" className="border-amber-400 text-amber-700" onClick={() => doDocAction('pending')} disabled={saving}><Clock className="h-4 w-4 mr-1"/>Keep Pending</Button>
               <Button className="bg-green-600 hover:bg-green-700" onClick={() => doDocAction('approve')} disabled={saving}>
-                {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}<CheckCircle2 className="h-4 w-4 mr-1"/>Approve → University
+                {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}<CheckCircle2 className="h-4 w-4 mr-1"/>Approve → Dispatch
               </Button>
             </>}
             {dialog?.type==='docChanges' && (
