@@ -113,6 +113,9 @@ export const paymentsApi = {  get:            (sid)          => request(`/paymen
   updateTransaction:      (sid, txId, data) => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateTransactionForm:  (sid, txId, fd)   => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: fd }),  // FormData for file upload
   installmentTimeline:    ()                => request('/payment-installments'),
+  dueTimeline:            ()                => request('/payment-due-timelines'),
+  updatePaymentTimeline:  (paymentId, data) => request(`/payment-installments/${paymentId}/timeline`, { method: 'PUT', body: JSON.stringify(data) }),
+  updateInstallmentTimeline: (paymentId, data) => request(`/payment-installments/${paymentId}/installments`, { method: 'PUT', body: JSON.stringify(data) }),
   markInstallmentPaid:    (paymentId, installmentId, fd) => uploadRequest(`/payment-installments/${paymentId}/installments/${installmentId}/pay`, 'POST', fd),
   resendTransaction: async (sid, txId, formData) => {
     const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';

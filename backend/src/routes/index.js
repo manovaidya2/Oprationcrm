@@ -106,6 +106,9 @@ router.post('/students/:id/counselor-send-to-center', protect, requireRole('Admi
 
 // ── PAYMENTS ─────────────────────────────────────────────────
 router.get   ('/payment-installments',                          protect, requireRole('Admin','PaymentCoordinator'), payC.installmentTimeline);
+router.get   ('/payment-due-timelines',                         protect, requireRole('Admin','PaymentCoordinator'), payC.dueTimeline);
+router.put   ('/payment-installments/:paymentId/timeline',       protect, requireRole('Admin','PaymentCoordinator'), payC.updateDueTimeline);
+router.put   ('/payment-installments/:paymentId/installments',   protect, requireRole('Admin','PaymentCoordinator'), payC.updateInstallmentTimeline);
 router.post  ('/payment-installments/:paymentId/installments/:installmentId/pay', protect, requireRole('Admin','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.markInstallmentPaid);
 router.get   ('/document-payment-followups',                    protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentTimeline);
 router.post  ('/documents/:id/payment-followup',                protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentFollowup);

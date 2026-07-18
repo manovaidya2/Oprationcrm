@@ -38,6 +38,19 @@ const STATUS_CLASS = {
 
 const EMPTY_PAY = { amount: '', mode: 'UPI', utrRef: '', upiId: '', bankName: '', accountHolder: '', paidAt: today(), note: '', paymentScreenshot: null };
 const EMPTY_DOC_FOLLOWUP = { contactWith: 'Center', outcome: 'Called center', expectedPaymentDate: '', note: '' };
+const blankTimelineRow = (n = 1) => ({ installmentNumber: n, paymentDate: '', amount: '', reasonOrRequirement: '' });
+
+function cleanTimelineRows(rows = []) {
+  return rows
+    .map((row, idx) => ({
+      _id: row._id || '',
+      installmentNumber: Number(row.installmentNumber || 0) || idx + 1,
+      paymentDate: row.paymentDate || '',
+      amount: Number(row.amount || 0) || 0,
+      reasonOrRequirement: String(row.reasonOrRequirement || '').trim(),
+    }))
+    .filter(row => row.installmentNumber > 0 && (row.paymentDate || row.amount > 0 || row.reasonOrRequirement));
+}
 
 function groupRows(rows) {
   const map = new Map();
@@ -52,7 +65,7 @@ function groupRows(rows) {
   }
   return [...map.values()].map(item => {
     const rank = { overdue: 0, week: 1, upcoming: 2, paid: 3 };
-    item.installments.sort((a, b) => new Date(a.paymentDate) - new Date(b.paymentDate));
+    item.installments.sort((a, b) => new Date(a.paymentDate || '9999-12-31') - new Date(b.paymentDate || '9999-12-31'));
     item.bucket = item.installments.reduce((best, r) => rank[r.bucket] < rank[best] ? r.bucket : best, item.installments[0]?.bucket || 'upcoming');
     return item;
   });
@@ -107,6 +120,8 @@ export default function PaymentCoordinatorPage() {
   const [openId, setOpenId] = useState('');
   const [payTarget, setPayTarget] = useState(null);
   const [payForm, setPayForm] = useState({ ...EMPTY_PAY });
+  const [timelineTarget, setTimelineTarget] = useState(null);
+  const [timelineRows, setTimelineRows] = useState([blankTimelineRow(1)]);
   const [docFollowTarget, setDocFollowTarget] = useState(null);
   const [docFollowForm, setDocFollowForm] = useState({ ...EMPTY_DOC_FOLLOWUP });
   const [saving, setSaving] = useState(false);
@@ -175,6 +190,62 @@ export default function PaymentCoordinatorPage() {
     const inst = row.installment || {};
     setPayTarget({ student, row });
     setPayForm({ ...EMPTY_PAY, amount: String(Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0)) || inst.amount || '') });
+  }
+
+  function openTimeline(student) {
+    const existing = (student.installments || [])
+      .filter(row => !row.needsTimeline)
+      .map((row, idx) => ({
+        _id: row.installment?._id || row._id || '',
+        installmentNumber: row.installment?.installmentNumber || idx + 1,
+        paymentDate: todayFrom(row.paymentDate || row.installment?.paymentDate),
+        amount: row.installment?.amount || '',
+        reasonOrRequirement: row.installment?.reasonOrRequirement || '',
+      }));
+    setTimelineTarget(student);
+    setTimelineRows(existing.length ? existing : [{
+      ...blankTimelineRow(1),
+      amount: student.dueAmount || '',
+    }]);
+  }
+
+  function updateTimelineRow(index, field, value) {
+    setTimelineRows(prev => prev.map((row, idx) => idx === index ? { ...row, [field]: value } : row));
+  }
+
+  function addTimelineRow() {
+    setTimelineRows(prev => {
+      const expected = Number(timelineTarget?.dueAmount || 0);
+      const used = cleanTimelineRows(prev).reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+      const remaining = Math.max(0, expected - used);
+      return [...prev, { ...blankTimelineRow((Number(prev.at(-1)?.installmentNumber) || prev.length || 0) + 1), amount: remaining || '' }];
+    });
+  }
+
+  function removeTimelineRow(index) {
+    setTimelineRows(prev => prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== index));
+  }
+
+  async function submitTimeline() {
+    if (!timelineTarget) return;
+    const rows = cleanTimelineRows(timelineRows);
+    const expected = Number(timelineTarget.netFee || 0);
+    const total = rows.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+    if (!rows.length) return toast.error('Add at least one timeline row');
+    if (rows.some(row => !row.paymentDate)) return toast.error('Payment date is required for every installment row');
+    if (expected > 0 && total !== expected) return toast.error(`Installment total must match net fee. Net fee is ${fmt(expected)}, installment total is ${fmt(total)}.`);
+    setSaving(true);
+    try {
+      await paymentsApi.updateInstallmentTimeline(timelineTarget.paymentId, { installments: rows });
+      toast.success('Installment timeline saved');
+      setTimelineTarget(null);
+      setTimelineRows([blankTimelineRow(1)]);
+      await load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function submitPaid() {
@@ -406,15 +477,18 @@ export default function PaymentCoordinatorPage() {
 
       <div className="overflow-hidden rounded-lg border bg-card">
         {students.length === 0 ? (
-          <div className="py-16 text-center text-sm text-muted-foreground">No installment records found</div>
+          <div className="py-16 text-center text-sm text-muted-foreground">No payment timeline records found</div>
         ) : (
           <div className="divide-y">
             {students.map(student => {
               const open = openId === String(student.studentId);
               const totalDue = student.installments.reduce((s, r) => s + Math.max(0, (r.installment?.amount || 0) - (r.installment?.paidAmount || 0)), 0);
+              const pendingVerification = (student.transactions || [])
+                .filter(tx => ['pending_counselor', 'pending_accountant'].includes(tx.verificationStatus || ''))
+                .reduce((sum, tx) => sum + (Number(tx.amount || 0) || 0), 0);
               return (
                 <div key={student.studentId}>
-                  <button type="button" onClick={() => setOpenId(open ? '' : String(student.studentId))} className="grid w-full gap-3 p-4 text-left hover:bg-muted/30 lg:grid-cols-[1.3fr_.8fr_.8fr_auto] lg:items-center">
+                  <button type="button" onClick={() => setOpenId(open ? '' : String(student.studentId))} className="grid w-full gap-3 p-4 text-left hover:bg-muted/30 xl:grid-cols-[1.35fr_1.35fr_auto] xl:items-center">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Link to={`/students/${student.studentId}`} onClick={e => e.stopPropagation()} className="font-semibold text-foreground hover:text-primary">{student.studentName}</Link>
@@ -424,9 +498,43 @@ export default function PaymentCoordinatorPage() {
                       <div className="mt-1 text-sm text-muted-foreground">{student.centerName || 'Center'} · {student.courseName || 'Course'} {student.courseYear || ''}</div>
                       <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">{student.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" />{student.phone}</span>}{student.email && <span>{student.email}</span>}</div>
                     </div>
-                    <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(student.paidAmount)}</div></div>
-                    <div><div className="text-xs text-muted-foreground">Balance</div><div className="font-semibold text-amber-700">{fmt(totalDue)}</div></div>
+                    <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+                        <div className="text-[11px] text-muted-foreground">Total Fee</div>
+                        <div className="font-semibold">{fmt(student.totalFee)}</div>
+                      </div>
+                      <div className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5">
+                        <div className="text-[11px] text-muted-foreground">Net Fee</div>
+                        <div className="font-semibold text-blue-700">{fmt(student.netFee)}</div>
+                      </div>
+                      <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+                        <div className="text-[11px] text-muted-foreground">Verified Paid</div>
+                        <div className="font-semibold text-emerald-700">{fmt(student.paidAmount)}</div>
+                      </div>
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5">
+                        <div className="text-[11px] text-muted-foreground">Outstanding</div>
+                        <div className="font-semibold text-amber-700">{fmt(student.dueAmount)}</div>
+                      </div>
+                      <div className="rounded-md border border-purple-200 bg-purple-50 px-2 py-1.5">
+                        <div className="text-[11px] text-muted-foreground">Timeline Due</div>
+                        <div className="font-semibold text-purple-700">{fmt(totalDue)}</div>
+                      </div>
+                      {pendingVerification > 0 && (
+                        <div className="rounded-md border border-orange-200 bg-orange-50 px-2 py-1.5 md:col-span-5">
+                          <div className="text-[11px] text-muted-foreground">Payment Verification Pending</div>
+                          <div className="font-semibold text-orange-700">{fmt(pendingVerification)}</div>
+                        </div>
+                      )}
+                    </div>
                     <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={e => { e.stopPropagation(); openTimeline(student); }}
+                      >
+                        Edit Timeline
+                      </Button>
                       <Button
                         type="button"
                         size="icon"
@@ -450,6 +558,7 @@ export default function PaymentCoordinatorPage() {
                           const paid = row.bucket === 'paid';
                           const overdue = row.bucket === 'overdue';
                           const actualPaidAt = row.actualPaidAt || inst.actualPaidAt || inst.paidAt;
+                          const pendingTx = row.pendingTransaction || inst.pendingTransaction || null;
                           return (
                             <div key={inst._id} className="grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-[.8fr_1fr_.9fr_.8fr_auto] lg:items-center">
                               <div><div className="text-xs text-muted-foreground">Installment</div><div className="font-semibold">#{inst.installmentNumber}</div>{inst.reasonOrRequirement && <div className="text-xs text-muted-foreground">{inst.reasonOrRequirement}</div>}</div>
@@ -458,13 +567,17 @@ export default function PaymentCoordinatorPage() {
                                 <div className="font-semibold">{fmtDt(row.paymentDate)}</div>
                                 {paid ? (
                                   <div className="mt-1 text-xs font-semibold text-emerald-700">Paid on: {fmtDt(actualPaidAt)}</div>
+                                ) : pendingTx ? (
+                                  <div className="mt-1 text-xs font-semibold text-amber-700">
+                                    Verification pending: {fmt(pendingTx.amount)} {pendingTx.mode || 'Payment'}{pendingTx.utrRef ? ` - ${pendingTx.utrRef}` : ''}
+                                  </div>
                                 ) : (
                                   <div className="text-xs">{row.daysLeft < 0 ? `${Math.abs(row.daysLeft)} days overdue` : `${row.daysLeft} days left`}</div>
                                 )}
                               </div>
                               <div className="grid grid-cols-3 gap-2 text-sm"><div><div className="text-xs text-muted-foreground">Fee</div><div className="font-semibold">{fmt(inst.amount)}</div></div><div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(inst.paidAmount)}</div></div><div><div className="text-xs text-muted-foreground">Due</div><div className="font-semibold text-amber-700">{fmt(due)}</div></div></div>
-                              <Badge className={cn('w-fit border', STATUS_CLASS[inst.status] || STATUS_CLASS.Pending)} variant="outline">{String(inst.status || 'Pending').replace(/_/g, ' ')}</Badge>
-                              {!paid && <Button size="sm" onClick={() => openPay(student, row)}><Send className="mr-1 h-3.5 w-3.5" />Mark Paid</Button>}
+                              <Badge className={cn('w-fit border', pendingTx ? 'border-amber-200 bg-amber-50 text-amber-700' : STATUS_CLASS[inst.status] || STATUS_CLASS.Pending)} variant="outline">{pendingTx ? 'Verification Pending' : String(inst.status || 'Pending').replace(/_/g, ' ')}</Badge>
+                              {!paid && !pendingTx && <Button size="sm" onClick={() => openPay(student, row)}><Send className="mr-1 h-3.5 w-3.5" />Mark Paid</Button>}
                             </div>
                           );
                         })}
@@ -494,6 +607,58 @@ export default function PaymentCoordinatorPage() {
       </div>
         </>
       )}
+
+      <Dialog open={Boolean(timelineTarget)} onOpenChange={v => { if (!v) setTimelineTarget(null); }}>
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Payment Timeline</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm sm:grid-cols-4">
+              <div><div className="text-xs text-muted-foreground">Student</div><div className="font-semibold">{timelineTarget?.studentName}</div></div>
+              <div><div className="text-xs text-muted-foreground">Center</div><div className="font-semibold">{timelineTarget?.centerName || 'Center'}</div></div>
+              <div><div className="text-xs text-muted-foreground">Paid</div><div className="font-semibold text-emerald-700">{fmt(timelineTarget?.paidAmount)}</div></div>
+              <div><div className="text-xs text-muted-foreground">Net Fee</div><div className="font-semibold text-amber-700">{fmt(timelineTarget?.netFee)}</div></div>
+            </div>
+
+            <div className="space-y-3">
+              {timelineRows.map((row, idx) => (
+                <div key={idx} className="grid gap-3 rounded-lg border bg-card p-3 sm:grid-cols-[90px_1fr_1fr_1.4fr_auto] sm:items-end">
+                  <div>
+                    <Label className="text-xs">No.</Label>
+                    <Input type="number" min="1" value={row.installmentNumber || ''} onChange={e => updateTimelineRow(idx, 'installmentNumber', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Payment Date</Label>
+                    <Input type="date" value={row.paymentDate || ''} onChange={e => updateTimelineRow(idx, 'paymentDate', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Amount</Label>
+                    <Input type="number" min="0" value={row.amount || ''} onChange={e => updateTimelineRow(idx, 'amount', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Reason / Requirement</Label>
+                    <Input value={row.reasonOrRequirement || ''} onChange={e => updateTimelineRow(idx, 'reasonOrRequirement', e.target.value)} placeholder="Call note or payment condition" />
+                  </div>
+                  <Button type="button" variant="ghost" size="icon" className="text-red-600 hover:text-red-700" onClick={() => removeTimelineRow(idx)} disabled={timelineRows.length <= 1}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm">
+              <div>
+                Timeline Total: <b>{fmt(cleanTimelineRows(timelineRows).reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0))}</b>
+                <span className="ml-2 text-muted-foreground">Installment total must match net fee {fmt(timelineTarget?.netFee)}</span>
+              </div>
+              <Button type="button" variant="outline" onClick={addTimelineRow}>Add Row</Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTimelineTarget(null)}>Cancel</Button>
+            <Button onClick={submitTimeline} disabled={saving}>{saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}Save Timeline</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(payTarget)} onOpenChange={v => { if (!v) setPayTarget(null); }}>
         <DialogContent className="max-w-lg">

@@ -12,6 +12,7 @@ function normalizeInstallments(input) {
   if (!Array.isArray(input)) return undefined;
   return input
     .map((row, idx) => ({
+      ...(row._id ? { _id: row._id } : {}),
       installmentNumber: Number(row.installmentNumber || row.number || 0) || idx + 1,
       paymentDate: row.paymentDate ? new Date(row.paymentDate) : null,
       amount: Number(row.amount || row.fee || 0) || 0,
@@ -136,50 +137,86 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
   for (const payment of rowsSource) {
     if (!payment.student) continue;
     if (payment.student.applicationStatus === 'Draft') continue;
-    const feeTransactions = (payment.transactions || [])
+    const allFeeTransactions = (payment.transactions || [])
+      .filter(t => t.type === 'Fee')
+      .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
+    const feeTransactions = allFeeTransactions
       .filter(t => t.type === 'Fee' && ['verified', 'not_required'].includes(t.verificationStatus || 'not_required'))
       .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
-    const orderedInstallments = [...(payment.installments || [])].sort((a, b) => {
+    const plannedRows = payment.installments || [];
+    const timelineType = 'installments';
+    const orderedInstallments = [...plannedRows].sort((a, b) => {
       const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);
       return byDate || (a.installmentNumber || 0) - (b.installmentNumber || 0);
     });
     const paidDateByInstallment = {};
-    let requiredTotal = 0;
-    for (const planned of orderedInstallments) {
-      requiredTotal += Number(planned.amount || 0);
-      let paidTotal = 0;
-      const coveringTx = feeTransactions.find(tx => {
-        paidTotal += Number(tx.amount || 0);
-        return paidTotal >= requiredTotal;
-      });
-      if (coveringTx) paidDateByInstallment[String(planned._id)] = coveringTx.paidAt || coveringTx.createdAt;
+    const paidTxByInstallment = {};
+    if (timelineType === 'installments' || timelineType === 'dueTimeline') {
+      let requiredTotal = timelineType === 'dueTimeline' ? Number(payment.dueTimelineBasePaidAmount || 0) : 0;
+      for (const planned of orderedInstallments) {
+        requiredTotal += Number(planned.amount || 0);
+        let paidTotal = 0;
+        const coveringTx = feeTransactions.find(tx => {
+          paidTotal += Number(tx.amount || 0);
+          return paidTotal >= requiredTotal;
+        });
+        if (coveringTx) {
+          paidDateByInstallment[String(planned._id)] = coveringTx.paidAt || coveringTx.createdAt;
+          paidTxByInstallment[String(planned._id)] = coveringTx;
+        }
+      }
     }
-    for (const inst of payment.installments || []) {
+    const base = {
+      paymentId: payment._id,
+      studentId: payment.student._id,
+      studentName: payment.student.name,
+      phone: payment.student.phone || '',
+      email: payment.student.email || '',
+      courseName: payment.student.courseName || '',
+      courseYear: payment.student.courseYear || '',
+      enrollmentNumber: payment.student.enrollmentNumber || '',
+      applicationStatus: payment.student.applicationStatus || '',
+      centerName: payment.student.center?.name || payment.student.center?.organisationName || payment.center?.name || '',
+      counselorName: payment.student.counselor?.name || '',
+      universityName: payment.student.university?.name || payment.student.university?.shortName || '',
+      totalFee: payment.totalFee || 0,
+      netFee: payment.netFee || 0,
+      paidAmount: payment.paidAmount || 0,
+      dueAmount: payment.dueAmount || 0,
+      transactions: allFeeTransactions,
+      timelineType,
+    };
+    for (const inst of plannedRows) {
+      const actualPaidAt = paidDateByInstallment[String(inst._id)] || inst.paidAt || null;
+      const paidTransaction = paidTxByInstallment[String(inst._id)] || null;
+      const pendingTransaction = allFeeTransactions
+        .filter(tx => ['pending_counselor', 'pending_accountant'].includes(tx.verificationStatus || ''))
+        .find(tx => String(tx.installmentRef || '') === String(inst._id));
+      const installment = { ...inst, actualPaidAt, paidTransaction, pendingTransaction };
       const due = inst.paymentDate ? new Date(inst.paymentDate) : null;
-      if (!due || Number.isNaN(due.getTime())) continue;
+      if (!due || Number.isNaN(due.getTime())) {
+        rows.push({
+          ...base,
+          needsTimeline: true,
+          installment,
+          paymentDate: null,
+          actualPaidAt,
+          paidTransaction,
+          pendingTransaction,
+          daysLeft: null,
+          bucket: 'needs_timeline',
+        });
+        continue;
+      }
       due.setHours(0, 0, 0, 0);
       const daysLeft = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
       rows.push({
-        paymentId: payment._id,
-        studentId: payment.student._id,
-        studentName: payment.student.name,
-        phone: payment.student.phone || '',
-        email: payment.student.email || '',
-        courseName: payment.student.courseName || '',
-        courseYear: payment.student.courseYear || '',
-        enrollmentNumber: payment.student.enrollmentNumber || '',
-        applicationStatus: payment.student.applicationStatus || '',
-        centerName: payment.student.center?.name || payment.student.center?.organisationName || payment.center?.name || '',
-        counselorName: payment.student.counselor?.name || '',
-        universityName: payment.student.university?.name || payment.student.university?.shortName || '',
-        totalFee: payment.totalFee || 0,
-        netFee: payment.netFee || 0,
-        paidAmount: payment.paidAmount || 0,
-        dueAmount: payment.dueAmount || 0,
-        transactions: feeTransactions,
-        installment: { ...inst, actualPaidAt: paidDateByInstallment[String(inst._id)] || null },
+        ...base,
+        installment,
         paymentDate: inst.paymentDate,
-        actualPaidAt: paidDateByInstallment[String(inst._id)] || null,
+        actualPaidAt,
+        paidTransaction,
+        pendingTransaction,
         daysLeft,
         bucket: inst.status === 'Paid'
           ? 'paid'
@@ -201,14 +238,227 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
   res.json(rows);
 });
 
-exports.markInstallmentPaid = asyncHandler(async (req, res) => {
-  const payment = await Payment.findById(req.params.paymentId);
+exports.dueTimeline = asyncHandler(async (req, res) => {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  const payments = await Payment.find({
+    'installments.0': { $exists: false },
+    $or: [{ 'dueTimeline.0': { $exists: true } }, { dueAmount: { $gt: 0 } }],
+  })
+    .populate({
+      path: 'student',
+      select: 'name phone email courseName courseYear enrollmentNumber applicationStatus center counselor university',
+      populate: [
+        { path: 'center', select: 'name organisationName city' },
+        { path: 'counselor', select: 'name' },
+        { path: 'university', select: 'name shortName' },
+      ],
+    })
+    .populate('center', 'name organisationName city')
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role');
+
+  for (const payment of payments) await payment.save();
+
+  const rows = [];
+  for (const paymentDoc of payments) {
+    const payment = paymentDoc.toObject();
+    if (!payment.student || payment.student.applicationStatus === 'Draft') continue;
+
+    const allFeeTransactions = (payment.transactions || [])
+      .filter(t => t.type === 'Fee')
+      .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
+    const feeTransactions = allFeeTransactions
+      .filter(t => t.type === 'Fee' && ['verified', 'not_required'].includes(t.verificationStatus || 'not_required'))
+      .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
+
+    const base = {
+      paymentId: payment._id,
+      studentId: payment.student._id,
+      studentName: payment.student.name,
+      phone: payment.student.phone || '',
+      email: payment.student.email || '',
+      courseName: payment.student.courseName || '',
+      courseYear: payment.student.courseYear || '',
+      enrollmentNumber: payment.student.enrollmentNumber || '',
+      applicationStatus: payment.student.applicationStatus || '',
+      centerName: payment.student.center?.name || payment.student.center?.organisationName || payment.center?.name || '',
+      counselorName: payment.student.counselor?.name || '',
+      universityName: payment.student.university?.name || payment.student.university?.shortName || '',
+      totalFee: payment.totalFee || 0,
+      netFee: payment.netFee || 0,
+      paidAmount: payment.paidAmount || 0,
+      dueAmount: payment.dueAmount || 0,
+      transactions: allFeeTransactions,
+    };
+
+    const plannedRows = payment.dueTimeline || [];
+    if (!plannedRows.length && (payment.dueAmount || 0) > 0) {
+      rows.push({
+        ...base,
+        needsTimeline: true,
+        installment: { _id: `due-${payment._id}`, installmentNumber: 'Timeline', paymentDate: null, amount: payment.dueAmount || 0, paidAmount: 0, status: 'Pending', reasonOrRequirement: 'Create a payment timeline for the pending balance' },
+        paymentDate: null,
+        actualPaidAt: null,
+        daysLeft: null,
+        bucket: 'needs_timeline',
+      });
+      continue;
+    }
+
+    const paidDateByInstallment = {};
+    const paidTxByInstallment = {};
+    let requiredTotal = Number(payment.dueTimelineBasePaidAmount || 0);
+    for (const planned of [...plannedRows].sort((a, b) => new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0))) {
+      requiredTotal += Number(planned.amount || 0);
+      let paidTotal = 0;
+      const coveringTx = feeTransactions.find(tx => {
+        paidTotal += Number(tx.amount || 0);
+        return paidTotal >= requiredTotal;
+      });
+      if (coveringTx) {
+        paidDateByInstallment[String(planned._id)] = coveringTx.paidAt || coveringTx.createdAt;
+        paidTxByInstallment[String(planned._id)] = coveringTx;
+      }
+    }
+
+    for (const inst of plannedRows) {
+      const due = inst.paymentDate ? new Date(inst.paymentDate) : null;
+      const actualPaidAt = paidDateByInstallment[String(inst._id)] || inst.paidAt || null;
+      const paidTransaction = paidTxByInstallment[String(inst._id)] || null;
+      const pendingTransaction = allFeeTransactions
+        .filter(tx => ['pending_counselor', 'pending_accountant'].includes(tx.verificationStatus || ''))
+        .find(tx => String(tx.installmentRef || '') === String(inst._id));
+      const installment = { ...inst, actualPaidAt, paidTransaction, pendingTransaction };
+      if (!due || Number.isNaN(due.getTime())) {
+        rows.push({
+          ...base,
+          needsTimeline: true,
+          installment,
+          paymentDate: null,
+          actualPaidAt,
+          paidTransaction,
+          pendingTransaction,
+          daysLeft: null,
+          bucket: inst.status === 'Paid' ? 'paid' : 'needs_timeline',
+        });
+        continue;
+      }
+      due.setHours(0, 0, 0, 0);
+      const daysLeft = Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+      const isPaid = inst.status === 'Paid' || Number(inst.paidAmount || 0) >= Number(inst.amount || 0);
+      rows.push({
+        ...base,
+        installment,
+        paymentDate: inst.paymentDate,
+        actualPaidAt,
+        paidTransaction,
+        pendingTransaction,
+        daysLeft,
+        bucket: isPaid ? 'paid' : daysLeft < 0 ? 'overdue' : daysLeft <= 7 ? 'week' : 'upcoming',
+      });
+    }
+  }
+
+  const statusRank = { needs_timeline: 0, overdue: 1, week: 2, upcoming: 3, paid: 4 };
+  rows.sort((a, b) => (statusRank[a.bucket] - statusRank[b.bucket])
+    || (new Date(a.paymentDate || '9999-12-31') - new Date(b.paymentDate || '9999-12-31'))
+    || String(a.studentName).localeCompare(String(b.studentName)));
+  res.json(rows);
+});
+
+exports.updateDueTimeline = asyncHandler(async (req, res) => {
+  const payment = await Payment.findById(req.params.paymentId).populate('student', 'name applicationStatus');
   if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
-  const inst = payment.installments.id(req.params.installmentId);
+  if (!payment.student || payment.student.applicationStatus === 'Draft') {
+    const e = new Error('Payment timeline can be created after application submission'); e.status = 400; throw e;
+  }
+
+  await payment.save();
+  const rows = normalizeInstallments(req.body.timeline || req.body.installments || []);
+  if (!rows || rows.length === 0) {
+    const e = new Error('Add at least one timeline row'); e.status = 400; throw e;
+  }
+  if (rows.some(row => !row.paymentDate || Number.isNaN(new Date(row.paymentDate).getTime()))) {
+    const e = new Error('Payment date is required for every timeline row'); e.status = 400; throw e;
+  }
+
+  const dueAmount = Number(payment.dueAmount || 0);
+  if (dueAmount <= 0) {
+    const e = new Error('No pending balance is available for a payment timeline'); e.status = 400; throw e;
+  }
+
+  const total = rows.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+  if (total !== dueAmount) {
+    const e = new Error(`Timeline total must match pending balance. Pending balance is ₹${dueAmount.toLocaleString('en-IN')}, timeline total is ₹${total.toLocaleString('en-IN')}`);
+    e.status = 400;
+    throw e;
+  }
+
+  payment.dueTimeline = rows;
+  payment.dueTimelineBasePaidAmount = payment.paidAmount || 0;
+  await payment.save();
+  await notifyRole('PaymentCoordinator', {
+    message: `Payment timeline updated for ${payment.student.name}`,
+    type: 'installment_updated',
+    role: 'PaymentCoordinator',
+    studentId: payment.student._id,
+  });
+  await audit('payment_due_timeline_updated', 'Payment', payment._id, req.user, { rows: rows.length, dueAmount }, 'Payment due timeline updated');
+  const saved = await Payment.findById(payment._id)
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
+});
+
+exports.updateInstallmentTimeline = asyncHandler(async (req, res) => {
+  const payment = await Payment.findById(req.params.paymentId).populate('student', 'name applicationStatus');
+  if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  if (!payment.student || payment.student.applicationStatus === 'Draft') {
+    const e = new Error('Installment timeline can be changed after application submission'); e.status = 400; throw e;
+  }
+
+  const rows = normalizeInstallments(req.body.timeline || req.body.installments || []);
+  if (!rows || rows.length === 0) {
+    const e = new Error('Add at least one installment row'); e.status = 400; throw e;
+  }
+  if (rows.some(row => !row.paymentDate || Number.isNaN(new Date(row.paymentDate).getTime()))) {
+    const e = new Error('Payment date is required for every installment row'); e.status = 400; throw e;
+  }
+
+  const netFee = Math.max(0, Number(payment.netFee || ((payment.totalFee || 0) - (payment.discount || 0))));
+  const total = rows.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+  if (netFee > 0 && total !== netFee) {
+    const e = new Error(`Installment total must match net fee. Net fee is ₹${netFee.toLocaleString('en-IN')}, installment total is ₹${total.toLocaleString('en-IN')}`);
+    e.status = 400;
+    throw e;
+  }
+
+  payment.installments = rows;
+  await payment.save();
+  await notifyRole('PaymentCoordinator', {
+    message: `Installment timeline updated for ${payment.student.name}`,
+    type: 'installment_updated',
+    role: 'PaymentCoordinator',
+    studentId: payment.student._id,
+  });
+  await audit('payment_installment_timeline_updated', 'Payment', payment._id, req.user, { rows: rows.length, netFee }, 'Installment timeline updated');
+  const saved = await Payment.findById(payment._id)
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role');
+  res.json(await enrichPaymentDuplicateUtrs(saved));
+});
+
+exports.markInstallmentPaid = asyncHandler(async (req, res) => {
+  const payment = await Payment.findById(req.params.paymentId).populate('student', 'name counselor center');
+  if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
+  const inst = payment.installments.id(req.params.installmentId) || payment.dueTimeline.id(req.params.installmentId);
   if (!inst) { const e = new Error('Installment not found'); e.status = 404; throw e; }
 
   const amount = Number(req.body.amount || Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0)));
   if (!amount || amount <= 0) { const e = new Error('Amount must be positive'); e.status = 400; throw e; }
+  const needsVerification = req.user.role === 'PaymentCoordinator';
 
   payment.transactions.push({
     amount,
@@ -223,13 +473,32 @@ exports.markInstallmentPaid = asyncHandler(async (req, res) => {
     paidAt: req.body.paidAt ? new Date(req.body.paidAt) : new Date(),
     recordedBy: req.user._id,
     type: 'Fee',
-    verificationStatus: 'verified',
-    verifiedBy: req.user._id,
-    verifiedAt: new Date(),
+    installmentRef: inst._id,
+    verificationStatus: needsVerification ? 'pending_counselor' : 'verified',
+    verifiedBy: needsVerification ? undefined : req.user._id,
+    verifiedAt: needsVerification ? undefined : new Date(),
     paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
   });
   await payment.save();
-  await audit('installment_paid', 'Payment', payment._id, req.user, { installmentId: inst._id, amount }, `Installment payment recorded`);
+  if (needsVerification) {
+    const counselorUser = await User.findOne({ counselorId: payment.student?.counselor, isActive: true });
+    if (counselorUser) {
+      await notify(counselorUser._id, {
+        message: `Fee payment of ₹${amount} submitted by payment coordinator for ${payment.student?.name} - please verify and forward to accountant`,
+        type: 'payment_verified',
+        role: 'Counselor',
+        studentId: payment.student?._id,
+      });
+    } else {
+      await notifyRole('Counselor', {
+        message: `Fee payment of ₹${amount} submitted by payment coordinator for ${payment.student?.name} - please verify and forward to accountant`,
+        type: 'payment_verified',
+        role: 'Counselor',
+        studentId: payment.student?._id,
+      });
+    }
+  }
+  await audit('installment_paid', 'Payment', payment._id, req.user, { installmentId: inst._id, amount, verificationStatus: needsVerification ? 'pending_counselor' : 'verified' }, `Installment payment recorded`);
   const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role');

@@ -20,6 +20,7 @@ const transactionSchema = new mongoose.Schema({
   type:        { type: String, enum: ['Fee', 'Document'], default: 'Fee' },
   // If type=Document, link to which document
   documentRef: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentDocument' },
+  installmentRef: { type: mongoose.Schema.Types.ObjectId },
   // Verification flow for Fee payments added by Center
   verificationStatus: {
     type: String,
@@ -61,6 +62,10 @@ const paymentSchema = new mongoose.Schema({
   // Planned fee installments for payment follow-up.
   installments: [installmentSchema],
 
+  // Coordinator timeline for remaining balance on old or already-submitted students.
+  dueTimeline: [installmentSchema],
+  dueTimelineBasePaidAmount: { type: Number, default: 0 },
+
   notes: { type: String, trim: true },
 }, { timestamps: true });
 
@@ -83,6 +88,33 @@ paymentSchema.pre('save', function (next) {
     const applied = amount > 0 ? Math.min(amount, remainingPaid) : 0;
     inst.paidAmount = applied;
     if (amount > 0) remainingPaid = Math.max(0, remainingPaid - applied);
+    const dueDate = inst.paymentDate ? new Date(inst.paymentDate) : null;
+    if (dueDate) dueDate.setHours(0, 0, 0, 0);
+    if (amount > 0 && applied >= amount) {
+      inst.status = 'Paid';
+      if (!inst.paidAt) inst.paidAt = new Date();
+    } else if (amount > 0 && applied > 0) {
+      inst.status = 'Partially_Paid';
+      inst.paidAt = undefined;
+    } else if (dueDate && dueDate < today) {
+      inst.status = 'Overdue';
+      inst.paidAt = undefined;
+    } else {
+      inst.status = 'Pending';
+      inst.paidAt = undefined;
+    }
+  });
+
+  let remainingTimelinePaid = Math.max(0, (this.paidAmount || 0) - (this.dueTimelineBasePaidAmount || 0));
+  const timelineRows = [...(this.dueTimeline || [])].sort((a, b) => {
+    const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);
+    return byDate || (a.installmentNumber || 0) - (b.installmentNumber || 0);
+  });
+  timelineRows.forEach(inst => {
+    const amount = Number(inst.amount || 0);
+    const applied = amount > 0 ? Math.min(amount, remainingTimelinePaid) : 0;
+    inst.paidAmount = applied;
+    if (amount > 0) remainingTimelinePaid = Math.max(0, remainingTimelinePaid - applied);
     const dueDate = inst.paymentDate ? new Date(inst.paymentDate) : null;
     if (dueDate) dueDate.setHours(0, 0, 0, 0);
     if (amount > 0 && applied >= amount) {

@@ -598,6 +598,50 @@ export default function StudentDetailPage() {
                 </div>
               </div>
               {payment.notes && <p className="text-sm text-muted-foreground">Note: {payment.notes}</p>}
+              {(payment.installments?.length > 0 || payment.dueTimeline?.length > 0) && (
+                <div className="space-y-3">
+                  {payment.installments?.length > 0 && (
+                    <div className="rounded-lg border p-3">
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-1"><Clock className="h-4 w-4"/>Installment Timeline</h4>
+                      <div className="space-y-2">
+                        {[...payment.installments].sort((a,b)=>new Date(a.paymentDate||0)-new Date(b.paymentDate||0)).map(inst => {
+                          const due = Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0));
+                          return (
+                            <div key={inst._id || `${inst.installmentNumber}-${inst.paymentDate}`} className="grid gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm sm:grid-cols-[80px_1fr_1fr_1fr_120px] sm:items-center">
+                              <div className="font-semibold">#{inst.installmentNumber}</div>
+                              <div><div className="text-xs text-muted-foreground">Date</div><div className="font-medium">{fmtDt(inst.paymentDate)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">Amount</div><div className="font-medium">{fmt(inst.amount)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">Paid / Due</div><div><span className="text-emerald-700 font-medium">{fmt(inst.paidAmount)}</span> / <span className="text-amber-700 font-medium">{fmt(due)}</span></div></div>
+                              <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${inst.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : inst.status === 'Overdue' ? 'bg-red-100 text-red-700' : inst.status === 'Partially_Paid' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{String(inst.status || 'Pending').replace(/_/g, ' ')}</span>
+                              {inst.reasonOrRequirement && <div className="text-xs text-muted-foreground sm:col-span-5">{inst.reasonOrRequirement}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {payment.dueTimeline?.length > 0 && (
+                    <div className="rounded-lg border p-3">
+                      <h4 className="text-sm font-medium mb-2 flex items-center gap-1"><Clock className="h-4 w-4"/>Old Student Payment Timeline</h4>
+                      <div className="space-y-2">
+                        {[...payment.dueTimeline].sort((a,b)=>new Date(a.paymentDate||0)-new Date(b.paymentDate||0)).map(inst => {
+                          const due = Math.max(0, (inst.amount || 0) - (inst.paidAmount || 0));
+                          return (
+                            <div key={inst._id || `${inst.installmentNumber}-${inst.paymentDate}`} className="grid gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-sm sm:grid-cols-[80px_1fr_1fr_1fr_120px] sm:items-center">
+                              <div className="font-semibold">#{inst.installmentNumber}</div>
+                              <div><div className="text-xs text-muted-foreground">Date</div><div className="font-medium">{fmtDt(inst.paymentDate)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">Amount</div><div className="font-medium">{fmt(inst.amount)}</div></div>
+                              <div><div className="text-xs text-muted-foreground">Paid / Due</div><div><span className="text-emerald-700 font-medium">{fmt(inst.paidAmount)}</span> / <span className="text-amber-700 font-medium">{fmt(due)}</span></div></div>
+                              <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${inst.status === 'Paid' ? 'bg-emerald-100 text-emerald-700' : inst.status === 'Overdue' ? 'bg-red-100 text-red-700' : inst.status === 'Partially_Paid' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>{String(inst.status || 'Pending').replace(/_/g, ' ')}</span>
+                              {inst.reasonOrRequirement && <div className="text-xs text-muted-foreground sm:col-span-5">{inst.reasonOrRequirement}</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center py-10 border border-dashed rounded-lg">

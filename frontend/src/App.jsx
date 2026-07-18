@@ -22,6 +22,7 @@ const RejectedPaymentsPage      = lazy(() => import('@/pages/RejectedPaymentsPag
 const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
 const ChatPage             = lazy(() => import('@/pages/ChatPage'));
 const PaymentCoordinatorPage = lazy(() => import('@/pages/PaymentCoordinatorPage'));
+const OldPaymentTimelinePage = lazy(() => import('@/pages/OldPaymentTimelinePage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -48,7 +49,7 @@ const ROLE_ALLOWED = {
   Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
-  PaymentCoordinator: ['/payment-coordinator', '/center', '/students', '/students/', '/document-inventory', '/chat'],
+  PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
   Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
 };
 
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="settings"            element={<W><SettingsPage /></W>} />
           <Route path="chat"                element={<W><ChatPage /></W>} />
           <Route path="payment-coordinator" element={<W><PaymentCoordinatorPage /></W>} />
+          <Route path="payment-due-timeline" element={<W><OldPaymentTimelinePage /></W>} />
           <Route path="help"                element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />
