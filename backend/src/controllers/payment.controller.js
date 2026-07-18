@@ -8,17 +8,28 @@ const { audit, notify, notifyRole } = require('../utils/helpers');
 function normalizeInstallments(input) {
   if (!Array.isArray(input)) return undefined;
   return input
-    .map(row => ({
-      installmentNumber: Number(row.installmentNumber || row.number || 0),
+    .map((row, idx) => ({
+      installmentNumber: Number(row.installmentNumber || row.number || 0) || idx + 1,
       paymentDate: row.paymentDate ? new Date(row.paymentDate) : null,
       amount: Number(row.amount || row.fee || 0) || 0,
       reasonOrRequirement: String(row.reasonOrRequirement || row.reason || '').trim(),
     }))
-    .filter(row => row.installmentNumber > 0 && row.paymentDate && !Number.isNaN(row.paymentDate.getTime()))
+    .filter(row => row.installmentNumber > 0
+      && (row.amount > 0 || row.reasonOrRequirement || (row.paymentDate && !Number.isNaN(row.paymentDate.getTime()))))
     .sort((a, b) => {
-      const byDate = a.paymentDate - b.paymentDate;
+      const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);
       return byDate || a.installmentNumber - b.installmentNumber;
     });
+}
+
+function validateInstallmentTotal(installments = [], netFee = 0) {
+  if (!installments.length) return '';
+  const expected = Math.max(0, Number(netFee || 0));
+  if (!expected) return '';
+  const total = installments.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+  if (total < expected) return `Installment total is short by ₹${(expected - total).toLocaleString('en-IN')}`;
+  if (total > expected) return `Fee and installment total mismatch. Net fee is ₹${expected.toLocaleString('en-IN')}, installment total is ₹${total.toLocaleString('en-IN')}`;
+  return '';
 }
 
 function wantsCenterFlow(req) {
@@ -33,6 +44,8 @@ async function canActForStudentCenter(req, student) {
 }
 
 exports.get = asyncHandler(async (req, res) => {
+  const existing = await Payment.findOne({ student: req.params.studentId });
+  if (existing) await existing.save();
   const payment = await Payment.findOne({ student: req.params.studentId })
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
@@ -72,6 +85,11 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   if (discount !== undefined) payment.discount  = Number(discount) || 0;
   if (notes    !== undefined) payment.notes     = notes;
   const installments = normalizeInstallments(req.body.installments);
+  if (installments !== undefined) {
+    const netFee = Math.max(0, (payment.totalFee || 0) - (payment.discount || 0));
+    const totalError = validateInstallmentTotal(installments, netFee);
+    if (totalError) { const e = new Error(totalError); e.status = 400; throw e; }
+  }
   if (installments !== undefined) payment.installments = installments;
   await payment.save();
 
@@ -106,15 +124,16 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
     })
     .populate('center', 'name organisationName city')
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role')
-    .lean();
+    .populate('transactions.verifiedBy', 'name role');
+  for (const payment of payments) await payment.save();
+  const rowsSource = payments.map(payment => payment.toObject());
 
   const rows = [];
-  for (const payment of payments) {
+  for (const payment of rowsSource) {
     if (!payment.student) continue;
     if (payment.student.applicationStatus === 'Draft') continue;
     const feeTransactions = (payment.transactions || [])
-      .filter(t => t.type === 'Fee')
+      .filter(t => t.type === 'Fee' && ['verified', 'not_required'].includes(t.verificationStatus || 'not_required'))
       .sort((a, b) => new Date(a.paidAt || a.createdAt || 0) - new Date(b.paidAt || b.createdAt || 0));
     const orderedInstallments = [...(payment.installments || [])].sort((a, b) => {
       const byDate = new Date(a.paymentDate || 0) - new Date(b.paymentDate || 0);

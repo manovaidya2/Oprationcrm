@@ -8,6 +8,28 @@ const Center     = require('../models/Center');
 const University = require('../models/University');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
+const SUBMISSION_DOC_NAME = 'Upload All Documents (Single PDF)';
+const MAX_SUBMISSION_PDF_BYTES = 10 * 1024 * 1024;
+
+function validateSubmissionFiles(files = []) {
+  const submissionFiles = files.filter(file => /^submissionFile_[0-9]+$/.test(file.fieldname || ''));
+  for (const file of submissionFiles) {
+    const isPdf = file.mimetype === 'application/pdf' || file.originalname?.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      const e = new Error('Please upload a PDF file only for student documents'); e.status = 400; throw e;
+    }
+    if (file.size > MAX_SUBMISSION_PDF_BYTES) {
+      const e = new Error('Student documents PDF must be 10 MB or less'); e.status = 400; throw e;
+    }
+  }
+}
+
+function normalizeSubmissionDocs(docs = []) {
+  const first = docs.find(d => d?.fileUrl) || docs[0];
+  if (!first) return [];
+  return [{ ...first, name: SUBMISSION_DOC_NAME }];
+}
+
 // ── Push a status history entry ──────────────────────────────
 async function pushHistory(studentId, status, user, note = '') {
   await Student.findByIdAndUpdate(studentId, {
@@ -257,11 +279,12 @@ exports.update = asyncHandler(async (req, res) => {
 
   const updateData = { ...req.body };
   let parsedDocs = null;
+  validateSubmissionFiles(req.files || []);
   if (req.body.submissionDocs) {
     try {
       const parsed = typeof req.body.submissionDocs === 'string'
         ? JSON.parse(req.body.submissionDocs) : req.body.submissionDocs;
-      if (Array.isArray(parsed)) { parsedDocs = parsed.filter(d => d.name?.trim()); updateData.submissionDocs = parsedDocs; }
+      if (Array.isArray(parsed)) { parsedDocs = normalizeSubmissionDocs(parsed.filter(d => d.name?.trim() || d.fileUrl)); updateData.submissionDocs = parsedDocs; }
     } catch {}
   }
   if (req.files && req.files.length > 0 && parsedDocs) {
@@ -424,36 +447,43 @@ exports.submit = asyncHandler(async (req, res) => {
     if (notes !== undefined) payment.notes = notes || '';
     if (Array.isArray(installments)) {
       payment.installments = installments
-        .map(row => ({
-          installmentNumber: Number(row.installmentNumber || 0),
+        .map((row, idx) => ({
+          installmentNumber: Number(row.installmentNumber || 0) || idx + 1,
           paymentDate: row.paymentDate ? new Date(row.paymentDate) : null,
           amount: Number(row.amount || 0) || 0,
           reasonOrRequirement: String(row.reasonOrRequirement || '').trim(),
         }))
-        .filter(row => row.installmentNumber > 0 && row.paymentDate && !Number.isNaN(row.paymentDate.getTime()));
+        .filter(row => row.installmentNumber > 0
+          && (row.amount > 0 || row.reasonOrRequirement || (row.paymentDate && !Number.isNaN(row.paymentDate.getTime()))));
+      if (payment.installments.length > 0) {
+        const expected = Math.max(0, (payment.totalFee || 0) - (payment.discount || 0));
+        const total = payment.installments.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+        if (expected > 0 && total !== expected) {
+          const e = new Error(total < expected
+            ? `Installment total is short by ₹${(expected - total).toLocaleString('en-IN')}`
+            : `Fee and installment total mismatch. Net fee is ₹${expected.toLocaleString('en-IN')}, installment total is ₹${total.toLocaleString('en-IN')}`);
+          e.status = 400; throw e;
+        }
+      }
     }
     await payment.save();
   }
 
-  const paymentForSubmit = await Payment.findOne({ student: s._id }).select('installments totalFee').lean();
-  if (!paymentForSubmit || !(paymentForSubmit.installments || []).length) {
-    const e = new Error('Please add installment timeline before submitting the application'); e.status = 400; throw e;
-  }
-
+  validateSubmissionFiles(req.files || []);
   if (req.body.submissionDocs) {
     try {
       const parsed = typeof req.body.submissionDocs === 'string'
         ? JSON.parse(req.body.submissionDocs) : req.body.submissionDocs;
-      if (Array.isArray(parsed)) s.submissionDocs = parsed.filter(d => d.name?.trim());
+      if (Array.isArray(parsed)) s.submissionDocs = normalizeSubmissionDocs(parsed.filter(d => d.name?.trim() || d.fileUrl));
     } catch {}
   }
   if (req.files && req.files.length > 0) {
-    const docNames = req.body.submissionDocNames ? req.body.submissionDocNames.split(',') : [];
-    const existing = s.submissionDocs || [];
-    req.files.forEach((file, i) => {
-      existing.push({ name: docNames[i]?.trim() || file.originalname, fileUrl: `/uploads/${file.filename}`, sizeKb: Math.round(file.size/1024) });
-    });
-    s.submissionDocs = existing;
+    const file = req.files.find(f => /^submissionFile_[0-9]+$/.test(f.fieldname || '')) || req.files[0];
+    s.submissionDocs = [{
+      name: SUBMISSION_DOC_NAME,
+      fileUrl: `/uploads/${file.filename}`,
+      sizeKb: Math.round(file.size/1024),
+    }];
   }
 
   const updated = await Student.findByIdAndUpdate(
@@ -992,6 +1022,20 @@ exports.remove = asyncHandler(async (req, res) => {
   const id = req.params.id;
 
   const student = await Student.findById(id).lean();
+  if (!student) {
+    const e = new Error('Student not found'); e.status = 404; throw e;
+  }
+
+  if (req.user.role !== 'Admin') {
+    if (student.applicationStatus !== 'Draft') {
+      const e = new Error('Only draft students can be deleted'); e.status = 400; throw e;
+    }
+    const allowed = await canUseCenterFlow(req, student.center);
+    if (!allowed) {
+      const e = new Error('Forbidden'); e.status = 403; throw e;
+    }
+  }
+
   const studentName = student?.name || id;
 
   // Delete all related records
@@ -1000,6 +1044,6 @@ exports.remove = asyncHandler(async (req, res) => {
   await StudentDocument.deleteMany({ student: id });
   await Notification.deleteMany({ studentId: id });
 
-  await audit('student_deleted', 'Student', id, req.user, { studentName }, `Student "${studentName}" permanently deleted with all related records by Admin`);
+  await audit('student_deleted', 'Student', id, req.user, { studentName, applicationStatus: student.applicationStatus }, `Student "${studentName}" permanently deleted with all related records by ${req.user.role}`);
   res.status(204).end();
 });

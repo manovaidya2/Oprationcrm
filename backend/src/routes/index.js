@@ -84,7 +84,7 @@ router.get   ('/students',     protect, studentC.list);
 router.get   ('/students/:id', protect, studentC.get);
 router.post  ('/students',     protect, requireRole('Admin','Counselor','Center','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.create);
 router.put   ('/students/:id', protect, requireRole('Admin','Counselor','Center','PaymentCoordinator'), upload.any(), studentC.update);
-router.delete('/students/:id', protect, requireRole('Admin'), studentC.remove);
+router.delete('/students/:id', protect, requireRole('Admin','Center','Counselor','PaymentCoordinator'), studentC.remove);
 
 // Application flow
 router.post('/students/:id/submit',            protect, requireRole('Admin','Center','Counselor','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.submit);

@@ -85,7 +85,7 @@ export const studentsApi = {
   getOne:          (id)          => request(`/students/${id}`),
   create:          (data)        => request('/students', { method: 'POST', body: JSON.stringify(data) }),
   update:          (id, data)    => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete:          (id)          => request(`/students/${id}`, { method: 'DELETE' }),
+  delete:          (id, data)    => request(`/students/${id}`, { method: 'DELETE', body: JSON.stringify(data || {}) }),
   // Flow actions
   submit:          (id, data)    => request(`/students/${id}/submit`, { method: 'POST', body: JSON.stringify(data || {}) }),
   approve:         (id)          => request(`/students/${id}/approve`, { method: 'POST' }),

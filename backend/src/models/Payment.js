@@ -36,7 +36,7 @@ const transactionSchema = new mongoose.Schema({
 
 const installmentSchema = new mongoose.Schema({
   installmentNumber: { type: Number, required: true, min: 1 },
-  paymentDate:       { type: Date, required: true },
+  paymentDate:       { type: Date },
   amount:            { type: Number, default: 0, min: 0 },
   reasonOrRequirement: { type: String, trim: true },
   paidAmount:        { type: Number, default: 0 },
@@ -52,7 +52,7 @@ const paymentSchema = new mongoose.Schema({
   totalFee:   { type: Number, default: 0 },
   discount:   { type: Number, default: 0 },
   netFee:     { type: Number, default: 0 },  // auto = totalFee - discount
-  paidAmount: { type: Number, default: 0 },  // auto = sum of Fee transactions
+  paidAmount: { type: Number, default: 0 },  // auto = sum of verified/not-required Fee transactions
   dueAmount:  { type: Number, default: 0 },  // auto = netFee - paidAmount
 
   // All transactions (fee + document)
@@ -68,7 +68,7 @@ const paymentSchema = new mongoose.Schema({
 paymentSchema.pre('save', function (next) {
   this.netFee     = Math.max(0, (this.totalFee || 0) - (this.discount || 0));
   this.paidAmount = this.transactions
-    .filter(t => t.type === 'Fee')
+    .filter(t => t.type === 'Fee' && ['verified', 'not_required'].includes(t.verificationStatus || 'not_required'))
     .reduce((s, t) => s + (t.amount || 0), 0);
   this.dueAmount  = Math.max(0, this.netFee - this.paidAmount);
   let remainingPaid = this.paidAmount || 0;

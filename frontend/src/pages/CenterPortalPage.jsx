@@ -28,21 +28,22 @@ const blankInstallment = (n = 1) => ({ installmentNumber: n, paymentDate: '', am
 
 function cleanInstallments(rows = []) {
   return rows
-    .map(r => ({
-      installmentNumber: Number(r.installmentNumber || 0),
+    .map((r, idx) => ({
+      installmentNumber: Number(r.installmentNumber || 0) || idx + 1,
       paymentDate: r.paymentDate || '',
       amount: r.amount === '' || r.amount == null ? 0 : Number(r.amount),
       reasonOrRequirement: r.reasonOrRequirement || '',
     }))
-    .filter(r => r.installmentNumber > 0 && r.paymentDate);
+    .filter(r => r.installmentNumber > 0 && (r.paymentDate || r.amount || r.reasonOrRequirement));
 }
 
-function validateInstallments(rows = []) {
-  const activeRows = rows.filter(r => r.installmentNumber || r.paymentDate || r.amount || r.reasonOrRequirement);
-  for (const row of activeRows) {
-    if (!row.installmentNumber || Number(row.installmentNumber) <= 0) return 'Installment number required';
-    if (!row.paymentDate) return `Payment date required for installment #${row.installmentNumber}`;
-  }
+function validateInstallments(rows = [], netFee = 0) {
+  const activeRows = rows.filter(r => r.paymentDate || r.amount || r.reasonOrRequirement);
+  if (!activeRows.length) return '';
+  const expected = Math.max(0, Number(netFee || 0));
+  const total = activeRows.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+  if (expected > 0 && total < expected) return `Installment total is ${fmt(total)}. Please add remaining installment amount of ${fmt(expected - total)}.`;
+  if (expected > 0 && total > expected) return `Fee and installment total mismatch. Net fee is ${fmt(expected)}, installment total is ${fmt(total)}.`;
   return '';
 }
 
@@ -59,19 +60,27 @@ function dateInputValue(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
 }
 
-function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
+function InstallmentTimelineEditor({ rows, setRows, compact = false, expectedAmount = 0 }) {
   const update = (idx, key, value) => setRows(prev => prev.map((row, i) => i === idx ? { ...row, [key]: value } : row));
-  const add = () => setRows(prev => [...prev, blankInstallment((Number(prev.at(-1)?.installmentNumber) || prev.length || 0) + 1)]);
+  const add = () => setRows(prev => {
+    const paidTotal = prev.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+    const remaining = Math.max(0, Number(expectedAmount || 0) - paidTotal);
+    return [...prev, { ...blankInstallment((Number(prev.at(-1)?.installmentNumber) || prev.length || 0) + 1), amount: remaining || '' }];
+  });
   const remove = idx => setRows(prev => prev.length <= 1 ? [blankInstallment(1)] : prev.filter((_, i) => i !== idx));
   const openDatePicker = event => {
     try { event.currentTarget.showPicker?.(); } catch {}
   };
+  const activeRows = rows.filter(r => r.paymentDate || r.amount || r.reasonOrRequirement);
+  const installmentTotal = activeRows.reduce((sum, row) => sum + (Number(row.amount || 0) || 0), 0);
+  const expected = Math.max(0, Number(expectedAmount || 0));
+  const balance = expected ? expected - installmentTotal : 0;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <Label className="text-xs font-semibold text-slate-600">Installment Timeline</Label>
-          <p className="text-xs text-slate-400">Installment number and payment date are mandatory.</p>
+          <p className="text-xs text-slate-400">Optional. If added, total installment fees must match net fee.</p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={add} className="border-slate-200">
           <Plus className="h-3.5 w-3.5 mr-1" />Add
@@ -82,11 +91,11 @@ function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
           <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
             <div className={compact ? 'grid gap-2 sm:grid-cols-[88px_150px_120px_minmax(150px,1fr)_36px]' : 'grid gap-2 sm:grid-cols-[110px_1fr_1fr_1.5fr_auto]'}>
               <div>
-                <Label className="text-[11px] text-slate-500">No. *</Label>
+                <Label className="text-[11px] text-slate-500">No.</Label>
                 <Input type="number" min="1" value={row.installmentNumber || ''} onChange={e => update(idx, 'installmentNumber', e.target.value)} className="mt-1 h-9 border-slate-200" />
               </div>
               <div>
-                <Label className="text-[11px] text-slate-500">Date *</Label>
+                <Label className="text-[11px] text-slate-500">Date</Label>
                 <Input
                   type="date"
                   value={dateInputValue(row.paymentDate)}
@@ -111,6 +120,12 @@ function InstallmentTimelineEditor({ rows, setRows, compact = false }) {
           </div>
         ))}
       </div>
+      {expected > 0 && activeRows.length > 0 && (
+        <div className={`rounded-lg border px-3 py-2 text-xs font-semibold ${balance === 0 ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : balance > 0 ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+          Installment total {fmt(installmentTotal)}
+          {balance > 0 ? ` · Remaining ${fmt(balance)}` : balance < 0 ? ` · Extra ${fmt(Math.abs(balance))}` : ' · Matched with net fee'}
+        </div>
+      )}
     </div>
   );
 }
@@ -494,13 +509,16 @@ function CancelledBanner({ student, onSettlementRequested }) {
   );
 }
 
-// Default documents checklist
-const DEFAULT_DOCS = [
-  'Aadhaar Card','10th Marksheet','10th Certificate',
-  '12th Marksheet','12th Certificate','Migration Certificate',
-  'Transfer Certificate','Passport Size Photo',
-  'Caste Certificate (if applicable)','Income Certificate (if applicable)',
-];
+const SUBMISSION_DOC_NAME = 'Upload All Documents (Single PDF)';
+const MAX_SUBMISSION_PDF_BYTES = 10 * 1024 * 1024;
+
+function validateSubmissionPdf(file) {
+  if (!file) return '';
+  const isPdf = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+  if (!isPdf) return 'Please upload a PDF file only.';
+  if (file.size > MAX_SUBMISSION_PDF_BYTES) return 'PDF size must be 10 MB or less.';
+  return '';
+}
 
 const EMPTY_STUDENT = {
   name:'', fatherName:'', motherName:'', dob:'', age:'',
@@ -570,8 +588,6 @@ function FieldGroup({ label, children }) {
 function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
   const [step,   setStep]   = useState(1);
   const [saving, setSaving] = useState(false);
-  const fileRefs = useRef([]);
-
   const [form, setForm] = useState({ ...EMPTY_STUDENT });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -594,19 +610,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
   const [feeInstallments, setFeeInstallments] = useState([blankInstallment(1)]);
   const setF = (k, v) => setFee(p => ({ ...p, [k]: v }));
 
-  const [docList, setDocList] = useState(
-    DEFAULT_DOCS.map(name => ({ name, checked: true, file: null }))
-  );
-  const [customDoc, setCustomDoc] = useState('');
-
-  function toggleDoc(i)    { setDocList(p => p.map((d,j) => j===i ? {...d, checked:!d.checked} : d)); }
-  function setDocFile(i,f) { setDocList(p => p.map((d,j) => j===i ? {...d, file:f} : d)); }
-  function addCustomDoc() {
-    if (!customDoc.trim()) return;
-    setDocList(p => [...p, { name: customDoc.trim(), checked: true, file: null }]);
-    setCustomDoc('');
-  }
-  function removeDoc(i) { setDocList(p => p.filter((_,j) => j !== i)); }
+  const [submissionPdf, setSubmissionPdf] = useState(null);
 
   const netFee = Number(fee.totalFee||0) - Number(fee.discount||0);
 
@@ -617,9 +621,11 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
     if (!form.universityId)      return toast.error('Please select a university');
     if (!defCounselor)           return toast.error('No counselor assigned. Contact admin.');
     if (fee.totalFee && Number(fee.totalFee) > 0) {
-      const err = validateInstallments(feeInstallments);
+      const err = validateInstallments(feeInstallments, netFee);
       if (err) return toast.error(err);
     }
+    const docErr = validateSubmissionPdf(submissionPdf);
+    if (docErr) return toast.error(docErr);
     setSaving(true);
     try {
       const student = await studentsApi.create({ ...form, counselor: defCounselor, center: centerId });
@@ -629,19 +635,23 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
           installments: cleanInstallments(feeInstallments),
         });
       }
-      const checkedDocs = docList.filter(d => d.checked);
-      if (checkedDocs.length > 0) {
+      if (submissionPdf) {
         const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
         const token = localStorage.getItem('crm_token');
         const fd = new FormData();
-        fd.append('submissionDocs', JSON.stringify(checkedDocs.map(d => ({ name: d.name, fileUrl: '' }))));
-        checkedDocs.forEach((d, i) => { if (d.file) fd.append(`submissionFile_${i}`, d.file); });
-        fd.append('submissionDocCount', String(checkedDocs.length));
-        await fetch(`${BASE}/students/${student._id}`, {
+        fd.append('submissionDocs', JSON.stringify([{ name: SUBMISSION_DOC_NAME, fileUrl: '' }]));
+        fd.append('submissionFile_0', submissionPdf);
+        fd.append('submissionDocCount', '1');
+        fd.append('actingAsCenter', 'true');
+        const res = await fetch(`${BASE}/students/${student._id}`, {
           method: 'PUT',
           headers: { Authorization: `Bearer ${token}` },
           body: fd,
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to upload documents');
+        }
       }
       toast.success('Student added successfully!');
       onSaved();
@@ -773,35 +783,31 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
             </div>
           </FieldGroup>
 
-          <FieldGroup label="Documents Checklist">
-            <p className="text-xs text-slate-400 mb-3">Tick documents that are available / will be submitted</p>
-            <div className="space-y-1.5">
-              {docList.map((doc, i) => (
-                <div key={i} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all ${
-                  doc.checked
-                    ? 'bg-emerald-50 border-emerald-200'
-                    : 'bg-slate-50 border-slate-200 opacity-60'
-                }`}>
-                  <input type="checkbox" checked={doc.checked} onChange={() => toggleDoc(i)}
-                    className="h-4 w-4 rounded accent-emerald-600 flex-shrink-0"/>
-                  <span className={`flex-1 text-sm font-medium ${doc.checked ? 'text-slate-700' : 'text-slate-400 line-through'}`}>{doc.name}</span>
-                  {doc.checked && (
-                    <input type="file" accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={e => setDocFile(i, e.target.files[0])}
-                      className="text-xs w-28 file:text-xs file:bg-white file:border file:border-slate-200 file:rounded file:px-2 file:py-0.5 file:mr-2 file:text-slate-600"/>
-                  )}
-                  <button onClick={() => removeDoc(i)} className="text-slate-300 hover:text-red-400 transition-colors flex-shrink-0">
-                    <Trash2 className="h-3.5 w-3.5"/>
-                  </button>
+          <FieldGroup label="Documents Upload">
+            <p className="text-xs text-slate-400 mb-3">Upload all student documents in one PDF file. Maximum file size: 10 MB.</p>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-700">{SUBMISSION_DOC_NAME}</p>
+                  <p className="text-xs text-slate-400">Accepted format: PDF only.</p>
+                  {submissionPdf && <p className="mt-1 truncate text-xs font-medium text-emerald-700">{submissionPdf.name}</p>}
                 </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                <Input value={customDoc} onChange={e => setCustomDoc(e.target.value)}
-                  placeholder="Add custom document…" className="flex-1 text-sm h-9 border-slate-200"
-                  onKeyDown={e => e.key === 'Enter' && addCustomDoc()}/>
-                <Button size="sm" variant="outline" onClick={addCustomDoc} className="h-9 border-slate-200 text-slate-600">
-                  <Plus className="h-3.5 w-3.5 mr-1"/>Add
-                </Button>
+                <input
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  onChange={e => {
+                    const file = e.target.files?.[0] || null;
+                    const err = validateSubmissionPdf(file);
+                    if (err) {
+                      toast.error(err);
+                      e.target.value = '';
+                      setSubmissionPdf(null);
+                      return;
+                    }
+                    setSubmissionPdf(file);
+                  }}
+                  className="text-xs file:mr-2 file:rounded file:border file:border-slate-200 file:bg-white file:px-3 file:py-1.5 file:text-xs file:text-slate-600"
+                />
               </div>
             </div>
           </FieldGroup>
@@ -849,7 +855,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
             </div>
 
             <div className="mt-4">
-              <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} />
+                <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} expectedAmount={netFee} />
             </div>
           </FieldGroup>
 
@@ -912,21 +918,20 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 
           <div className="rounded-xl border border-slate-200 overflow-hidden">
             <div className="bg-slate-50 px-4 py-2.5 flex items-center justify-between border-b border-slate-200">
-              <span className="font-semibold text-sm text-slate-700 flex items-center gap-2"><FileText className="h-4 w-4 text-slate-400"/>Documents ({docList.filter(d=>d.checked).length})</span>
+              <span className="font-semibold text-sm text-slate-700 flex items-center gap-2"><FileText className="h-4 w-4 text-slate-400"/>Documents</span>
               <button onClick={() => setStep(1)} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1">
                 <Pencil className="h-3 w-3"/>Edit
               </button>
             </div>
-            <div className="p-4 flex flex-wrap gap-2">
-              {docList.filter(d => d.checked).map((d,i) => (
-                <span key={i} className="text-xs flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full px-3 py-1 font-medium">
-                  <CheckCircle2 className="h-3 w-3"/>
-                  {d.name}{d.file ? ' 📎' : ''}
+            <div className="p-4">
+              {submissionPdf ? (
+                <span className="text-xs inline-flex max-w-full items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-medium text-emerald-700">
+                  <CheckCircle2 className="h-3 w-3 flex-shrink-0"/>
+                  <span className="truncate">{SUBMISSION_DOC_NAME}: {submissionPdf.name}</span>
                 </span>
-              ))}
-              {docList.filter(d => !d.checked).map((d,i) => (
-                <span key={i} className="text-xs text-slate-400 line-through bg-slate-50 border border-slate-200 rounded-full px-3 py-1">{d.name}</span>
-              ))}
+              ) : (
+                <p className="text-sm text-slate-400 italic">No PDF uploaded</p>
+              )}
             </div>
           </div>
         </div>
@@ -996,7 +1001,7 @@ function FeeSection({ studentId, appStatus, student }) {
 
   async function saveFee(){
     if(!ff.totalFee) return toast.error('Total fee required');
-    const err = validateInstallments(ffInstallments);
+    const err = validateInstallments(ffInstallments, Number(ff.totalFee || 0) - Number(ff.discount || 0));
     if(err) return toast.error(err);
     setSaving(true);
     try{ await paymentsApi.upsertFee(studentId,{totalFee:Number(ff.totalFee),discount:Number(ff.discount)||0,notes:ff.notes,installments:cleanInstallments(ffInstallments),actingAsCenter:isCounselorSwitch}); toast.success('Fee saved'); setFeeOpen(false); load(); }
@@ -1170,6 +1175,16 @@ function FeeSection({ studentId, appStatus, student }) {
                         inst.status==='Partially_Paid'?'bg-amber-50 text-amber-700 border-amber-200':
                         'bg-slate-50 text-slate-600 border-slate-200'
                       }`}>{String(inst.status||'Pending').replace(/_/g,' ')}</span>
+                      {(Number(inst.paidAmount || 0) > 0 || inst.status === 'Partially_Paid') && (
+                        <span className="text-xs font-semibold text-emerald-700">
+                          Paid {fmt(inst.paidAmount || 0)}
+                        </span>
+                      )}
+                      {inst.status === 'Partially_Paid' && (
+                        <span className="text-xs font-semibold text-amber-700">
+                          Due {fmt(Math.max(0, Number(inst.amount || 0) - Number(inst.paidAmount || 0)))}
+                        </span>
+                      )}
                       {inst.reasonOrRequirement&&<span className="text-xs text-slate-500">{inst.reasonOrRequirement}</span>}
                     </div>
                   </div>
@@ -1230,9 +1245,8 @@ function FeeSection({ studentId, appStatus, student }) {
                     {tx.paidAt&&<span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-200">{fmtDt(tx.paidAt)}</span>}
                   </div>
                   <PaymentDetail tx={tx} accMap={accMap}/>
-                  {tx.verificationStatus==='pending_counselor'&&<span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">⏳ Awaiting Counselor</span>}
-                  {tx.verificationStatus==='pending_accountant'&&<span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">⏳ With Accountant</span>}
-                  {tx.verificationStatus==='verified'&&<span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium">✓ Verified</span>}
+                  {['pending_counselor','pending_accountant'].includes(tx.verificationStatus)&&<span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">Verification Pending</span>}
+                  {tx.verificationStatus==='verified'&&<span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium">Verified</span>}
                   {tx.verificationStatus==='rejected'&&<span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200 font-medium">✗ Rejected{tx.verificationNote?`: ${tx.verificationNote}`:''}</span>}
                 </div>
                 <div className="flex items-center gap-2 ml-3 flex-shrink-0">
@@ -1261,7 +1275,7 @@ function FeeSection({ studentId, appStatus, student }) {
             <div><Label className="text-xs font-semibold text-slate-600">Discount (₹)</Label><Input type="number" value={ff.discount} onChange={e=>setFf(p=>({...p,discount:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             {ff.totalFee&&<div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 text-sm font-semibold text-emerald-700">Net: {fmt(Number(ff.totalFee)-Number(ff.discount||0))}</div>}
             <div><Label className="text-xs font-semibold text-slate-600">Notes</Label><Textarea rows={2} value={ff.notes} onChange={e=>setFf(p=>({...p,notes:e.target.value}))} className="mt-1 border-slate-200 resize-none"/></div>
-            <InstallmentTimelineEditor rows={ffInstallments} setRows={setFfInstallments} compact />
+            <InstallmentTimelineEditor rows={ffInstallments} setRows={setFfInstallments} compact expectedAmount={Number(ff.totalFee || 0) - Number(ff.discount || 0)} />
           </div>
           <DialogFooter className="border-t border-slate-100 px-6 py-4"><Button variant="outline" onClick={()=>setFeeOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={saveFee} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save</Button></DialogFooter>
         </DialogContent>
@@ -1328,7 +1342,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
   const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
-  const [df,setDf]=useState({name:'',names:[],chargeFee:'',note:'',payAmount:'',requestType:'Soft Copy'});
+  const [df,setDf]=useState({name:'',names:[],chargeFees:{},note:'',payAmount:'',requestType:'Soft Copy'});
   const [editDf,setEditDf]=useState({name:'',chargeFee:'',note:'',requestType:'Soft Copy'});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
@@ -1356,7 +1370,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         const fd=new FormData();
         fd.append('studentId',studentId); fd.append('name',name);
         fd.append('note',df.note);
-        fd.append('chargeFee',df.chargeFee||0);
+        fd.append('chargeFee',df.chargeFees?.[name]||0);
         fd.append('requestType',df.requestType||'Soft Copy');
         if(isCounselorSwitch) fd.append('actingAsCenter','true');
         if(df.payAmount&&Number(df.payAmount)>0){
@@ -1376,7 +1390,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         await docsApi.create(fd);
       }
       toast.success(names.length > 1 ? `${names.length} document requests submitted` : 'Document request submitted'); setAddOpen(false);
-      setDf({name:'',names:[],chargeFee:'',note:'',payAmount:'',requestType:'Soft Copy'}); setDfPay({...EMPTY_PF});
+      setDf({name:'',names:[],chargeFees:{},note:'',payAmount:'',requestType:'Soft Copy'}); setDfPay({...EMPTY_PF});
       setDocFile(null); if(fileRef.current) fileRef.current.value='';
       load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1610,21 +1624,15 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
           </span>
         )}
 
-        {p.verificationStatus === 'pending_counselor' && (
+        {['pending_counselor', 'pending_accountant'].includes(p.verificationStatus) && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 font-medium">
-            ⏳ Awaiting Counselor
-          </span>
-        )}
-
-        {p.verificationStatus === 'pending_accountant' && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 font-medium">
-            ⏳ With Accountant
+            Verification Pending
           </span>
         )}
 
         {p.verificationStatus === 'verified' && (
           <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-medium">
-            ✓ Verified
+            Verified
           </span>
         )}
 
@@ -1708,11 +1716,16 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => setDf(p => ({
-                          ...p,
-                          name: '',
-                          names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
-                        }))}
+                        onChange={() => setDf(p => {
+                          const nextCharges = { ...(p.chargeFees || {}) };
+                          if (checked) delete nextCharges[name];
+                          return {
+                            ...p,
+                            name: '',
+                            names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
+                            chargeFees: nextCharges,
+                          };
+                        })}
                         className="h-4 w-4 accent-indigo-600"
                       />
                       <span>{name}</span>
@@ -1733,8 +1746,30 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                   </SelectContent>
                 </Select>
               </div>
-              <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             </div>
+            {df.names.length > 0 && (
+              <div>
+                <Label className="text-xs font-semibold text-slate-600">Document Charges</Label>
+                <div className="mt-1 space-y-2">
+                  {df.names.map(name => (
+                    <div key={name} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-sm font-medium text-slate-700">{name}</span>
+                      <div className="flex items-center gap-2 sm:w-40">
+                        <span className="text-xs font-semibold text-slate-500">Charge</span>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={df.chargeFees?.[name] ?? ''}
+                          onChange={e=>setDf(p=>({...p,chargeFees:{...(p.chargeFees||{}),[name]:e.target.value}}))}
+                          placeholder="0"
+                          className="h-9 border-slate-200 text-sm"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={df.note} onChange={e=>setDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div> */}
             {/* <div><Label className="text-xs font-semibold text-slate-600">Upload File (optional)</Label><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setDocFile(e.target.files[0])} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-600 file:font-medium"/></div> */}
             {/* <div className="border-t border-slate-200 pt-3">
@@ -1933,10 +1968,8 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const [feeForm,setFeeForm] = useState({totalFee:'',discount:'',notes:''});
   const [feeInstallments,setFeeInstallments] = useState([blankInstallment(1)]);
 
-  const [editDocs,setEditDocs] = useState([]);
-  const [customDoc,setCustomDoc] = useState('');
+  const [editDocs,setEditDocs] = useState([{ name: SUBMISSION_DOC_NAME, fileUrl: '', file: null }]);
   const [docsSaving,setDocsSaving] = useState(false);
-  const fileRefs = useRef([]);
   const [universities, setUniversities] = useState([]);
   useEffect(() => {
     const centerId = student?.center?._id || student?.center;
@@ -1967,17 +2000,9 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
       setFeeInstallments((p?.installments||[]).length ? p.installments.map(i=>({installmentNumber:i.installmentNumber,paymentDate:i.paymentDate?String(i.paymentDate).split('T')[0]:'',amount:i.amount||'',reasonOrRequirement:i.reasonOrRequirement||''})) : [blankInstallment(1)]);
       setFeeData(p);
     }).catch(()=>{});
-    const existing = s.submissionDocs||[];
-    if (existing.length > 0) {
-      const savedNames = existing.map(d=>d.name);
-      const missing = DEFAULT_DOCS.filter(n=>!savedNames.includes(n));
-      setEditDocs([
-        ...existing.map(d=>({name:d.name,fileUrl:d.fileUrl||'',file:null,checked:true})),
-        ...missing.map(n=>({name:n,fileUrl:'',file:null,checked:false})),
-      ]);
-    } else {
-      setEditDocs(DEFAULT_DOCS.map(n=>({name:n,fileUrl:'',file:null,checked:true})));
-    }
+    const existing = s.submissionDocs || [];
+    const savedPdf = existing.find(d => d.name === SUBMISSION_DOC_NAME) || existing.find(d => d.fileUrl?.toLowerCase?.().endsWith('.pdf')) || existing[0];
+    setEditDocs([{ name: SUBMISSION_DOC_NAME, fileUrl: savedPdf?.fileUrl || '', file: null }]);
     setEditTab(tab);
     setEditOpen(true);
   }
@@ -1995,7 +2020,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
 
   async function saveFee(){
     if(!feeForm.totalFee) return toast.error('Total fee required');
-    const err = validateInstallments(feeInstallments);
+    const err = validateInstallments(feeInstallments, Number(feeForm.totalFee || 0) - Number(feeForm.discount || 0));
     if(err) return toast.error(err);
     setFeeSaving(true);
     try{
@@ -2007,13 +2032,18 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   async function saveDocs(){
     setDocsSaving(true);
     try{
+      const doc = editDocs[0] || { name: SUBMISSION_DOC_NAME, fileUrl: '', file: null };
+      const docErr = validateSubmissionPdf(doc.file);
+      if (docErr) {
+        toast.error(docErr);
+        return;
+      }
       const BASE=import.meta.env.VITE_API_URL||'http://localhost:5000/api';
       const token=localStorage.getItem('crm_token');
       const fd=new FormData();
-      const checked=editDocs.filter(d=>d.checked&&d.name.trim());
-      fd.append('submissionDocs',JSON.stringify(checked.map(d=>({name:d.name,fileUrl:d.fileUrl||''}))));
-      checked.forEach((d,i)=>{ if(d.file) fd.append(`submissionFile_${i}`,d.file); });
-      fd.append('submissionDocCount', String(checked.length));
+      fd.append('submissionDocs',JSON.stringify(doc.file || doc.fileUrl ? [{name:SUBMISSION_DOC_NAME,fileUrl:doc.fileUrl||''}] : []));
+      if(doc.file) fd.append('submissionFile_0',doc.file);
+      fd.append('submissionDocCount', doc.file || doc.fileUrl ? '1' : '0');
       if (isCounselorSwitch) fd.append('actingAsCenter', 'true');
       const res=await fetch(`${BASE}/students/${s._id}`,{method:'PUT',headers:{Authorization:`Bearer ${token}`},body:fd});
       if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||'Failed');}
@@ -2033,14 +2063,6 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
     }
     setSaving(true);
     try{
-      const payment = await paymentsApi.get(s._id);
-      if (!payment?.installments?.length) {
-        toast.error('Please add installment timeline in Fees tab before submitting');
-        setSubmitOpen(false);
-        setSaving(false);
-        startEdit('fee');
-        return;
-      }
       await studentsApi.submit(s._id, { universityId: uniId, actingAsCenter: isCounselorSwitch });
       setS(p=>({...p,applicationStatus:'Submitted'}));
       toast.success('Application submitted to counselor!');
@@ -2358,7 +2380,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
                   </div>
                 )}
                 <div><Label className="text-xs font-semibold text-slate-600">Notes</Label><Textarea rows={2} value={feeForm.notes} onChange={e=>setFeeForm(p=>({...p,notes:e.target.value}))} placeholder="Payment terms, installments…" className="mt-1 border-slate-200 resize-none"/></div>
-                <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} compact />
+                <InstallmentTimelineEditor rows={feeInstallments} setRows={setFeeInstallments} compact expectedAmount={Number(feeForm.totalFee || 0) - Number(feeForm.discount || 0)} />
                 <DialogFooter>
                   <Button variant="outline" onClick={()=>setEditOpen(false)} className="border-slate-200">Cancel</Button>
                   <Button onClick={saveFee} disabled={feeSaving} className="bg-indigo-600 hover:bg-indigo-700">{feeSaving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Save Fee</Button>
@@ -2374,36 +2396,32 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
 
           {editTab==='docs'&&(
             <div className="space-y-3">
-              <p className="text-xs text-slate-400">Tick documents that are available. Upload files if ready. Untick to remove.</p>
-              <div className="border border-slate-200 rounded-xl divide-y overflow-hidden">
-                {editDocs.map((doc,i)=>(
-                  <div key={i} className={`flex items-center gap-3 px-4 py-3 transition-colors ${doc.checked?'bg-white':'bg-slate-50'}`}>
-                    <input type="checkbox" checked={doc.checked}
-                      onChange={()=>setEditDocs(p=>p.map((d,j)=>j===i?{...d,checked:!d.checked}:d))}
-                      className="h-4 w-4 rounded accent-emerald-600 flex-shrink-0"/>
-                    <div className="flex-1 min-w-0">
-                      <span className={`text-sm font-medium ${!doc.checked?'line-through text-slate-400':'text-slate-700'}`}>{doc.name}</span>
-                      {doc.fileUrl&&<div className="text-xs mt-0.5"><a href={`${MEDIA}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="text-indigo-600 underline flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>View uploaded file</a></div>}
-                    </div>
-                    {doc.checked&&(
-                      <input type="file" ref={el=>fileRefs.current[i]=el} accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={e=>setEditDocs(p=>p.map((d,j)=>j===i?{...d,file:e.target.files[0]}:d))}
-                        className="text-xs w-28 file:text-xs file:bg-slate-100 file:border-0 file:rounded file:px-2 file:py-1 flex-shrink-0"/>
-                    )}
-                    <button onClick={()=>setEditDocs(p=>p.filter((_,j)=>j!==i))} className="text-slate-300 hover:text-red-400 transition-colors flex-shrink-0">
-                      <Trash2 className="h-3.5 w-3.5"/>
-                    </button>
+              <p className="text-xs text-slate-400">Upload all student documents in one PDF file. Maximum file size: 10 MB.</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-700">{SUBMISSION_DOC_NAME}</p>
+                    <p className="text-xs text-slate-400">Accepted format: PDF only.</p>
+                    {editDocs[0]?.fileUrl&&<div className="text-xs mt-1"><a href={`${MEDIA}${editDocs[0].fileUrl}`} target="_blank" rel="noreferrer" className="text-indigo-600 underline flex items-center gap-1 w-fit"><Download className="h-3 w-3"/>View uploaded PDF</a></div>}
+                    {editDocs[0]?.file&&<p className="mt-1 truncate text-xs font-medium text-emerald-700">{editDocs[0].file.name}</p>}
                   </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <Input value={customDoc} onChange={e=>setCustomDoc(e.target.value)}
-                  placeholder="Add new document name…" className="flex-1 text-sm border-slate-200"
-                  onKeyDown={e=>{if(e.key==='Enter'&&customDoc.trim()){setEditDocs(p=>[...p,{name:customDoc.trim(),fileUrl:'',file:null,checked:true}]);setCustomDoc('');}}}/>
-                <Button size="sm" variant="outline" onClick={()=>{if(customDoc.trim()){setEditDocs(p=>[...p,{name:customDoc.trim(),fileUrl:'',file:null,checked:true}]);setCustomDoc('');}}}
-                  className="border-slate-200 text-slate-600">
-                  <Plus className="h-3.5 w-3.5 mr-1"/>Add
-                </Button>
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={e=>{
+                      const file = e.target.files?.[0] || null;
+                      const err = validateSubmissionPdf(file);
+                      if (err) {
+                        toast.error(err);
+                        e.target.value = '';
+                        setEditDocs([{ name: SUBMISSION_DOC_NAME, fileUrl: editDocs[0]?.fileUrl || '', file: null }]);
+                        return;
+                      }
+                      setEditDocs([{ name: SUBMISSION_DOC_NAME, fileUrl: editDocs[0]?.fileUrl || '', file }]);
+                    }}
+                    className="text-xs file:mr-2 file:rounded file:border file:border-slate-200 file:bg-white file:px-3 file:py-1.5 file:text-xs file:text-slate-600"
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={()=>setEditOpen(false)} className="border-slate-200">Cancel</Button>
@@ -2556,6 +2574,19 @@ export default function CenterPortalPage() {
     } catch{toast.error('Problem loading data');} finally{setLoading(false);}
   },[centerId]);
   useEffect(()=>{loadAll();},[loadAll]);
+
+  async function deleteDraftStudent(student) {
+    if (student.applicationStatus !== 'Draft') return toast.error('Only draft students can be deleted');
+    if (!confirm(`Delete draft student "${student.name}"? This will permanently remove this draft record.`)) return;
+    try {
+      await studentsApi.delete(student._id, { actingAsCenter: isCounselorSwitch });
+      toast.success('Draft student deleted');
+      setStudents(prev => prev.filter(s => String(s._id) !== String(student._id)));
+      if (selected?._id === student._id) setSelected(null);
+    } catch (e) {
+      toast.error(e.message || 'Failed to delete draft student');
+    }
+  }
 
   if (['Counselor','PaymentCoordinator'].includes(user?.role) && !centerId) {
     return (
@@ -2732,7 +2763,22 @@ export default function CenterPortalPage() {
                       )}
                     </div>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 transition-colors flex-shrink-0"/>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {s.applicationStatus === 'Draft' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteDraftStudent(s);
+                        }}
+                        className="rounded-lg p-2 text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                        title="Delete draft student"
+                      >
+                        <Trash2 className="h-4 w-4"/>
+                      </button>
+                    )}
+                    <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-slate-500 transition-colors"/>
+                  </div>
                 </div>
               </div>
             );
