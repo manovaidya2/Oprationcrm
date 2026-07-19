@@ -107,12 +107,14 @@ router.post('/students/:id/counselor-send-to-center', protect, requireRole('Admi
 // ── PAYMENTS ─────────────────────────────────────────────────
 router.get   ('/payment-installments',                          protect, requireRole('Admin','PaymentCoordinator'), payC.installmentTimeline);
 router.get   ('/payment-due-timelines',                         protect, requireRole('Admin','PaymentCoordinator'), payC.dueTimeline);
+router.get   ('/accountant/fee-payments',                       protect, requireRole('Admin','Accountant'), payC.accountantFeePayments);
 router.put   ('/payment-installments/:paymentId/timeline',       protect, requireRole('Admin','PaymentCoordinator'), payC.updateDueTimeline);
 router.put   ('/payment-installments/:paymentId/installments',   protect, requireRole('Admin','PaymentCoordinator'), payC.updateInstallmentTimeline);
 router.post  ('/payment-installments/:paymentId/installments/:installmentId/pay', protect, requireRole('Admin','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.markInstallmentPaid);
 router.get   ('/document-payment-followups',                    protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentTimeline);
 router.post  ('/documents/:id/payment-followup',                protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentFollowup);
 router.get   ('/payments/:studentId',                          protect, payC.get);
+router.post  ('/payments-bulk',                                protect, requireRole('Admin','Counselor','Center','Accountant','PaymentCoordinator'), payC.bulkGet);
 router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Counselor','Center','PaymentCoordinator'), payC.upsertFee);
 router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.addTransaction);
 router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.updateTransaction);

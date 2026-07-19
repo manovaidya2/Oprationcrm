@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Loader2, IndianRupee, CheckCircle2, XCircle, Clock, Eye,
   Paperclip, History, User, Calendar, Hash, Search, X, Send, Download, Trash2
@@ -34,6 +34,16 @@ function CardRequestDate({ date, label = 'Submitted' }) {
       {label}: {fmtD(date)}
     </div>
   );
+}
+
+const accountantPageCache = {
+  fee: null,
+  full: null,
+};
+
+function clearAccountantPageCache() {
+  accountantPageCache.fee = null;
+  accountantPageCache.full = null;
 }
 
 function UtrDuplicateWarning({ tx }) {
@@ -85,7 +95,7 @@ function PaymentInfo({ tx, className = '' }) {
 }
 
 function FeePaymentPanel({ payment, status = 'pending_accountant', accMap = {} }) {
-  const txs = (payment?.transactions || []).filter(tx => tx.type === 'Fee' && (!status || tx.verificationStatus === status));
+  const txs = (payment?.transactions || []).filter(tx => (!tx.type || tx.type === 'Fee') && (!status || tx.verificationStatus === status));
   if (!txs.length) return null;
   return (
     <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50/60 p-3 space-y-2">
@@ -131,7 +141,7 @@ function StudentDetailModal({ student, onClose }) {
     if (!student) return;
     // Fetch fresh to get submissionDocs + all populated fields
     studentsApi.getOne(student._id).then(s => { if (s) setFullStudent(s); }).catch(() => {});
-    paymentsApi.get(student._id).then(setPayment).catch(() => {});
+    paymentsApi.get(student._id, { checkDuplicates: true }).then(setPayment).catch(() => {});
     docsApi.list({ studentId: student._id, all: '1' }).then(setDocs).catch(() => {});
   }, [student?._id]);
 
@@ -406,41 +416,111 @@ export default function AccountantPage() {
   const [detailStudent, setDetailStudent] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('feepay');
   const [note,   setNote]   = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const fullLoadedRef = useRef(false);
+  const fullLoadingRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const applyCachedData = useCallback((cached) => {
+    if (!cached) return false;
+    if (cached.payAccounts) setPayAccounts(cached.payAccounts);
+    if (cached.feePayments) setFeePayments(cached.feePayments);
+    if (cached.allFeePayments) setAllFeePayments(cached.allFeePayments);
+    if (cached.students) setStudents(cached.students);
+    if (cached.uniRejected) setUniRejected(cached.uniRejected);
+    if (cached.amountSettleQueue) setAmountSettleQueue(cached.amountSettleQueue);
+    if (cached.docs) setDocs(cached.docs);
+    if (cached.payDocs) setPayDocs(cached.payDocs);
+    if (cached.allPayDocs) setAllPayDocs(cached.allPayDocs);
+    if (cached.scanDocs) setScanDocs(cached.scanDocs);
+    if (cached.history) setHistory(cached.history);
+    if (cached.studentPayMap) setStudentPayMap(cached.studentPayMap);
+    if (cached.admissionFeeMap) setAdmissionFeeMap(cached.admissionFeeMap);
+    if (cached.full) fullLoadedRef.current = true;
+    setLoading(false);
+    return true;
+  }, []);
+
+  const load = useCallback(async (loadAll = false) => {
+    if (loadAll && accountantPageCache.full) {
+      applyCachedData(accountantPageCache.full);
+      return;
+    }
+    if (!loadAll && accountantPageCache.fee) {
+      applyCachedData(accountantPageCache.fee);
+      return;
+    }
+    if (loadAll && (fullLoadedRef.current || fullLoadingRef.current)) return;
+    if (loadAll) fullLoadingRef.current = true;
+    let initialFeeLoaded = false;
+    let initialFeeEntries = [];
+    let loadedPayAccounts = accountantPageCache.fee?.payAccounts || {};
     try {
       setLoading(true);
-      const [allS, allD, accs] = await Promise.all([studentsApi.getAll(), docsApi.list({ all: '1' }), paymentAccountsApi.list().catch(()=>[])]);
-      // Build id→account map for quick lookup
-      const accMap = {};
-      accs.forEach(a => { accMap[String(a._id)] = a; });
-      setPayAccounts(accMap);
+      try {
+        const [initialFees, accs] = await Promise.all([
+          paymentsApi.accountantFeePayments(),
+          paymentAccountsApi.list().catch(()=>[]),
+        ]);
+        const initialAccMap = {};
+        accs.forEach(a => { initialAccMap[String(a._id)] = a; });
+        setPayAccounts(initialAccMap);
+        loadedPayAccounts = initialAccMap;
+        setFeePayments(initialFees || []);
+        setAllFeePayments(initialFees || []);
+        initialFeeEntries = initialFees || [];
+        initialFeeLoaded = true;
+        accountantPageCache.fee = {
+          payAccounts: initialAccMap,
+          feePayments: initialFeeEntries,
+          allFeePayments: initialFeeEntries,
+        };
+      } catch (e) {
+        if (!loadAll) toast.error(e.message || 'Failed to load fee payments');
+      }
 
-      setStudents(allS.filter(s => ['Counselor_Approved','Accountant_Pending'].includes(s.applicationStatus)));
-      // Uni Rejected tab: both currently University_Rejected AND those forwarded to counselor (rejectedVia=university)
-      setUniRejected(allS.filter(s =>
+      if (!loadAll) return;
+
+      const [allS, allD] = await Promise.all([studentsApi.getAll(), docsApi.list({ all: '1' })]);
+      // Build id→account map for quick lookup
+      if (!initialFeeLoaded) {
+        const accs = await paymentAccountsApi.list().catch(()=>[]);
+        const accMap = {};
+        accs.forEach(a => { accMap[String(a._id)] = a; });
+        setPayAccounts(accMap);
+        loadedPayAccounts = accMap;
+      }
+
+      const nextStudents = allS.filter(s => ['Counselor_Approved','Accountant_Pending'].includes(s.applicationStatus));
+      const nextUniRejected = allS.filter(s =>
         s.applicationStatus === 'University_Rejected' ||
         (s.applicationStatus === 'Accountant_Rejected' && s.rejectedVia === 'university')
-      ));
-      // Amount Settle tab: Rejected students + Cancelled students forwarded by counselor to accountant
-      setAmountSettleQueue(allS.filter(s => {
+      );
+      const nextAmountSettleQueue = allS.filter(s => {
         if (s.applicationStatus === 'Rejected') return true;
         if (s.applicationStatus !== 'Cancelled') return false;
-        // Primary check
         if (s.settlementForwardedToAccountant) return true;
-        // Fallback: check statusHistory for 'Settlement_Forwarded' entry
         return (s.statusHistory || []).some(h => h.status === 'Settlement_Forwarded');
-      }));
-      setDocs(allD.filter(d => ['Forwarded','Fee_Pending'].includes(d.status)));
-      setScanDocs(allD.filter(d => d.status === 'Accountant_Received'));
-      setPayDocs(allD.filter(d => d.status === 'Payment_Submitted'));
-      setAllPayDocs(allD.filter(d =>
+      });
+      const nextDocs = allD.filter(d => ['Forwarded','Fee_Pending'].includes(d.status));
+      const nextScanDocs = allD.filter(d => d.status === 'Accountant_Received');
+      const nextPayDocs = allD.filter(d => d.status === 'Payment_Submitted');
+      const nextAllPayDocs = allD.filter(d =>
         ['Payment_Submitted','Payment_Verified','Center_Notified','Fee_Rejected'].includes(d.status) &&
         d.payments?.length > 0
-      ));
+      );
+
+      setStudents(nextStudents);
+      // Uni Rejected tab: both currently University_Rejected AND those forwarded to counselor (rejectedVia=university)
+      setUniRejected(nextUniRejected);
+      // Amount Settle tab: Rejected students + Cancelled students forwarded by counselor to accountant
+      setAmountSettleQueue(nextAmountSettleQueue);
+      setDocs(nextDocs);
+      setScanDocs(nextScanDocs);
+      setPayDocs(nextPayDocs);
+      setAllPayDocs(nextAllPayDocs);
 
       // Build complete history from all sources
       const hist = [];
@@ -547,6 +627,7 @@ export default function AccountantPage() {
       });
 
       // 3. Fee payments — ALL transactions (pending + verified + rejected)
+      /*
       const pending = [];
       const allFeePayments = [];
       const admissionMap = {};
@@ -585,32 +666,67 @@ export default function AccountantPage() {
       }));
 
       pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
-      setFeePayments(pending);
+      if (!initialFeeLoaded) setFeePayments(pending);
       setAllFeePayments(allFeePayments);
       setAdmissionFeeMap(admissionMap);
+      */
+      const pending = [...initialFeeEntries].sort((a, b) => new Date(b.tx?.paidAt || b.tx?.createdAt || 0) - new Date(a.tx?.paidAt || a.tx?.createdAt || 0));
+      if (!initialFeeLoaded) setFeePayments(pending);
+      setAllFeePayments(initialFeeEntries);
+      const nextAdmissionFeeMap = initialFeeEntries.reduce((acc, entry) => {
+        if (entry?.student?._id && entry?.payment) acc[String(entry.student._id)] = entry.payment;
+        return acc;
+      }, {});
+      setAdmissionFeeMap(nextAdmissionFeeMap);
 
       // Build payment map for document cards.
-      const allDocStudentIds = [...new Set(allD.map(d => d.student?._id).filter(Boolean))];
       const payMap = {};
-      await Promise.all(allDocStudentIds.map(async (sid) => {
-        try {
-          const pay = await paymentsApi.get(sid);
-          if (pay) payMap[sid] = { totalFee: pay.totalFee||0, netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
-        } catch {}
-      }));
+      allD.forEach(d => {
+        const sid = d.student?._id;
+        if (sid && d.courseFeeSummary) payMap[sid] = d.courseFeeSummary;
+      });
       setStudentPayMap(payMap);
 
 
       hist.sort((a,b) => b._sortKey - a._sortKey);
       setHistory(hist);
-    } catch { toast.error('Failed to load'); } finally { setLoading(false); }
-  }, []);
+      fullLoadedRef.current = true;
+      accountantPageCache.full = {
+        full: true,
+        students: nextStudents,
+        uniRejected: nextUniRejected,
+        amountSettleQueue: nextAmountSettleQueue,
+        docs: nextDocs,
+        scanDocs: nextScanDocs,
+        payDocs: nextPayDocs,
+        allPayDocs: nextAllPayDocs,
+        feePayments: pending,
+        allFeePayments: initialFeeEntries,
+        admissionFeeMap: nextAdmissionFeeMap,
+        studentPayMap: payMap,
+        history: hist,
+        payAccounts: loadedPayAccounts,
+      };
+    } catch {
+      if (!initialFeeLoaded) toast.error('Failed to load');
+    } finally {
+      if (loadAll) fullLoadingRef.current = false;
+      setLoading(false);
+    }
+  }, [applyCachedData]);
 
   useEffect(() => { load(); }, [load]);
 
+  const refreshCurrentTab = useCallback(() => {
+    clearAccountantPageCache();
+    fullLoadedRef.current = false;
+    fullLoadingRef.current = false;
+    load(activeTab !== 'feepay');
+  }, [activeTab, load]);
+
   async function doAdmAction(action) {
     setSaving(true);
-    try { await studentsApi.accountantAction(dialog.item._id, action, note); toast.success('Done'); setDialog(null); setNote(''); load(); }
+    try { await studentsApi.accountantAction(dialog.item._id, action, note); toast.success('Done'); setDialog(null); setNote(''); refreshCurrentTab(); }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -618,7 +734,7 @@ export default function AccountantPage() {
     setSaving(true);
     try {
       await studentsApi.accountantForwardToCounselor(student._id, student.rejectionReason || '');
-      toast.success('Forwarded to counselor'); load();
+      toast.success('Forwarded to counselor'); refreshCurrentTab();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -626,13 +742,13 @@ export default function AccountantPage() {
     setSaving(true);
     try {
       await studentsApi.amountSettle(student._id);
-      toast.success(`Amount settled for ${student.name}`); load();
+      toast.success(`Amount settled for ${student.name}`); refreshCurrentTab();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function doDocAction(action) {
     setSaving(true);
-    try { await docsApi.accountantAction(dialog.item._id, action, note); toast.success('Done'); setDialog(null); setNote(''); load(); }
+    try { await docsApi.accountantAction(dialog.item._id, action, note); toast.success('Done'); setDialog(null); setNote(''); refreshCurrentTab(); }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -644,7 +760,7 @@ export default function AccountantPage() {
       toast.success('Sent back to center for changes');
       setDialog(null);
       setNote('');
-      load();
+      refreshCurrentTab();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -660,14 +776,14 @@ export default function AccountantPage() {
       for (const doc of selected) await docsApi.accountantAction(doc._id, 'approve', '');
       toast.success(`${selected.length} documents approved`);
       setSelectedDocIds([]);
-      load();
+      refreshCurrentTab();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   }
 
   async function doPayVerify(approved) {
     setSaving(true);
-    try { await docsApi.verifyPayment(dialog.item._id, approved, note); toast.success(approved?'Verified':'Rejected'); setDialog(null); setNote(''); load(); }
+    try { await docsApi.verifyPayment(dialog.item._id, approved, note); toast.success(approved?'Verified':'Rejected'); setDialog(null); setNote(''); refreshCurrentTab(); }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -679,7 +795,7 @@ export default function AccountantPage() {
       for (const doc of selected) await docsApi.verifyPayment(doc._id, true, '');
       toast.success(`${selected.length} document payments verified`);
       setSelectedDocIds([]);
-      load();
+      refreshCurrentTab();
     } catch (e) { toast.error(e.message); }
     finally { setSaving(false); }
   }
@@ -688,7 +804,7 @@ export default function AccountantPage() {
     try {
       await docsApi.accountantForwardScan(docId);
       toast.success('Scan forwarded to counselor');
-      load();
+      refreshCurrentTab();
     } catch(e) { toast.error(e.message); }
   }
 
@@ -696,7 +812,7 @@ export default function AccountantPage() {
     try {
       await paymentsApi.accountantVerifyPayment(studentId, txId, { approved, note });
       toast.success(approved ? 'Fee payment verified!' : 'Fee payment rejected');
-      setDialog(null); setNote(''); load();
+      setDialog(null); setNote(''); refreshCurrentTab();
     } catch(e) { toast.error(e.message); }
   }
 
@@ -762,7 +878,13 @@ export default function AccountantPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="feepay">
+      <Tabs
+        value={activeTab}
+        onValueChange={(val) => {
+          setActiveTab(val);
+          if (val !== 'feepay') load(true);
+        }}
+      >
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
             { val:'scans',       label:'Scan Review',    count: scanDocs.length,                                         dot:'bg-violet-500' },

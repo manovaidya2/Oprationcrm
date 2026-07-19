@@ -283,7 +283,7 @@ export default function StudentDetailPage() {
       setLoading(true);
       const [s, p, d, c] = await Promise.all([
         studentsApi.getOne(id),
-        paymentsApi.get(id).catch(()=>null),
+        paymentsApi.get(id, { checkDuplicates: true }).catch(()=>null),
         docsApi.list({ studentId: id, all: '1' }).catch(()=>[]),
         centersApi.getAll().catch(()=>[]),
       ]);

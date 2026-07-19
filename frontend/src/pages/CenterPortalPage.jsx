@@ -1008,7 +1008,7 @@ function FeeSection({ studentId, appStatus, student }) {
     }).catch(() => {});
   }, []);
 
-  const load=useCallback(async()=>{ try{setLoading(true);setData(await paymentsApi.get(studentId));} catch{} finally{setLoading(false);} },[studentId]);
+  const load=useCallback(async()=>{ try{setLoading(true);setData(await paymentsApi.get(studentId, { checkDuplicates: true }));} catch{} finally{setLoading(false);} },[studentId]);
   useEffect(()=>{load();},[load]);
 
   const canSetFee = !isCancelled && (FEE_EDITABLE_STATUSES.includes(appStatus) || (user?.role === 'PaymentCoordinator' && isCounselorSwitch));
@@ -1923,7 +1923,7 @@ function PaymentsSection({ studentId }) {
   const [data,setData]=useState(null); const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [accMap,setAccMap]=useState({});
   useEffect(()=>{
-    (async()=>{ try{setLoading(true); const [p,d,accs]=await Promise.all([paymentsApi.get(studentId),docsApi.list({studentId}),paymentAccountsApi.list().catch(()=>[])]); setData(p);setDocs(d); const m={}; accs.forEach(a=>{m[String(a._id)]=a;}); setAccMap(m);} finally{setLoading(false);} })();
+   (async()=>{ try{setLoading(true); const [p,d,accs]=await Promise.all([paymentsApi.get(studentId, { checkDuplicates: true }),docsApi.list({studentId}),paymentAccountsApi.list().catch(()=>[])]); setData(p);setDocs(d); const m={}; accs.forEach(a=>{m[String(a._id)]=a;}); setAccMap(m);} finally{setLoading(false);} })();
   },[studentId]);
 
   if(loading) return <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-slate-300"/></div>;

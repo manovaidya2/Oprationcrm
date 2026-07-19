@@ -84,14 +84,27 @@ async function findDuplicateUtrMatches(utrRef, exclude = {}) {
 async function enrichPaymentDuplicateUtrs(payment) {
   if (!payment) return null;
   const obj = typeof payment.toObject === 'function' ? payment.toObject() : { ...payment };
-  for (const tx of obj.transactions || []) {
-    const matches = await findDuplicateUtrMatches(tx.utrRef, {
-      paymentId: obj._id,
-      txId: tx._id,
-    });
+  const txs = obj.transactions || [];
+  // Only check duplicates for transactions still under review — verified/old ones don't need re-checking on every fetch
+  const checkable = txs.filter(tx => ['pending_counselor','pending_accountant','rejected'].includes(tx.verificationStatus) && tx.utrRef);
+  await Promise.all(checkable.map(async tx => {
+    const matches = await findDuplicateUtrMatches(tx.utrRef, { paymentId: obj._id, txId: tx._id });
     tx.duplicateUtrMatches = matches;
     tx.utrDuplicate = matches.length > 0;
-  }
+  }));
+  return obj;
+}
+
+async function enrichDocumentDuplicateUtrs(doc) {
+  if (!doc) return null;
+  const obj = typeof doc.toObject === 'function' ? doc.toObject() : { ...doc };
+  const pays = obj.payments || [];
+  const checkable = pays.filter(pay => !pay.verified && pay.utrRef);
+  await Promise.all(checkable.map(async pay => {
+    const matches = await findDuplicateUtrMatches(pay.utrRef, { documentId: obj._id, docPaymentId: pay._id });
+    pay.duplicateUtrMatches = matches;
+    pay.utrDuplicate = matches.length > 0;
+  }));
   return obj;
 }
 

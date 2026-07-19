@@ -4,6 +4,7 @@ const Student       = require('../models/Student');
 const Payment       = require('../models/Payment');
 const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
+const mongoose      = require('mongoose');
 const { audit, notify, notifyRole } = require('../utils/helpers');
 
 async function loadDoc(id) {
@@ -108,6 +109,11 @@ const INVENTORY_RECEIVED_OR_DONE_STATUSES = [
 ];
 
 const normalizeInventoryDocName = value => String(value || '').trim().toLowerCase();
+const isValidObjectId = value => value && value !== 'null' && value !== 'undefined' && mongoose.Types.ObjectId.isValid(String(value));
+const docStudentId = doc => {
+  const id = doc?.student?._id || doc?.student;
+  return isValidObjectId(id) ? String(id) : '';
+};
 
 function latestHistoryEntry(doc, status) {
   return [...(doc?.statusHistory || [])].reverse().find(h => h.status === status);
@@ -164,7 +170,7 @@ function mergeInventoryDispatchStatus(inventoryDoc, requestDoc) {
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
   const filter = req.user.role === 'University' ? {} : { origin: { $ne: 'Inventory' } };
-  if (req.query.studentId) filter.student = req.query.studentId;
+  if (isValidObjectId(req.query.studentId)) filter.student = req.query.studentId;
 
   const { role, centerId, counselorId, universityId } = req.user;
   if (role === 'Center') {
@@ -203,7 +209,7 @@ exports.list = asyncHandler(async (req, res) => {
     .sort('-createdAt')
     .lean();
 
-  const studentIds = [...new Set(docs.map(doc => String(doc.student?._id || doc.student)).filter(Boolean))];
+  const studentIds = [...new Set(docs.map(docStudentId).filter(Boolean))];
   const payments = await Payment.find({ student: { $in: studentIds } })
     .select('student totalFee discount netFee paidAmount dueAmount')
     .lean();
@@ -220,7 +226,7 @@ exports.list = asyncHandler(async (req, res) => {
 
   res.json(docs.map(doc => ({
     ...doc,
-    courseFeeSummary: paymentMap[String(doc.student?._id || doc.student)] || null,
+    courseFeeSummary: paymentMap[docStudentId(doc)] || null,
   })));
 });
 
@@ -898,13 +904,34 @@ exports.inventoryList = asyncHandler(async (req, res) => {
       : [{ counselor: req.user.counselorId }];
   }
   if (req.user.role === 'Center') filter.center = req.user.centerId;
+  if (req.query.search) {
+    const q = req.query.search;
+    filter.$and = [
+      ...(filter.$and || []),
+      { $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { enrollmentNumber: { $regex: q, $options: 'i' } },
+      ] },
+    ];
+  }
 
-  const students = await Student.find(filter)
-    .populate('center', 'name city')
-    .populate('counselor', 'name')
-    .populate('university', 'name shortName')
-    .sort('-updatedAt')
-    .lean();
+  // Pagination — page defaults to fetching everything ONLY if no page param passed (kept for backward compat),
+  // but the frontend should always pass page+limit to avoid loading the whole enrolled list at once.
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+  const skip  = (page - 1) * limit;
+
+  const [total, students] = await Promise.all([
+    Student.countDocuments(filter),
+    Student.find(filter)
+      .populate('center', 'name city')
+      .populate('counselor', 'name')
+      .populate('university', 'name shortName')
+      .sort('-updatedAt')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+  ]);
 
   const studentIds = students.map(s => s._id);
   const docs = await StudentDoc.find({ student: { $in: studentIds } })
@@ -921,7 +948,12 @@ exports.inventoryList = asyncHandler(async (req, res) => {
     return acc;
   }, {});
 
-  res.json(students.map(student => ({
+  res.json({
+    total,
+    page,
+    limit,
+    hasMore: skip + students.length < total,
+    rows: students.map(student => ({
     student,
     docs: (() => {
       const studentDocs = docsByStudent[String(student._id)] || [];
@@ -951,7 +983,8 @@ exports.inventoryList = asyncHandler(async (req, res) => {
       return [...catalogDocs, ...extraDocs];
     })(),
     requestedDocs: (docsByStudent[String(student._id)] || []).filter(d => d.origin !== 'Inventory'),
-  })));
+  })),
+  });
 });
 
 exports.inventoryAddDoc = asyncHandler(async (req, res) => {

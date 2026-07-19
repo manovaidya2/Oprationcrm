@@ -30,6 +30,20 @@ const ROLE_OPTIONS = [
 const ALL_ROLES = ROLE_OPTIONS.map(r => r.value);
 const roleLabel = role => ROLE_OPTIONS.find(r => r.value === role)?.label || role;
 
+const settingsPageCache = {
+  users: null,
+  centers: null,
+  universities: null,
+  accounts: null,
+};
+
+function clearSettingsPageCache() {
+  settingsPageCache.users = null;
+  settingsPageCache.centers = null;
+  settingsPageCache.universities = null;
+  settingsPageCache.accounts = null;
+}
+
 export default function SettingsPage() {
   const { user: me } = useAuth();
   const navigate = useNavigate();
@@ -76,10 +90,29 @@ export default function SettingsPage() {
   }, [me, navigate]);
 
   const load = useCallback(async () => {
+    if (settingsPageCache.users) {
+      setUsers(settingsPageCache.users);
+      setCenters(settingsPageCache.centers || []);
+      setUniversities(settingsPageCache.universities || []);
+      setAccounts(settingsPageCache.accounts || []);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const [u, c, unis, accs] = await Promise.all([authApi.listUsers(), centersApi.getAll(), universitiesApi.getAll(), paymentAccountsApi.listAll()]);
-      setUsers(u); setCenters(c); setUniversities(unis); setAccounts(accs);
+      const u = await authApi.listUsers();
+      setUsers(u);
+      settingsPageCache.users = u;
+      setLoading(false);
+      const [c, unis, accs] = await Promise.all([
+        centersApi.getAll().catch(() => []),
+        universitiesApi.getAll().catch(() => []),
+        paymentAccountsApi.listAll().catch(() => []),
+      ]);
+      setCenters(c); setUniversities(unis); setAccounts(accs);
+      settingsPageCache.centers = c;
+      settingsPageCache.universities = unis;
+      settingsPageCache.accounts = accs;
     } catch { toast.error('Failed to load'); } finally { setLoading(false); }
   }, []);
 
@@ -93,7 +126,9 @@ export default function SettingsPage() {
     try {
       await authApi.createUser(form);
       toast.success('User created'); setCreateOpen(false);
-      setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' }); load();
+      setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' });
+      clearSettingsPageCache();
+      load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -110,13 +145,13 @@ export default function SettingsPage() {
       ? `Activate "${u.name}"? They will be able to login again.`
       : `Deactivate "${u.name}"? They will not be able to login until reactivated.`;
     if (!confirm(msg)) return;
-    try { await authApi.toggleUser(u._id); toast.success(u.isActive===false?'Activated':'Deactivated'); load(); }
+    try { await authApi.toggleUser(u._id); toast.success(u.isActive===false?'Activated':'Deactivated'); clearSettingsPageCache(); load(); }
     catch(e) { toast.error(e.message); }
   }
 
   async function deleteUser(id) {
     if (!confirm('Delete user permanently?')) return;
-    try { await authApi.deleteUser(id); toast.success('Deleted'); load(); }
+    try { await authApi.deleteUser(id); toast.success('Deleted'); clearSettingsPageCache(); load(); }
     catch(e) { toast.error(e.message); }
   }
 
@@ -132,13 +167,15 @@ export default function SettingsPage() {
     try {
       if (editAcc) { await paymentAccountsApi.update(editAcc._id, accForm); toast.success('Account updated'); }
       else         { await paymentAccountsApi.create(accForm);               toast.success('Account added'); }
-      setAccOpen(false); setEditAcc(null); setAccForm({ ...EMPTY_ACC }); load();
+      setAccOpen(false); setEditAcc(null); setAccForm({ ...EMPTY_ACC });
+      clearSettingsPageCache();
+      load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function deleteAcc(acc) {
     if (!confirm(`Remove "${acc.label}"?`)) return;
-    try { await paymentAccountsApi.remove(acc._id); toast.success('Removed'); load(); }
+    try { await paymentAccountsApi.remove(acc._id); toast.success('Removed'); clearSettingsPageCache(); load(); }
     catch(e) { toast.error(e.message); }
   }
 
@@ -245,6 +282,7 @@ export default function SettingsPage() {
                       try {
                         await paymentAccountsApi.update(acc._id, { isActive: !acc.isActive });
                         toast.success(acc.isActive ? 'Account deactivated — hidden from centers' : 'Account activated');
+                        clearSettingsPageCache();
                         load();
                       } catch(e) { toast.error(e.message); }
                     }}>

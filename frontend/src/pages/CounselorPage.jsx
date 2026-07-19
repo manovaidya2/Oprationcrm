@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { studentsApi, docsApi, centersApi, paymentsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
+import { pageCache } from '@/lib/pageCache';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
@@ -161,7 +162,7 @@ function StudentModal({ student, onClose }) {
   useEffect(() => {
     if (!student) return;
     studentsApi.getOne(student._id).then(s => { if(s) setFullStudent(s); }).catch(()=>{});
-    paymentsApi.get(student._id).then(setPayment).catch(()=>{});
+    paymentsApi.get(student._id, { checkDuplicates: true }).then(setPayment).catch(()=>{});
     docsApi.list({ studentId: student._id, all: '1' }).then(setDocs).catch(()=>{});
   }, [student?._id]);
   const s = fullStudent;
@@ -799,8 +800,18 @@ export default function CounselorPage() {
   const [centerSwitchSearch, setCenterSwitchSearch] = useState('');
 
   const load = useCallback(async () => {
-    try {
+    // Stale-while-revalidate: show cached data instantly, then refresh in background
+    const cached = pageCache.get('counselor-dashboard');
+    if (cached) {
+      setAllStudents(cached.allStudents); setDocs(cached.docs); setCenters(cached.centers);
+      setUniversities(cached.universities); setPayAccounts(cached.payAccounts);
+      setSettlementQueue(cached.settlementQueue); setDocPayments(cached.docPayments);
+      setStudentFeeMap(cached.studentFeeMap); setFeePayments(cached.feePayments);
+      setLoading(false);
+    } else {
       setLoading(true);
+    }
+    try {
       const [ss, d, c, unis, accs] = await Promise.all([
         studentsApi.getAll(),
         docsApi.list(),
@@ -826,35 +837,51 @@ export default function CounselorPage() {
       setPayAccounts(accMap);
 
       const uniqueStudentIds = [...new Set(d.map(doc => doc.student?._id).filter(Boolean))];
+      const allStudentIds = [...new Set([...ss.map(s => s._id), ...uniqueStudentIds])];
+
+      // ONE bulk request instead of N individual requests — fixes the timeout/slowness
+      const allPayments = await paymentsApi.bulkGet(allStudentIds).catch(() => []);
+      const paymentByStudent = {};
+      allPayments.forEach(p => { paymentByStudent[String(p.student)] = p; });
+
       const payMap = {};
-      await Promise.all(uniqueStudentIds.map(async (sid) => {
-        try {
-          const pay = await paymentsApi.get(sid);
-          if (pay) payMap[sid] = { totalFee: pay.totalFee||0, netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
-        } catch {}
-      }));
+      uniqueStudentIds.forEach(sid => {
+        const pay = paymentByStudent[String(sid)];
+        if (pay) payMap[sid] = { totalFee: pay.totalFee||0, netFee: pay.netFee||0, paidAmount: pay.paidAmount||0, dueAmount: pay.dueAmount||0 };
+      });
       setDocPayments(payMap);
 
       const pending = [];
       const feeMap = {};
-      Promise.all(ss.map(async (student) => {
-        try {
-          const pay = await paymentsApi.get(student._id);
-          if (pay) feeMap[String(student._id)] = pay;
-          if (pay?.transactions) {
-            pay.transactions.forEach(tx => {
-              if (tx.verificationStatus === 'pending_counselor') {
-                pending.push({ student, payment: pay, tx });
-              }
-            });
-          }
-        } catch {}
-      })).then(() => {
-  pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
-  setStudentFeeMap(feeMap);
-  setFeePayments([...pending]);
-}).catch(() => {});
-    } catch (e) { toast.error('Failed to load: ' + e.message); }
+      ss.forEach(student => {
+        const pay = paymentByStudent[String(student._id)];
+        if (pay) {
+          feeMap[String(student._id)] = pay;
+          (pay.transactions || []).forEach(tx => {
+            if (tx.verificationStatus === 'pending_counselor') {
+              pending.push({ student, payment: pay, tx });
+            }
+          });
+        }
+      });
+      pending.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
+      setStudentFeeMap(feeMap);
+      setFeePayments(pending);
+
+      // Cache everything for instant load next time this page mounts
+      const settlementQ = ss.filter(s => {
+        if (s.applicationStatus !== 'Cancelled') return false;
+        if (s.amountSettled) return false;
+        if (s.settlementForwardedToAccountant) return false;
+        if (s.settlementRequested) return true;
+        return (s.statusHistory || []).some(h => h.status === 'Settlement_Requested');
+      });
+      pageCache.set('counselor-dashboard', {
+        allStudents: ss, docs: d, centers: c, universities: unis,
+        payAccounts: accMap, settlementQueue: settlementQ,
+        docPayments: payMap, studentFeeMap: feeMap, feePayments: pending,
+      });
+    } catch (e) { if (!cached) toast.error('Failed to load: ' + e.message); }
     finally { setLoading(false); }
   }, []);
 

@@ -107,13 +107,14 @@ export const studentsApi = {
 };
 
 // ── PAYMENTS ─────────────────────────────────────────────────
-export const paymentsApi = {  get:            (sid)          => request(`/payments/${sid}`),
+export const paymentsApi = {  get:            (sid, opts = {}) => request(`/payments/${sid}${opts.checkDuplicates ? '?checkDuplicates=1' : ''}`),
   upsertFee:      (sid, data)    => request(`/payments/${sid}`, { method: 'PUT', body: JSON.stringify(data) }),
   addTransaction: (sid, data)    => request(`/payments/${sid}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
   updateTransaction:      (sid, txId, data) => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   updateTransactionForm:  (sid, txId, fd)   => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: fd }),  // FormData for file upload
   installmentTimeline:    ()                => request('/payment-installments'),
   dueTimeline:            ()                => request('/payment-due-timelines'),
+  accountantFeePayments:  ()                => request('/accountant/fee-payments'),
   updatePaymentTimeline:  (paymentId, data) => request(`/payment-installments/${paymentId}/timeline`, { method: 'PUT', body: JSON.stringify(data) }),
   updateInstallmentTimeline: (paymentId, data) => request(`/payment-installments/${paymentId}/installments`, { method: 'PUT', body: JSON.stringify(data) }),
   markInstallmentPaid:    (paymentId, installmentId, fd) => uploadRequest(`/payment-installments/${paymentId}/installments/${installmentId}/pay`, 'POST', fd),
@@ -130,7 +131,9 @@ export const paymentsApi = {  get:            (sid)          => request(`/paymen
   counselorRejectPayment: (sid, txId, note) => request(`/payments/${sid}/transactions/${txId}/counsel-reject`, { method: 'PATCH', body: JSON.stringify({ note }) }),
   accountantVerifyPayment:(sid, txId, data) => request(`/payments/${sid}/transactions/${txId}/account-verify`, { method: 'PATCH', body: JSON.stringify(data) }),
  deleteTransaction:      (sid, txId)       => request(`/payments/${sid}/transactions/${txId}`, { method: 'DELETE' }),
-  getRejectedPayments:    ()                => request('/payments-rejected'),};
+  getRejectedPayments:    ()                => request('/payments-rejected'),
+  bulkGet:                (studentIds)      => request('/payments-bulk', { method: 'POST', body: JSON.stringify({ studentIds }) }),
+};
 
 // ── DOCUMENTS ────────────────────────────────────────────────
 export const docsApi = {
@@ -160,7 +163,7 @@ export const docsApi = {
 };
 
 export const documentInventoryApi = {
-  list:        ()                => request('/document-inventory'),
+  list:        (params = {})     => request(`/document-inventory?${new URLSearchParams(params)}`),
   addDocs:     (studentId, data) => request(`/document-inventory/${studentId}/docs`, { method: 'POST', body: JSON.stringify(data) }),
   markReceived:(docId, data={})  => request(`/document-inventory/docs/${docId}/receive`, { method: 'PATCH', body: JSON.stringify(data) }),
   requestDoc:  (docId, data={})  => request(`/document-inventory/docs/${docId}/request`, { method: 'PATCH', body: JSON.stringify(data) }),

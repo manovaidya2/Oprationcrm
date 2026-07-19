@@ -4,7 +4,7 @@ const Student = require('../models/Student');
 const User    = require('../models/User');
 const Counselor = require('../models/Counselor');
 const { audit, notify, notifyRole } = require('../utils/helpers');
-const { enrichPaymentDuplicateUtrs } = require('../utils/utrDuplicate');
+const { enrichPaymentDuplicateUtrs, findDuplicateUtrMatches } = require('../utils/utrDuplicate');
 
 const CENTER_FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejected', 'University_Rejected'];
 
@@ -47,6 +47,16 @@ async function canActForStudentCenter(req, student) {
   return (counselor?.centers || []).some(centerId => String(centerId) === String(student.center));
 }
 
+// POST /api/payments-bulk — fetch payments for many students in ONE query (no duplicate-check, fast)
+exports.bulkGet = asyncHandler(async (req, res) => {
+  const { studentIds } = req.body;
+  if (!Array.isArray(studentIds) || studentIds.length === 0) return res.json([]);
+  const payments = await Payment.find({ student: { $in: studentIds } })
+    .select('student totalFee discount netFee paidAmount dueAmount transactions')
+    .lean();
+  res.json(payments);
+});
+
 exports.get = asyncHandler(async (req, res) => {
   const existing = await Payment.findOne({ student: req.params.studentId });
   if (existing) await existing.save();
@@ -54,7 +64,50 @@ exports.get = asyncHandler(async (req, res) => {
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
     .populate('transactions.documentRef', 'name');
-  res.json(await enrichPaymentDuplicateUtrs(payment));
+  // Duplicate-UTR check is expensive (scans full collections) — only run it when explicitly requested
+  // (dashboards/lists that just need totals should NOT trigger this)
+  if (req.query.checkDuplicates === '1') {
+    return res.json(await enrichPaymentDuplicateUtrs(payment));
+  }
+  res.json(payment);
+});
+
+exports.accountantFeePayments = asyncHandler(async (req, res) => {
+  const payments = await Payment.find({
+    'transactions.verificationStatus': 'pending_accountant',
+  })
+    .populate({
+      path: 'student',
+      select: 'name phone email courseName courseYear enrollmentNumber applicationStatus center counselor university fatherName tenth_percent twelfth_percent',
+      populate: [
+        { path: 'center', select: 'name organisationName city' },
+        { path: 'counselor', select: 'name' },
+        { path: 'university', select: 'name shortName' },
+      ],
+    })
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role')
+    .lean();
+
+  const entries = [];
+  for (const payment of payments) {
+    if (!payment.student) continue;
+    (payment.transactions || [])
+      .filter(tx => tx.verificationStatus === 'pending_accountant' && tx.type !== 'Document' && !tx.documentRef)
+      .forEach(tx => entries.push({ student: payment.student, payment, tx }));
+  }
+
+  await Promise.all(entries.map(async entry => {
+    const matches = await findDuplicateUtrMatches(entry.tx.utrRef, {
+      paymentId: entry.payment._id,
+      txId: entry.tx._id,
+    });
+    entry.tx.duplicateUtrMatches = matches;
+    entry.tx.utrDuplicate = matches.length > 0;
+  }));
+
+  entries.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
+  res.json(entries);
 });
 
 // PUT - lock fee after first submission for Center role

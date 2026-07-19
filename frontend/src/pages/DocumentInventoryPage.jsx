@@ -115,6 +115,8 @@ export default function DocumentInventoryPage() {
   const [actionDate, setActionDate] = useState(todayInput());
   const [csvOpen, setCsvOpen] = useState(false);
   const [csvStudentSearch, setCsvStudentSearch] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [bgLoading, setBgLoading] = useState(false);
   const [csvFilters, setCsvFilters] = useState({
     scope: 'all',
     studentId: 'all',
@@ -128,12 +130,28 @@ export default function DocumentInventoryPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      setRows(await documentInventoryApi.list());
-    } catch (e) {
-      toast.error(e.message || 'Failed to load inventory');
-    } finally {
+      // 1) Fetch just the first page fast — page renders immediately with this data
+      const first = await documentInventoryApi.list({ page: 1, limit: 25 });
+      setRows(first.rows || []);
       setLoading(false);
-    }
+
+      // 2) Fetch remaining pages ONE AT A TIME in the background (not in parallel),
+      // appending as each arrives — keeps server load low, page stays usable meanwhile.
+      if (first.hasMore) {
+        setBgLoading(true);
+        let page = 2;
+        let hasMore = true;
+        while (hasMore) {
+          try {
+            const next = await documentInventoryApi.list({ page, limit: 25 });
+            setRows(prev => [...prev, ...(next.rows || [])]);
+            hasMore = next.hasMore;
+            page += 1;
+          } catch { hasMore = false; }
+        }
+        setBgLoading(false);
+      }
+    } catch (e) { toast.error('Failed to load: ' + e.message); setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -395,6 +413,13 @@ export default function DocumentInventoryPage() {
   if (loading) {
     return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
   }
+
+  const bgLoadingBanner = bgLoading && (
+    <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mb-3">
+      <Loader2 className="h-3.5 w-3.5 animate-spin"/>
+      Loading more records in background… {rows.length} loaded so far
+    </div>
+  );
 
   return (
     <div className="space-y-4">
