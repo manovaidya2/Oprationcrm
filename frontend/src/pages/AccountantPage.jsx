@@ -1620,12 +1620,10 @@ export default function AccountantPage() {
         <TabsContent value="history" className="space-y-2 mt-3">
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm text-muted-foreground">Complete audit trail of all actions — every incoming and outgoing event per student.</p>
-            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
-              {historyList.bgLoading && <Loader2 className="h-3 w-3 animate-spin"/>}
-              {history.length}{historyList.bgLoading ? ` of ${historyList.total}` : ''} records
-            </span>
+            <span className="text-xs text-muted-foreground">{historyList.total} records</span>
           </div>
-          {historyList.loading && history.length === 0 && (
+          <div className={`space-y-2 transition-opacity duration-200 ${historyList.loading && filtHistory.length > 0 ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+          {historyList.loading && filtHistory.length === 0 && (
             <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground"/></div>
           )}
           {filtHistory.length===0 ? (
@@ -1744,6 +1742,9 @@ export default function AccountantPage() {
               )}
             </div>
           ))}
+          </div>
+
+          <PagerBar page={historyList.page} pages={historyList.pages} total={historyList.total} loading={historyList.loading} onPage={historyList.setPage}/>
         </TabsContent>
       </Tabs>
 
