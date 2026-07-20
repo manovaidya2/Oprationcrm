@@ -156,7 +156,10 @@ router.patch('/documents/:id/dispatch-to-center',   protect, requireRole('Admin'
 router.patch('/documents/:id/confirm-delivery', protect, requireRole('Admin','Center','Counselor','PaymentCoordinator'), docC.centerConfirmDelivery);
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────
-router.get  ('/notifications',          protect, misc.listNotifications);
+router.get   ('/notifications',          protect, misc.listNotifications);
+router.get   ('/accountant/history',       protect, requireRole('Admin','Accountant'), misc.accountantHistory);
+router.get   ('/accountant/students-queue',protect, requireRole('Admin','Accountant'), studentC.accountantStudentsQueue);
+router.get   ('/accountant/docs-queue',    protect, requireRole('Admin','Accountant'), docC.accountantDocsQueue);
 router.patch('/notifications/read-all', protect, misc.markRead);
 router.patch('/notifications/:id/read', protect, misc.markOneRead);
 

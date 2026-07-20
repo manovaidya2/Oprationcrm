@@ -1027,6 +1027,54 @@ exports.amountSettle = asyncHandler(async (req, res) => {
 });
 
 // DELETE /api/students/:id  — Admin only
+// GET /api/accountant/students-queue?queue=admissions|unirejected|amountsettle
+exports.accountantStudentsQueue = asyncHandler(async (req, res) => {
+  const { queue } = req.query;
+  let filter;
+  if (queue === 'admissions') {
+    filter = { applicationStatus: { $in: ['Counselor_Approved','Accountant_Pending'] } };
+  } else if (queue === 'unirejected') {
+    filter = { $or: [
+      { applicationStatus: 'University_Rejected' },
+      { applicationStatus: 'Accountant_Rejected', rejectedVia: 'university' },
+    ] };
+  } else if (queue === 'amountsettle') {
+    filter = { $or: [
+      { applicationStatus: 'Rejected' },
+      { applicationStatus: 'Cancelled', settlementForwardedToAccountant: true },
+      { applicationStatus: 'Cancelled', 'statusHistory.status': 'Settlement_Forwarded' },
+    ] };
+  } else {
+    const e = new Error('Invalid queue'); e.status = 400; throw e;
+  }
+
+  if (req.query.search) {
+    const q = req.query.search;
+    filter = { $and: [filter, { $or: [
+      { name: { $regex: q, $options: 'i' } },
+      { enrollmentNumber: { $regex: q, $options: 'i' } },
+      { phone: { $regex: q, $options: 'i' } },
+    ] }] };
+  }
+
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const skip  = (page - 1) * limit;
+
+  const [total, students] = await Promise.all([
+    Student.countDocuments(filter),
+    Student.find(filter)
+      .populate('center', 'name city')
+      .populate('counselor', 'name avatarColor')
+      .populate('university', 'name shortName avatarColor')
+      .sort('-updatedAt')
+      .skip(skip)
+      .limit(limit),
+  ]);
+  res.json({ students, total, page, pages: Math.ceil(total / limit) || 1 });
+});
+
+// DELETE /api/students/:id  — Admin only
 exports.remove = asyncHandler(async (req, res) => {
   const StudentDocument = require('../models/StudentDocument');
   const Notification    = require('../models/Notification');

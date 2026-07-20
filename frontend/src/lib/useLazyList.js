@@ -15,7 +15,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
  * @param {any[]}  [opts.deps=[]]      — when these change, restart from page 1
  * @param {string} [opts.itemsKey]     — key in the response holding the array (auto-detected if omitted)
  */
-export function useLazyList(fetchPage, { limit = 25, deps = [] } = {}) {
+export function useLazyList(fetchPage, { limit = 25, deps = [], enabled = true } = {}) {
   const [items, setItems]       = useState([]);
   const [loading, setLoading]   = useState(true);
   const [bgLoading, setBgLoading] = useState(false);
@@ -62,11 +62,14 @@ export function useLazyList(fetchPage, { limit = 25, deps = [] } = {}) {
     }
   }, [fetchPage, limit]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const startedRef = useRef(false);
   useEffect(() => {
+    if (!enabled) return;
+    startedRef.current = true;
     run();
     return () => { cancelledRef.current = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [enabled, ...deps]);
 
-  return { items, setItems, loading, bgLoading, total, error, reload: run };
+  return { items, setItems, loading: enabled ? loading : false, bgLoading, total, error, reload: run };
 }

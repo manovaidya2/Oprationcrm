@@ -894,6 +894,45 @@ async function assertInventoryStudentAccess(req, student) {
   }
 }
 
+// GET /api/accountant/docs-queue?queue=scanreview|docrequest|docpayments|docpayments_all
+exports.accountantDocsQueue = asyncHandler(async (req, res) => {
+  const { queue } = req.query;
+  const filter = { origin: { $ne: 'Inventory' } };
+  if (queue === 'scanreview') {
+    filter.status = 'Accountant_Received';
+  } else if (queue === 'docrequest') {
+    filter.status = { $in: ['Forwarded','Fee_Pending'] };
+  } else if (queue === 'docpayments') {
+    filter.status = 'Payment_Submitted';
+  } else if (queue === 'docpayments_all') {
+    filter.status = { $in: ['Payment_Submitted','Payment_Verified','Center_Notified','Fee_Rejected'] };
+    filter['payments.0'] = { $exists: true };
+  } else {
+    const e = new Error('Invalid queue'); e.status = 400; throw e;
+  }
+
+  if (req.query.search) {
+    const q = req.query.search;
+    filter.name = { $regex: q, $options: 'i' };
+  }
+
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const skip  = (page - 1) * limit;
+
+  const [total, documents] = await Promise.all([
+    StudentDoc.countDocuments(filter),
+    StudentDoc.find(filter)
+      .populate('student', 'name enrollmentNumber courseName')
+      .populate('center', 'name')
+      .sort('-updatedAt')
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+  ]);
+  res.json({ documents, total, page, pages: Math.ceil(total / limit) || 1 });
+});
+
 exports.inventoryList = asyncHandler(async (req, res) => {
   const filter = { applicationStatus: 'Enrolled', enrollmentNumber: { $exists: true, $ne: '' } };
   if (req.user.role === 'Counselor') {

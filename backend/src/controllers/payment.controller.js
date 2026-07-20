@@ -73,9 +73,13 @@ exports.get = asyncHandler(async (req, res) => {
 });
 
 exports.accountantFeePayments = asyncHandler(async (req, res) => {
-  const payments = await Payment.find({
-    'transactions.verificationStatus': 'pending_accountant',
-  })
+  // status: 'pending' (new — needs action) or 'history' (already verified/rejected)
+  const status = req.query.status === 'history' ? 'history' : 'pending';
+  const statusFilter = status === 'pending'
+    ? { 'transactions.verificationStatus': 'pending_accountant' }
+    : { 'transactions.verificationStatus': { $in: ['verified', 'rejected'] } };
+
+  const payments = await Payment.find(statusFilter)
     .populate({
       path: 'student',
       select: 'name phone email courseName courseYear enrollmentNumber applicationStatus center counselor university fatherName tenth_percent twelfth_percent',
@@ -89,24 +93,48 @@ exports.accountantFeePayments = asyncHandler(async (req, res) => {
     .populate('transactions.verifiedBy', 'name role')
     .lean();
 
-  const entries = [];
+  const wantedStatuses = status === 'pending' ? ['pending_accountant'] : ['verified', 'rejected'];
+  let entries = [];
   for (const payment of payments) {
     if (!payment.student) continue;
     (payment.transactions || [])
-      .filter(tx => tx.verificationStatus === 'pending_accountant' && tx.type !== 'Document' && !tx.documentRef)
+      .filter(tx => wantedStatuses.includes(tx.verificationStatus) && tx.type !== 'Document' && !tx.documentRef)
       .forEach(tx => entries.push({ student: payment.student, payment, tx }));
   }
 
-  await Promise.all(entries.map(async entry => {
-    const matches = await findDuplicateUtrMatches(entry.tx.utrRef, {
-      paymentId: entry.payment._id,
-      txId: entry.tx._id,
-    });
-    entry.tx.duplicateUtrMatches = matches;
-    entry.tx.utrDuplicate = matches.length > 0;
-  }));
+  if (req.query.search) {
+    const q = req.query.search.toLowerCase();
+    entries = entries.filter(e =>
+      e.student.name?.toLowerCase().includes(q) ||
+      e.student.center?.name?.toLowerCase().includes(q) ||
+      e.student.enrollmentNumber?.toLowerCase().includes(q) ||
+      e.tx.utrRef?.toLowerCase().includes(q)
+    );
+  }
+
+  // Duplicate-UTR check only matters for the pending (actionable) queue
+  if (status === 'pending') {
+    await Promise.all(entries.map(async entry => {
+      const matches = await findDuplicateUtrMatches(entry.tx.utrRef, {
+        paymentId: entry.payment._id,
+        txId: entry.tx._id,
+      });
+      entry.tx.duplicateUtrMatches = matches;
+      entry.tx.utrDuplicate = matches.length > 0;
+    }));
+  }
 
   entries.sort((a, b) => new Date(b.tx.paidAt || b.tx.createdAt || 0) - new Date(a.tx.paidAt || a.tx.createdAt || 0));
+
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const total = entries.length;
+  const start = (page - 1) * limit;
+
+  // Opt-in pagination — no page param means old callers get the full array (unchanged behavior)
+  if (req.query.page) {
+    return res.json({ entries: entries.slice(start, start + limit), total, page, pages: Math.ceil(total / limit) || 1 });
+  }
   res.json(entries);
 });
 

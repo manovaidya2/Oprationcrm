@@ -114,7 +114,7 @@ export const paymentsApi = {  get:            (sid, opts = {}) => request(`/paym
   updateTransactionForm:  (sid, txId, fd)   => request(`/payments/${sid}/transactions/${txId}`, { method: 'PATCH', body: fd }),  // FormData for file upload
   installmentTimeline:    ()                => request('/payment-installments'),
   dueTimeline:            ()                => request('/payment-due-timelines'),
-  accountantFeePayments:  ()                => request('/accountant/fee-payments'),
+  accountantFeePayments:  (params = {})     => request(`/accountant/fee-payments?${new URLSearchParams(params)}`),
   updatePaymentTimeline:  (paymentId, data) => request(`/payment-installments/${paymentId}/timeline`, { method: 'PUT', body: JSON.stringify(data) }),
   updateInstallmentTimeline: (paymentId, data) => request(`/payment-installments/${paymentId}/installments`, { method: 'PUT', body: JSON.stringify(data) }),
   markInstallmentPaid:    (paymentId, installmentId, fd) => uploadRequest(`/payment-installments/${paymentId}/installments/${installmentId}/pay`, 'POST', fd),
@@ -181,6 +181,13 @@ export const chatApi = {
   messages:      (id)          => request(`/chat/conversations/${id}/messages`),
   sendMessage:   (id, body)    => request(`/chat/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ body }) }),
   updateTicket:  (id, status, data = {})  => request(`/chat/tickets/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...data }) }),
+};
+
+
+export const accountantQueueApi = {
+  history:       (params = {}) => request(`/accountant/history?${new URLSearchParams(params)}`),
+  studentsQueue: (queue, params = {}) => request(`/accountant/students-queue?${new URLSearchParams({ queue, ...params })}`),
+  docsQueue:     (queue, params = {}) => request(`/accountant/docs-queue?${new URLSearchParams({ queue, ...params })}`),
 };
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────

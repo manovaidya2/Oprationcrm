@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLazyList } from '@/lib/useLazyList';
+import { usePagedFetch } from '@/lib/usePagedFetch';
+import { PagerBar } from '@/components/PagerBar';
+import { accountantQueueApi } from '@/lib/api';
 import {
   Loader2, IndianRupee, CheckCircle2, XCircle, Clock, Eye,
   Paperclip, History, User, Calendar, Hash, Search, X, Send, Download, Trash2
@@ -398,52 +402,107 @@ function PaidToAccountBox({ tx, accMap }) {
 export default function AccountantPage() {
   const { user } = useAuth();
   const { dismiss, isDismissed } = usePanelDismissals(user, 'accountant');
-  const [students,    setStudents]    = useState([]);
-  const [uniRejected, setUniRejected] = useState([]);
-  const [amountSettleQueue, setAmountSettleQueue] = useState([]);
-  const [docs,        setDocs]        = useState([]);
-  const [payDocs,     setPayDocs]     = useState([]);
-  const [feePayments, setFeePayments] = useState([]);   // only pending
-  const [allFeePayments, setAllFeePayments] = useState([]); // pending + verified + rejected
-  const [allPayDocs, setAllPayDocs] = useState([]);     // all doc payments (any verification status)
-  const [scanDocs,    setScanDocs]    = useState([]);
-  const [history,     setHistory]     = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [studentPayMap, setStudentPayMap] = useState({});
-  const [admissionFeeMap, setAdmissionFeeMap] = useState({});
   const [payAccounts, setPayAccounts] = useState({}); // id → account object
   const [dialog,      setDialog]      = useState(null);
   const [detailStudent, setDetailStudent] = useState(null);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('feepay');
+
+  // Background prefetch queue — 'feepay' (default tab) loads immediately,
+  // then every other tab's FIRST page loads on its own, staggered in the
+  // background (one request every ~600ms) so the server never sees a burst
+  // of parallel requests, and by the time the user clicks a tab its data
+  // is usually already there.
+  const TAB_ORDER = ['admissions', 'unireject', 'amountsettle', 'scans', 'docs', 'payments', 'history'];
+  const [readyTabs, setReadyTabs] = useState(() => new Set(['feepay']));
+
+  useEffect(() => {
+    let cancelled = false;
+    TAB_ORDER.forEach((tab, i) => {
+      setTimeout(() => {
+        if (!cancelled) setReadyTabs(prev => prev.has(tab) ? prev : new Set(prev).add(tab));
+      }, (i + 1) * 600);
+    });
+    return () => { cancelled = true; };
+  }, []);
   const [note,   setNote]   = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedDocIds, setSelectedDocIds] = useState([]);
-  const fullLoadedRef = useRef(false);
-  const fullLoadingRef = useRef(false);
+  const studentPayMap = {};    // TODO: restore per-student fee summary in Doc Request tab if needed
+  const admissionFeeMap = {};  // TODO: restore per-student fee panel in Admissions tab if needed
 
-  const applyCachedData = useCallback((cached) => {
-    if (!cached) return false;
-    if (cached.payAccounts) setPayAccounts(cached.payAccounts);
-    if (cached.feePayments) setFeePayments(cached.feePayments);
-    if (cached.allFeePayments) setAllFeePayments(cached.allFeePayments);
-    if (cached.students) setStudents(cached.students);
-    if (cached.uniRejected) setUniRejected(cached.uniRejected);
-    if (cached.amountSettleQueue) setAmountSettleQueue(cached.amountSettleQueue);
-    if (cached.docs) setDocs(cached.docs);
-    if (cached.payDocs) setPayDocs(cached.payDocs);
-    if (cached.allPayDocs) setAllPayDocs(cached.allPayDocs);
-    if (cached.scanDocs) setScanDocs(cached.scanDocs);
-    if (cached.history) setHistory(cached.history);
-    if (cached.studentPayMap) setStudentPayMap(cached.studentPayMap);
-    if (cached.admissionFeeMap) setAdmissionFeeMap(cached.admissionFeeMap);
-    if (cached.full) fullLoadedRef.current = true;
-    setLoading(false);
-    return true;
+  useEffect(() => {
+    paymentAccountsApi.list().then(accs => {
+      const m = {};
+      accs.forEach(a => { m[String(a._id)] = a; });
+      setPayAccounts(m);
+    }).catch(() => {});
   }, []);
 
-  const load = useCallback(async (loadAll = false) => {
+  const searchParam = search ? { search } : {};
+
+  // ── Each tab is now fully independent — its own paginated fetch, its own
+  // loading state, only active when its tab is selected. Switching tabs never
+  // triggers any other tab's fetch, and each request only asks for one page. ──
+  const feePayPending = usePagedFetch(
+    useCallback((page, limit) => paymentsApi.accountantFeePayments({ status: 'pending', page, limit, ...searchParam }), [search]),
+   { limit: 20, enabled: readyTabs.has('feepay'), deps: [search] }
+  );
+  const feePayHistory = usePagedFetch(
+    useCallback((page, limit) => paymentsApi.accountantFeePayments({ status: 'history', page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('feepay'), deps: [search] }
+  );
+  const admissionsList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.studentsQueue('admissions', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('admissions'), deps: [search] }
+  );
+  const uniRejectedList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.studentsQueue('unirejected', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('unireject'), deps: [search] }
+  );
+  const amountSettleList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.studentsQueue('amountsettle', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('amountsettle'), deps: [search] }
+  );
+  const scanReviewList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('scanreview', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('scans'), deps: [search] }
+  );
+  const docRequestList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('docrequest', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('docs'), deps: [search] }
+  );
+  const docPaymentsList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('payments'), deps: [search] }
+  );
+  const docPaymentsAllList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments_all', { page, limit, ...searchParam }), [search]),
+    { limit: 20, enabled: readyTabs.has('payments'), deps: [search] }
+  );
+  const historyList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.history({ page, limit, ...searchParam }), [search]),
+    { limit: 30, enabled: readyTabs.has('history'), deps: [search] }
+  );
+
+  // Aliases so the existing JSX below (which already reads these names) keeps working
+  const students          = admissionsList.items;
+  const uniRejected        = uniRejectedList.items;
+  const amountSettleQueue  = amountSettleList.items;
+  const docs               = docRequestList.items;
+  const scanDocs           = scanReviewList.items;
+  const payDocs            = docPaymentsList.items;
+  const feePayments        = feePayPending.items;
+  const allFeePayments     = feePayHistory.items;
+  const allPayDocs         = docPaymentsAllList.items;
+  const history            = historyList.items;
+
+  
+
+  
+
+  async function _unused_load_disabled(loadAll = false) {
     if (loadAll && accountantPageCache.full) {
       applyCachedData(accountantPageCache.full);
       return;
@@ -522,8 +581,10 @@ export default function AccountantPage() {
       setPayDocs(nextPayDocs);
       setAllPayDocs(nextAllPayDocs);
 
-      // Build complete history from all sources
+      // History tab is now fetched independently via historyList (useLazyList) —
+      // this monolithic build is no longer needed and is disabled below.
       const hist = [];
+      if (false) {
 
       // ACTION LABELS for student statusHistory entries
       const ACTION_CONFIG = {
@@ -689,40 +750,23 @@ export default function AccountantPage() {
 
 
       hist.sort((a,b) => b._sortKey - a._sortKey);
-      setHistory(hist);
+      } // end disabled history-build block
       fullLoadedRef.current = true;
-      accountantPageCache.full = {
-        full: true,
-        students: nextStudents,
-        uniRejected: nextUniRejected,
-        amountSettleQueue: nextAmountSettleQueue,
-        docs: nextDocs,
-        scanDocs: nextScanDocs,
-        payDocs: nextPayDocs,
-        allPayDocs: nextAllPayDocs,
-        feePayments: pending,
-        allFeePayments: initialFeeEntries,
-        admissionFeeMap: nextAdmissionFeeMap,
-        studentPayMap: payMap,
-        history: hist,
-        payAccounts: loadedPayAccounts,
-      };
-    } catch {
-      if (!initialFeeLoaded) toast.error('Failed to load');
-    } finally {
-      if (loadAll) fullLoadingRef.current = false;
-      setLoading(false);
+      } catch {
+      // disabled — kept only for reference, not called anywhere
     }
-  }, [applyCachedData]);
+  }
 
-  useEffect(() => { load(); }, [load]);
-
-  const refreshCurrentTab = useCallback(() => {
-    clearAccountantPageCache();
-    fullLoadedRef.current = false;
-    fullLoadingRef.current = false;
-    load(activeTab !== 'feepay');
-  }, [activeTab, load]);
+  function refreshCurrentTab() {
+    if (activeTab === 'feepay')       { feePayPending.reload(); feePayHistory.reload(); }
+    else if (activeTab === 'admissions')   admissionsList.reload();
+    else if (activeTab === 'unireject')    uniRejectedList.reload();
+    else if (activeTab === 'amountsettle') amountSettleList.reload();
+    else if (activeTab === 'scans')        scanReviewList.reload();
+    else if (activeTab === 'docs')         docRequestList.reload();
+    else if (activeTab === 'payments')     docPaymentsList.reload();
+    else if (activeTab === 'history')      historyList.reload();
+  }
 
   async function doAdmAction(action) {
     setSaving(true);
@@ -816,27 +860,20 @@ export default function AccountantPage() {
     } catch(e) { toast.error(e.message); }
   }
 
-  // Search filter - matches student name, center, UTR, enrollment number
-  const q = search.toLowerCase().trim();
-  const matchS  = s  => !q || s.name?.toLowerCase().includes(q) || s.center?.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q);
-  const matchD  = d  => !q || d.student?.name?.toLowerCase().includes(q) || d.name?.toLowerCase().includes(q) || d.center?.name?.toLowerCase().includes(q);
-  const matchFP = fp => !q || fp.student?.name?.toLowerCase().includes(q) || fp.tx?.utrRef?.toLowerCase().includes(q) || fp.student?.center?.name?.toLowerCase().includes(q);
-  const matchH  = h  => !q || h.studentName?.toLowerCase().includes(q) || h.centerName?.toLowerCase().includes(q) || h.utrRef?.toLowerCase().includes(q) || h.entityName?.toLowerCase().includes(q) || h.enrollmentNumber?.toLowerCase().includes(q) || h.universityName?.toLowerCase().includes(q) || h.note?.toLowerCase().includes(q) || h.actionConfig?.label?.toLowerCase().includes(q);
+  // Search is now applied server-side (per-tab, in the paginated fetch above) —
+  // dismiss-filtering still happens client-side since it's a local UI concern.
+  const filtStudents       = students.filter(s => !isDismissed(`student:${s._id}:admission`));
+  const filtUniRejected    = uniRejected;
+  const filtAmountSettle   = amountSettleQueue;
+  const filtDocs           = docs.filter(d => !isDismissed(`doc:${d._id}:fee`));
+  const filtPayDocs     = payDocs.filter(d => !isDismissed(`doc:${d._id}:payment`));
+  const filtFeePayments    = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
+  const filtAllFeePayments = allFeePayments;
+  const filtAllPayDocs     = allPayDocs;
+  const filtHistory     = history;
 
-  const filtStudents       = students.filter(s => !isDismissed(`student:${s._id}:admission`)).filter(matchS);
-  const filtUniRejected    = uniRejected.filter(matchS);
-  const filtAmountSettle   = amountSettleQueue.filter(matchS);
-  const filtDocs           = docs.filter(d => !isDismissed(`doc:${d._id}:fee`)).filter(matchD);
-  const filtPayDocs     = payDocs.filter(d => !isDismissed(`doc:${d._id}:payment`)).filter(matchD);
-  const filtFeePayments    = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`)).filter(matchFP);
-  const filtAllFeePayments = allFeePayments.filter(matchFP);
-  const filtAllPayDocs     = allPayDocs.filter(matchD);
-  const filtHistory     = history.filter(matchH);
-
-  const pendingSettleCount = amountSettleQueue.filter(s => !s.amountSettled).length;
-  const totalPending = students.length + uniRejected.length + pendingSettleCount + feePayments.length + docs.length + payDocs.length;
-
-  if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
+  const pendingSettleCount = amountSettleList.total ? amountSettleQueue.filter(s => !s.amountSettled).length : 0;
+  const totalPending = admissionsList.total + uniRejectedList.total + pendingSettleCount + feePayPending.total + docRequestList.total + docPaymentsList.total;
 
   return (
     <div className="space-y-4">
@@ -864,12 +901,13 @@ export default function AccountantPage() {
       )}
 
       {/* Stats */}
+      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           ['Pending Actions', totalPending, 'text-amber-600'],
-          ['Fee Payments', feePayments.length, 'text-orange-600'],
-          ['Doc Payments', payDocs.length, 'text-purple-600'],
-          ['Verified Records', history.length, 'text-emerald-600'],
+          ['Fee Payments', feePayPending.total, 'text-orange-600'],
+          ['Doc Payments', docPaymentsList.total, 'text-purple-600'],
+          ['Verified Records', historyList.total, 'text-emerald-600'],
         ].map(([l,v,c]) => (
           <Card key={l}><CardContent className="pt-4 pb-3 text-center">
             <div className={`text-2xl font-bold ${c}`}>{v}</div>
@@ -882,19 +920,19 @@ export default function AccountantPage() {
         value={activeTab}
         onValueChange={(val) => {
           setActiveTab(val);
-          if (val !== 'feepay') load(true);
+          setReadyTabs(prev => prev.has(val) ? prev : new Set(prev).add(val));
         }}
       >
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
-            { val:'scans',       label:'Scan Review',    count: scanDocs.length,                                         dot:'bg-violet-500' },
-            { val:'admissions',  label:'Admissions',     count: filtStudents.length,          dot:'bg-blue-500'   },
-            { val:'unireject',   label:'Uni Rejected',   count: search ? filtUniRejected.length : uniRejected.length,    dot:'bg-orange-500' },
-            { val:'amountsettle',label:'Amount Settle',  count: search ? filtAmountSettle.length : amountSettleQueue.length, dot:'bg-emerald-500', badge: pendingSettleCount },
-            { val:'feepay',      label:'Fee Payments',   count: filtFeePayments.length,    dot:'bg-amber-500'  },
-            { val:'docs',        label:'Doc Request',    count: filtDocs.length,                  dot:'bg-indigo-500' },
-            { val:'payments',    label:'Doc Payments',   count: filtPayDocs.length,            dot:'bg-teal-500'   },
-            { val:'history',     label:'History',        count: search ? filtHistory.length : history.length,            dot:''              },
+            { val:'scans',       label:'Scan Review',    count: scanReviewList.total,                                    dot:'bg-violet-500' },
+            { val:'admissions',  label:'Admissions',     count: admissionsList.total,          dot:'bg-blue-500'   },
+            { val:'unireject',   label:'Uni Rejected',   count: uniRejectedList.total,    dot:'bg-orange-500' },
+            { val:'amountsettle',label:'Amount Settle',  count: amountSettleList.total, dot:'bg-emerald-500', badge: pendingSettleCount },
+            { val:'feepay',      label:'Fee Payments',   count: feePayPending.total,    dot:'bg-amber-500'  },
+            { val:'docs',        label:'Doc Request',    count: docRequestList.total,                  dot:'bg-indigo-500' },
+            { val:'payments',    label:'Doc Payments',   count: docPaymentsList.total,            dot:'bg-teal-500'   },
+            { val:'history',     label:'History',        count: historyList.total,            dot:''              },
           ].map(({ val, label, count, dot, badge }) => (
             <TabsTrigger key={val} value={val}
               className="rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-1.5 px-3 flex items-center gap-1.5">
@@ -1075,7 +1113,9 @@ export default function AccountantPage() {
         {/* Fee Payments Tab */}
         <TabsContent value="feepay" className="space-y-2 mt-3">
           <p className="text-sm text-muted-foreground">Counselor verified fee payments — verify or reject below.</p>
-          {filtFeePayments.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No fee payments matching "${search}"` : 'No fee payments pending verification'}</div>
+          <div className={`space-y-2 transition-opacity duration-200 ${feePayPending.loading && filtFeePayments.length > 0 ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+          {feePayPending.loading && filtFeePayments.length === 0 ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground"/></div> :
+          filtFeePayments.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No fee payments matching "${search}"` : 'No fee payments pending verification'}</div>
           : filtFeePayments.map(({student, payment, tx}) => (
             <Card key={tx._id} className="border-orange-200">
               <CardContent className="p-4">
@@ -1146,17 +1186,26 @@ export default function AccountantPage() {
               </CardContent>
             </Card>
           ))}
+          </div>
 
-          {/* ── Permanent list: ALL fee payment students ───── */}
-          {allFeePayments.length > 0 && (
-            <div className="mt-6">
+          <PagerBar page={feePayPending.page} pages={feePayPending.pages} total={feePayPending.total} loading={feePayPending.loading} onPage={feePayPending.setPage}/>
+{feePayPending.bgLoading && (
+  <p className="text-xs text-slate-400 flex items-center gap-1.5 px-1">
+    <Loader2 className="h-3 w-3 animate-spin"/>Preloading remaining pages in background…
+  </p>
+)}
+
+          {/* ── Verified/Rejected fee payment history — its own separate page ───── */}
+          <div className="mt-6">
               <div className="flex items-center gap-2 mb-3">
                 <div className="h-px flex-1 bg-border"/>
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
-                  All Fee Payment Students ({allFeePayments.length})
+                  Fee Payment History ({feePayHistory.total})
                 </span>
                 <div className="h-px flex-1 bg-border"/>
               </div>
+              {feePayHistory.loading ? <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground"/></div> :
+              allFeePayments.length === 0 ? <div className="text-center py-6 text-sm text-muted-foreground">No verified/rejected payments yet</div> :
               <div className="space-y-2">
                 {allFeePayments.map(({ student, payment, tx }, idx) => {
                   const isPending  = tx.verificationStatus === 'pending_accountant';
@@ -1260,10 +1309,12 @@ export default function AccountantPage() {
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
+              </div>}
+              <PagerBar page={feePayHistory.page} pages={feePayHistory.pages} total={feePayHistory.total} loading={feePayHistory.loading} onPage={feePayHistory.setPage}/>
+          </div>
         </TabsContent>
+
+        {/* Doc Fees Tab */}
 
         {/* Doc Fees Tab */}
         <TabsContent value="docs" className="space-y-2 mt-3">
@@ -1569,8 +1620,14 @@ export default function AccountantPage() {
         <TabsContent value="history" className="space-y-2 mt-3">
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm text-muted-foreground">Complete audit trail of all actions — every incoming and outgoing event per student.</p>
-            <span className="text-xs text-muted-foreground">{history.length} records</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+              {historyList.bgLoading && <Loader2 className="h-3 w-3 animate-spin"/>}
+              {history.length}{historyList.bgLoading ? ` of ${historyList.total}` : ''} records
+            </span>
           </div>
+          {historyList.loading && history.length === 0 && (
+            <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground"/></div>
+          )}
           {filtHistory.length===0 ? (
             <div className="text-center py-10 text-muted-foreground">
               <History className="h-10 w-10 mx-auto mb-3 text-muted-foreground"/>

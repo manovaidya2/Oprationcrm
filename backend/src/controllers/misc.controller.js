@@ -474,6 +474,132 @@ exports.listAudit = asyncHandler(async (req, res) => {
 
   res.json({ logs, total, page, pages: Math.ceil(total / limit) });
 });
+
+// ── Accountant History — combined feed from Student.statusHistory + Document approvals ──
+// Building this feed requires scanning students/documents' embedded history arrays.
+// We compute it once and cache briefly so subsequent pages of the SAME view are instant
+// (no repeated full-collection scan per page request).
+let _acctHistoryCache = { data: null, at: 0 };
+const ACCT_HISTORY_TTL_MS = 60 * 1000; // 1 minute
+
+exports.accountantHistory = asyncHandler(async (req, res) => {
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+  const force = req.query.refresh === '1';
+
+  const now = Date.now();
+  if (force || !_acctHistoryCache.data || (now - _acctHistoryCache.at) > ACCT_HISTORY_TTL_MS) {
+    const ACTION_CONFIG = {
+      Sent_To_University:  { label: 'Sent to University',        badge: 'bg-purple-100 text-purple-700',  icon: '🎓' },
+      University_Rejected: { label: 'Rejected by University',    badge: 'bg-orange-100 text-orange-700',  icon: '🏫' },
+      Accountant_Rejected: { label: 'Forwarded to Counselor',    badge: 'bg-red-100 text-red-700',        icon: '↩' },
+      Accountant_Pending:  { label: 'Kept Pending',              badge: 'bg-amber-100 text-amber-700',    icon: '⏳' },
+      Counselor_Approved:  { label: 'Received from Counselor',   badge: 'bg-indigo-100 text-indigo-700',  icon: '📥' },
+      Enrolled:            { label: 'Enrolled by University',    badge: 'bg-emerald-100 text-emerald-700',icon: '✅' },
+      Rejected:            { label: 'Rejected → Center',         badge: 'bg-red-100 text-red-700',        icon: '✗' },
+      Changes_Requested:   { label: 'Changes Requested → Center',badge: 'bg-amber-100 text-amber-700',    icon: '✏' },
+      Submitted:           { label: 'Submitted by Center',       badge: 'bg-blue-100 text-blue-700',      icon: '📤' },
+    };
+    const ACCOUNTANT_RELEVANT = new Set([
+      'Sent_To_University', 'University_Rejected', 'Accountant_Rejected',
+      'Accountant_Pending', 'Counselor_Approved',  'Enrolled',
+      'Rejected', 'Changes_Requested',
+    ]);
+
+    const [allS, allD] = await Promise.all([
+      Student.find({})
+        .select('name center courseName university universityName enrollmentNumber statusHistory applicationStatus updatedAt rejectionReason changesRequested')
+        .populate('center', 'name')
+        .lean(),
+      StudentDoc.find({ origin: { $ne: 'Inventory' } })
+        .select('name student center type chargeFee totalPaid status statusHistory payments updatedAt')
+        .populate('student', 'name')
+        .populate('center', 'name')
+        .lean(),
+    ]);
+
+    const hist = [];
+
+    allS.forEach(s => {
+      const entries = s.statusHistory || [];
+      if (entries.length === 0) {
+        if (ACCOUNTANT_RELEVANT.has(s.applicationStatus)) {
+          hist.push({
+            id: `${s._id}-fallback`, type: 'student_action',
+            actionStatus: s.applicationStatus,
+            actionConfig: ACTION_CONFIG[s.applicationStatus] || { label: s.applicationStatus.replace(/_/g,' '), badge: 'bg-slate-100 text-slate-700', icon: '•' },
+            studentId: s._id, studentName: s.name, centerName: s.center?.name,
+            courseName: s.courseName, universityName: s.university?.name || s.universityName,
+            enrollmentNumber: s.enrollmentNumber, note: s.rejectionReason || s.changesRequested || '',
+            doneBy: '—', doneByRole: '', at: s.updatedAt, _sortKey: new Date(s.updatedAt || 0),
+          });
+        }
+        return;
+      }
+      entries.forEach((entry, idx) => {
+        if (!ACCOUNTANT_RELEVANT.has(entry.status)) return;
+        hist.push({
+          id: `${s._id}-sh-${idx}`, type: 'student_action',
+          actionStatus: entry.status,
+          actionConfig: ACTION_CONFIG[entry.status] || { label: entry.status.replace(/_/g,' '), badge: 'bg-slate-100 text-slate-700', icon: '•' },
+          studentId: s._id, studentName: s.name, centerName: s.center?.name,
+          courseName: s.courseName, universityName: s.university?.name || s.universityName,
+          enrollmentNumber: s.enrollmentNumber, note: entry.note || '',
+          doneBy: entry.changedBy?.name || entry.role || '—', doneByRole: entry.role || '',
+          at: entry.at, _sortKey: new Date(entry.at || 0),
+        });
+      });
+    });
+
+    allD.filter(d => ['Fee_Approved','Sent_To_University','Dispatched','Delivered','Payment_Verified'].includes(d.status)).forEach(d => {
+      const approvalEntry = (d.statusHistory||[]).slice().reverse().find(h => h.status === 'Fee_Approved');
+      hist.push({
+        id: d._id, type: 'doc_fee',
+        entityName: d.name, studentName: d.student?.name, centerName: d.center?.name,
+        chargeFee: d.chargeFee, totalPaid: d.totalPaid, docType: d.type,
+        verifiedBy: approvalEntry?.changedBy?.name || 'Accountant',
+        verifiedAt: approvalEntry?.at || d.updatedAt,
+        verificationNote: approvalEntry?.note || '', status: d.status,
+        _sortKey: new Date(approvalEntry?.at || d.updatedAt),
+      });
+    });
+
+    allD.filter(d => d.status === 'Payment_Verified').forEach(d => {
+      (d.payments||[]).filter(p => p.verified).forEach(p => {
+        hist.push({
+          id: `${d._id}-${p._id}`, type: 'doc_payment',
+          entityName: d.name, studentName: d.student?.name, docName: d.name,
+          amount: p.amount, mode: p.mode, utrRef: p.utrRef, upiId: p.upiId,
+          bankName: p.bankName, accountHolder: p.accountHolder, accountNumber: p.accountNumber, ifscCode: p.ifscCode,
+          paidAt: p.paidAt, verifiedBy: p.verifiedBy?.name || 'Accountant',
+          verifiedAt: p.verifiedAt || d.updatedAt, verificationNote: '',
+          _sortKey: new Date(p.verifiedAt || d.updatedAt),
+        });
+      });
+    });
+
+    hist.sort((a, b) => b._sortKey - a._sortKey);
+    _acctHistoryCache = { data: hist, at: now };
+  }
+
+  let all = _acctHistoryCache.data;
+  if (req.query.search) {
+    const q = req.query.search.toLowerCase();
+    all = all.filter(h =>
+      h.studentName?.toLowerCase().includes(q) ||
+      h.centerName?.toLowerCase().includes(q) ||
+      h.entityName?.toLowerCase().includes(q) ||
+      h.enrollmentNumber?.toLowerCase().includes(q) ||
+      h.universityName?.toLowerCase().includes(q) ||
+      h.note?.toLowerCase().includes(q) ||
+      h.utrRef?.toLowerCase().includes(q) ||
+      h.actionConfig?.label?.toLowerCase().includes(q)
+    );
+  }
+  const total = all.length;
+  const start = (page - 1) * limit;
+  res.json({ history: all.slice(start, start + limit), total, page, pages: Math.ceil(total / limit) || 1 });
+});
 // GET /api/centers/:id/students - students with their stage breakdown
 exports.getCenterStudents = asyncHandler(async (req, res) => {
   const students = await Student.find({ center: req.params.id })
