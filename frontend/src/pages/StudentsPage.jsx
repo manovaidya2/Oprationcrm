@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLazyList } from '@/lib/useLazyList';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -42,10 +43,8 @@ export default function StudentsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
 
-  const [students,   setStudents]   = useState([]);
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
-  const [loading,    setLoading]    = useState(true);
 
   // Filters
   const [search,    setSearch]    = useState('');
@@ -121,25 +120,24 @@ export default function StudentsPage() {
     finally { setTransferLoading(false); }
   }
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const params = {};
-      if (statusF && statusF !== 'all') params.status   = statusF;
-      if (centerF && centerF !== 'all') params.centerId = centerF;
-      if (search)                        params.search   = search;
-      const [s, c, co] = await Promise.all([
-        studentsApi.getAll(params),
-        centersApi.getAll(),
-        counselorsApi.getAll(),
-      ]);
-      setStudents(s); setCenters(c); setCounselors(co);
-      setSelected(new Set());
-    } catch { toast.error('Failed to load students'); }
-    finally { setLoading(false); }
+  const fetchStudentsPage = useCallback((page, limit) => {
+    const params = { page, limit };
+    if (statusF && statusF !== 'all') params.status   = statusF;
+    if (centerF && centerF !== 'all') params.centerId = centerF;
+    if (search)                        params.search   = search;
+    return studentsApi.getAll(params);
   }, [search, statusF, centerF]);
 
-  useEffect(() => { load(); }, [load]);
+  const { items: students, setItems: setStudents, loading, bgLoading, reload: load } =
+    useLazyList(fetchStudentsPage, { limit: 30, deps: [search, statusF, centerF] });
+
+  useEffect(() => {
+    Promise.all([centersApi.getAll(), counselorsApi.getAll()])
+      .then(([c, co]) => { setCenters(c); setCounselors(co); })
+      .catch(() => toast.error('Failed to load centers/counselors'));
+  }, []);
+
+  useEffect(() => { setSelected(new Set()); }, [students]);
 
   // ── Selection helpers ──────────────────────────────────────
   const allSelected  = students.length > 0 && students.every(s => selected.has(s._id));
@@ -326,8 +324,13 @@ export default function StudentsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">
+        <h1 className="text-xl font-semibold flex items-center gap-2">
           Students ({students.length})
+          {bgLoading && (
+            <span className="flex items-center gap-1.5 text-xs font-normal text-slate-400">
+              <Loader2 className="h-3 w-3 animate-spin"/>Loading more…
+            </span>
+          )}
           {someSelected && <span className="ml-2 text-sm font-normal text-indigo-600">{selected.size} selected</span>}
         </h1>
         <div className="flex gap-2">

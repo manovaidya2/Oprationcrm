@@ -76,6 +76,15 @@ exports.listCenters = asyncHandler(async (req, res) => {
     if (!c.verificationDocs)    c.verificationDocs    = [];
     if (!c.allowedUniversities) c.allowedUniversities = [];
   });
+
+  // Opt-in pagination — old callers without page/limit keep getting the full array
+  if (req.query.page) {
+    const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const total = centers.length;
+    const start = (page - 1) * limit;
+    return res.json({ centers: centers.slice(start, start + limit), total, page, pages: Math.ceil(total / limit) || 1 });
+  }
   res.json(centers);
 });
 

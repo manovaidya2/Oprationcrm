@@ -58,7 +58,7 @@ export const universitiesApi = {
 export const centersApi = {
   uploadDoc:  (id, fd)       => request(`/centers/${id}/docs`, { method: 'POST', body: fd }),
   deleteDoc:  (id, docId)    => request(`/centers/${id}/docs/${docId}`, { method: 'DELETE' }),
-  getAll:  ()         => request('/centers'),
+  getAll:  (params = {}) => request(`/centers?${new URLSearchParams(params)}`),
   getOne:  (id)       => request(`/centers/${id}`),
   create:  (data)     => request('/centers', { method: 'POST', body: data instanceof FormData ? data : JSON.stringify(data) }),
   update:  (id, data) => request(`/centers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -81,7 +81,7 @@ export const counselorsApi = {
 
 // ── STUDENTS ─────────────────────────────────────────────────
 export const studentsApi = {
-  getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`),
+  getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`), // pass {page, limit} for paginated response
   getOne:          (id)          => request(`/students/${id}`),
   create:          (data)        => request('/students', { method: 'POST', body: JSON.stringify(data) }),
   update:          (id, data)    => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),

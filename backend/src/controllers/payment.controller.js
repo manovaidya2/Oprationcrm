@@ -170,6 +170,9 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
   const weekEnd = new Date(now);
   weekEnd.setDate(weekEnd.getDate() + 7);
 
+  const page  = req.query.page  ? Math.max(1, parseInt(req.query.page, 10)) : null;
+  const limit = req.query.limit ? Math.min(100, Math.max(1, parseInt(req.query.limit, 10))) : null;
+
   const payments = await Payment.find({ 'installments.0': { $exists: true } })
     .populate({
       path: 'student',
@@ -183,7 +186,9 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
     .populate('center', 'name organisationName city')
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role');
-  for (const payment of payments) await payment.save();
+  // Parallelize instead of sequential await — this was doing one DB write per payment,
+  // one after another, on EVERY dashboard load. Concurrent writes are safe here (different documents).
+  await Promise.all(payments.map(payment => payment.save()));
   const rowsSource = payments.map(payment => payment.toObject());
 
   const rows = [];
@@ -288,6 +293,14 @@ exports.installmentTimeline = asyncHandler(async (req, res) => {
       || (new Date(a.paymentDate) - new Date(b.paymentDate))
       || String(a.studentName).localeCompare(String(b.studentName));
   });
+
+  // Opt-in pagination — old callers with no page param get the full array (unchanged behavior)
+  if (page && limit) {
+    const total = rows.length;
+    const start = (page - 1) * limit;
+    const pageRows = rows.slice(start, start + limit);
+    return res.json({ rows: pageRows, total, page, pages: Math.ceil(total / limit) || 1 });
+  }
   res.json(rows);
 });
 

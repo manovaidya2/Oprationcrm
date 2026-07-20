@@ -163,6 +163,24 @@ exports.list = asyncHandler(async (req, res) => {
   if (andConditions.length === 1) Object.assign(filter, andConditions[0]);
   else if (andConditions.length > 1) filter.$and = andConditions;
 
+  // Opt-in pagination — existing callers without page/limit keep getting the full array (zero behavior change)
+  if (req.query.page) {
+    const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const skip  = (page - 1) * limit;
+    const [total, students] = await Promise.all([
+      Student.countDocuments(filter),
+      Student.find(filter)
+        .populate('center', 'name city')
+        .populate('counselor', 'name avatarColor')
+        .populate('university', 'name shortName avatarColor')
+        .sort('-createdAt')
+        .skip(skip)
+        .limit(limit),
+    ]);
+    return res.json({ students, total, page, pages: Math.ceil(total / limit) || 1 });
+  }
+
   const students = await Student.find(filter)
     .populate('center', 'name city')
     .populate('counselor', 'name avatarColor')
