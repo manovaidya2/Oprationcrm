@@ -120,6 +120,27 @@ exports.setCenterUniversities = asyncHandler(async (req, res) => {
   res.json(c.allowedUniversities);
 });
 
+// GET /api/centers/:id/payment-accounts  — list allowed payment accounts for this center
+exports.getCenterPaymentAccounts = asyncHandler(async (req, res) => {
+  const c = await Center.findById(req.params.id)
+    .populate('allowedPaymentAccounts').lean();
+  if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
+  res.json(c.allowedPaymentAccounts || []);
+});
+
+// PUT /api/centers/:id/payment-accounts  — set allowed payment accounts (replace whole list)
+exports.setCenterPaymentAccounts = asyncHandler(async (req, res) => {
+  const { accountIds } = req.body; // array of IDs
+  if (!Array.isArray(accountIds)) { const e = new Error('accountIds array required'); e.status = 400; throw e; }
+  const c = await Center.findByIdAndUpdate(
+    req.params.id,
+    { allowedPaymentAccounts: accountIds },
+    { new: true }
+  ).populate('allowedPaymentAccounts');
+  if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
+  res.json(c.allowedPaymentAccounts);
+});
+
 exports.createCenter = asyncHandler(async (req, res) => {
   const body = { ...req.body };
   // Parse array fields sent as JSON strings

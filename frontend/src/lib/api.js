@@ -67,6 +67,8 @@ export const centersApi = {
   // University access control
   getUniversities: (id)     => request(`/centers/${id}/universities`),
   setUniversities: (id, ids)=> request(`/centers/${id}/universities`, { method: 'PUT', body: JSON.stringify({ universityIds: ids }) }),
+  getPaymentAccounts: (id)     => request(`/centers/${id}/payment-accounts`),
+  setPaymentAccounts: (id, ids)=> request(`/centers/${id}/payment-accounts`, { method: 'PUT', body: JSON.stringify({ accountIds: ids }) }),
 };
 
 // ── COUNSELORS ───────────────────────────────────────────────

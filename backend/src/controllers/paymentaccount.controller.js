@@ -1,8 +1,18 @@
 const asyncHandler    = require('express-async-handler');
 const PaymentAccount  = require('../models/PaymentAccount');
+const Center          = require('../models/Center');
 
 // GET /api/payment-accounts
-exports.list = asyncHandler(async (_req, res) => {
+exports.list = asyncHandler(async (req, res) => {
+  // If the requester is a Center with a restricted allow-list, only show those accounts
+  if (req.user?.role === 'Center' && req.user.centerId) {
+    const center = await Center.findById(req.user.centerId).select('allowedPaymentAccounts').lean();
+    const allowed = center?.allowedPaymentAccounts || [];
+    if (allowed.length > 0) {
+      return res.json(await PaymentAccount.find({ _id: { $in: allowed }, isActive: true }).sort('label'));
+    }
+    // Empty allow-list = no restriction set yet — center sees all active accounts (backward compatible)
+  }
   res.json(await PaymentAccount.find({ isActive: true }).sort('label'));
 });
 

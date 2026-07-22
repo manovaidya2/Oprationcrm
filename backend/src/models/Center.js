@@ -53,6 +53,7 @@ const centerSchema = new mongoose.Schema({
 
   // Universities this center is allowed to apply to (set by counselor)
   allowedUniversities: [{ type: mongoose.Schema.Types.ObjectId, ref: 'University' }],
+  allowedPaymentAccounts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' }],
 
   // Verification documents uploaded by counselor
   verificationDocs: [{

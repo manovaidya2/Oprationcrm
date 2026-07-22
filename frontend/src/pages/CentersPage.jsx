@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Plus, Edit2, Trash2, Loader2, Building2, User, Key,
   UserPlus, ChevronDown, ChevronUp, MapPin, Phone,
-  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip, Search, X, Download,
+  Globe, Users, GraduationCap, Clock, BookOpen, CheckCircle2, ChevronRight, Eye, Paperclip, Search, X, Download, CreditCard,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { centersApi, counselorsApi, authApi, studentsApi, universitiesApi } from '@/lib/api';
+import { centersApi, counselorsApi, authApi, studentsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 // ── Options matching WhatsApp Flow ──────────────────────────
@@ -216,6 +216,10 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
   const [uniManageOpen,   setUniManageOpen]   = useState(false);
   const [selectedUniIds,  setSelectedUniIds]  = useState([]);
   const [savingUnis,      setSavingUnis]       = useState(false);
+  const [allPayAccounts, setAllPayAccounts]   = useState([]);
+  const [payManageOpen,  setPayManageOpen]    = useState(false);
+  const [selectedPayIds, setSelectedPayIds]   = useState([]);
+  const [savingPayAccts, setSavingPayAccts]   = useState(false);
   const [savingFeeStructure, setSavingFeeStructure] = useState(false);
   const [editingFeeStructure, setEditingFeeStructure] = useState(false);
   const [savingLoginProvision, setSavingLoginProvision] = useState(false);
@@ -225,6 +229,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
   const streamBadges  = Array.isArray(center.streams) ? center.streams : [];
   const verDocs       = center.verificationDocs || [];
   const allowedUnis   = center.allowedUniversities || [];
+  const allowedPayAccts = center.allowedPaymentAccounts || [];
 
   async function openUniManage() {
     try {
@@ -244,6 +249,30 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
       onRefresh?.();
     } catch(e) { toast.error(e.message); }
     finally { setSavingUnis(false); }
+  }
+
+  async function openPayManage() {
+    try {
+      const accs = await paymentAccountsApi.list();
+      setAllPayAccounts(accs);
+      setSelectedPayIds((center.allowedPaymentAccounts || []).map(a => String(a._id || a)));
+      setPayManageOpen(true);
+    } catch(e) { toast.error(e.message); }
+  }
+
+  async function savePayAccts() {
+    setSavingPayAccts(true);
+    try {
+      await centersApi.setPaymentAccounts(center._id, selectedPayIds);
+      toast.success('Payment account access updated');
+      setPayManageOpen(false);
+      onRefresh?.();
+    } catch(e) { toast.error(e.message); }
+    finally { setSavingPayAccts(false); }
+  }
+
+  function togglePayAcct(id) {
+    setSelectedPayIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   }
 
   async function updateFeeStructure(value) {
@@ -635,6 +664,75 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* ── Allowed Payment Accounts ─────────────────── */}
+            <div className="border rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
+                  <CreditCard className="h-3.5 w-3.5"/> Payment Account Access ({allowedPayAccts.length})
+                </div>
+                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openPayManage}>
+                  <Plus className="h-3 w-3"/> Manage
+                </Button>
+              </div>
+              {allowedPayAccts.length === 0 ? (
+                <p className="text-xs text-muted-foreground italic">No accounts assigned — center can see all payment accounts</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {allowedPayAccts.map(a => (
+                    <span key={a._id} className="text-xs px-2 py-1 rounded-full border flex items-center gap-1">
+                      {a.label} {a.mode ? `(${a.mode})` : ''}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Payment Account Manage Modal ─────────────────── */}
+        {payManageOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setPayManageOpen(false)}>
+            <div className="bg-background rounded-xl shadow-xl p-5 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+              <h3 className="font-semibold text-base mb-1">Manage Payment Account Access</h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                Tick the bank/UPI accounts this center should see in its payment dropdown. Untick to hide an account from this center.
+              </p>
+              <div className="space-y-2 max-h-64 overflow-y-auto mb-4">
+                {allPayAccounts.map(a => (
+                  <label key={a._id} className="flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer hover:bg-muted/30 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selectedPayIds.includes(String(a._id))}
+                      onChange={() => togglePayAcct(String(a._id))}
+                      className="h-4 w-4 rounded"
+                    />
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${a.mode === 'UPI' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {a.mode}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{a.label}</p>
+                        {a.mode === 'UPI' && a.upiId && <p className="text-xs text-muted-foreground">{a.upiId}</p>}
+                        {a.mode === 'Bank Transfer' && a.bankName && <p className="text-xs text-muted-foreground">{a.bankName}</p>}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+                {allPayAccounts.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No payment accounts found. Add accounts first in Settings.</p>
+                )}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className="text-sm px-3 py-1.5 rounded-lg border hover:bg-muted/50" onClick={() => setPayManageOpen(false)}>Cancel</button>
+                <button
+                  className="text-sm px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 flex items-center gap-1 disabled:opacity-50"
+                  onClick={savePayAccts} disabled={savingPayAccts}>
+                  {savingPayAccts && <span className="inline-block h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>}
+                  Save
+                </button>
+              </div>
             </div>
           </div>
         )}

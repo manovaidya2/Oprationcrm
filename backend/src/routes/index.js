@@ -70,6 +70,8 @@ router.delete('/centers/:id/docs/:docId',  protect, requireRole('Admin','Counsel
 // Allowed universities per center
 router.get   ('/centers/:id/universities', protect, misc.getCenterUniversities);
 router.put   ('/centers/:id/universities', protect, requireRole('Admin','Counselor'), misc.setCenterUniversities);
+router.get   ('/centers/:id/payment-accounts', protect, misc.getCenterPaymentAccounts);
+router.put   ('/centers/:id/payment-accounts', protect, requireRole('Admin','Counselor'), misc.setCenterPaymentAccounts);
 
 // ── COUNSELORS ───────────────────────────────────────────────
 router.get   ('/counselors',             protect, misc.listCounselors);
