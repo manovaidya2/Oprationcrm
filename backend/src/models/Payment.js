@@ -17,6 +17,8 @@ const transactionSchema = new mongoose.Schema({
   note:        { type: String, trim: true },
   paidAt:      { type: Date, default: Date.now },
   recordedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedAt: { type: Date },
   type:        { type: String, enum: ['Fee', 'Document'], default: 'Fee' },
   // If type=Document, link to which document
   documentRef: { type: mongoose.Schema.Types.ObjectId, ref: 'StudentDocument' },
@@ -67,6 +69,8 @@ const paymentSchema = new mongoose.Schema({
   dueTimelineBasePaidAmount: { type: Number, default: 0 },
 
   notes: { type: String, trim: true },
+  lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedAt: { type: Date },
 }, { timestamps: true });
 
 // Recompute running totals on every save

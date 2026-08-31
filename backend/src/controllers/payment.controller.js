@@ -42,7 +42,7 @@ function wantsCenterFlow(req) {
 
 async function canActForStudentCenter(req, student) {
   if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
-  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(centerId => String(centerId) === String(student.center));
 }
@@ -52,7 +52,10 @@ exports.bulkGet = asyncHandler(async (req, res) => {
   const { studentIds } = req.body;
   if (!Array.isArray(studentIds) || studentIds.length === 0) return res.json([]);
   const payments = await Payment.find({ student: { $in: studentIds } })
-    .select('student totalFee discount netFee paidAmount dueAmount transactions')
+    .select('student totalFee discount netFee paidAmount dueAmount transactions lastUpdatedBy lastUpdatedAt')
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
     .lean();
   res.json(payments);
 });
@@ -62,8 +65,10 @@ exports.get = asyncHandler(async (req, res) => {
   if (existing) await existing.save();
   const payment = await Payment.findOne({ student: req.params.studentId })
     .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
-    .populate('transactions.documentRef', 'name');
+    .populate('transactions.documentRef', 'name')
+    .populate('lastUpdatedBy', 'name role');
   // Duplicate-UTR check is expensive (scans full collections) — only run it when explicitly requested
   // (dashboards/lists that just need totals should NOT trigger this)
   if (req.query.checkDuplicates === '1') {
@@ -90,6 +95,7 @@ exports.accountantFeePayments = asyncHandler(async (req, res) => {
       ],
     })
     .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
     .lean();
 
@@ -145,11 +151,14 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const userActingAsCenter = await canActForStudentCenter(req, student);
   const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
+  if (req.user.role === 'ViewerCounselor' && !userActingAsCenter) {
+    const e = new Error('Viewer counselors can update fees only from center view'); e.status = 403; throw e;
+  }
 
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
+  if (['Counselor','ViewerCounselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
@@ -169,6 +178,10 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   if (totalFee !== undefined) payment.totalFee = Number(totalFee) || 0;
   if (discount !== undefined) payment.discount  = Number(discount) || 0;
   if (notes    !== undefined) payment.notes     = notes;
+  if (req.user.role === 'ViewerCounselor' && userActingAsCenter) {
+    payment.lastUpdatedBy = req.user._id;
+    payment.lastUpdatedAt = new Date();
+  }
   const installments = normalizeInstallments(req.body.installments);
   if (installments !== undefined) {
     const netFee = Math.max(0, (payment.totalFee || 0) - (payment.discount || 0));
@@ -188,7 +201,11 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   }
 
   await audit('fee_updated', 'Payment', payment._id, req.user, { totalFee, discount, installments: installments?.length }, `Fee updated`);
-  const saved = await Payment.findById(payment._id).populate('transactions.recordedBy', 'name role');
+  const saved = await Payment.findById(payment._id)
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role')
+    .populate('lastUpdatedBy', 'name role');
   res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
@@ -566,6 +583,8 @@ exports.markInstallmentPaid = asyncHandler(async (req, res) => {
     note: req.body.note || `Installment #${inst.installmentNumber} marked paid by payment coordinator`,
     paidAt: req.body.paidAt ? new Date(req.body.paidAt) : new Date(),
     recordedBy: req.user._id,
+    lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
+    lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
     type: 'Fee',
     installmentRef: inst._id,
     verificationStatus: needsVerification ? 'pending_counselor' : 'verified',
@@ -595,6 +614,7 @@ exports.markInstallmentPaid = asyncHandler(async (req, res) => {
   await audit('installment_paid', 'Payment', payment._id, req.user, { installmentId: inst._id, amount, verificationStatus: needsVerification ? 'pending_counselor' : 'verified' }, `Installment payment recorded`);
   const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role');
   res.json(await enrichPaymentDuplicateUtrs(saved));
 });
@@ -612,10 +632,13 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const userActingAsCenter = await canActForStudentCenter(req, student);
   const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
+  if (req.user.role === 'ViewerCounselor' && !userActingAsCenter) {
+    const e = new Error('Viewer counselors can add payments only from center view'); e.status = 403; throw e;
+  }
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
+  if (['Counselor','ViewerCounselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
 
@@ -642,6 +665,8 @@ exports.addTransaction = asyncHandler(async (req, res) => {
     note: note || '',
     paidAt: paidAt ? new Date(paidAt) : new Date(),
     recordedBy: req.user._id,
+    lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
+    lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
     type: type || 'Fee',
     documentRef: documentRef || undefined,
     verificationStatus,
@@ -666,6 +691,7 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   await audit('payment_added', 'Payment', payment._id, req.user, { amount, utrRef, verificationStatus }, `Payment ₹${amount} recorded`);
   const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role');
   res.status(201).json(await enrichPaymentDuplicateUtrs(saved));
 });
@@ -676,6 +702,14 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
   if (!payment) { const e = new Error('Payment record not found'); e.status = 404; throw e; }
   const tx = payment.transactions.id(req.params.txId);
   if (!tx) { const e = new Error('Transaction not found'); e.status = 404; throw e; }
+  const viewerEditing = req.user.role === 'ViewerCounselor';
+  if (viewerEditing) {
+    const student = await Student.findById(req.params.studentId);
+    const userActingAsCenter = student ? await canActForStudentCenter(req, student) : false;
+    if (!userActingAsCenter) {
+      const e = new Error('Viewer counselors can edit payments only from center view'); e.status = 403; throw e;
+    }
+  }
 
   // Only Admin can edit verified transactions; all others are blocked
   if (tx.verificationStatus === 'verified' && req.user.role !== 'Admin') {
@@ -695,9 +729,14 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
   }
 
   if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
+  if (viewerEditing) {
+    tx.lastUpdatedBy = req.user._id;
+    tx.lastUpdatedAt = new Date();
+  }
   await payment.save();
   const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role');
   res.json(await enrichPaymentDuplicateUtrs(saved));
 });
@@ -710,10 +749,13 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const userActingAsCenter = await canActForStudentCenter(req, student);
+  if (req.user.role === 'ViewerCounselor' && !userActingAsCenter) {
+    const e = new Error('Viewer counselors can resend payments only from center view'); e.status = 403; throw e;
+  }
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (['Counselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
+  if (['Counselor','ViewerCounselor','PaymentCoordinator'].includes(req.user.role) && wantsCenterFlow(req) && !userActingAsCenter) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   const tx = payment.transactions.id(req.params.txId);
@@ -729,6 +771,10 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
     }
   });
   if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
+  if (req.user.role === 'ViewerCounselor' && userActingAsCenter) {
+    tx.lastUpdatedBy = req.user._id;
+    tx.lastUpdatedAt = new Date();
+  }
 
   tx.verificationStatus = 'pending_counselor';
   await payment.save();

@@ -84,6 +84,8 @@ const studentSchema = new mongoose.Schema({
 
   // Who created / last updated
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedAt: { type: Date },
 
   // Full status history — every action appended here
   statusHistory: [{

@@ -39,6 +39,7 @@ const W = ({ children }) => <Suspense fallback={<Spin />}>{children}</Suspense>;
 const ROLE_HOME = {
   Admin:      '/',
   Counselor:  '/counselor',
+  ViewerCounselor: '/counselor',
   Center:     '/center',
   Accountant: '/accountant',
   University: '/university',
@@ -54,6 +55,7 @@ const ROLE_ALLOWED = {
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
   Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/chat'],
+  ViewerCounselor: ['/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/chat'],
 };
 
 function ProtectedRoute({ children }) {

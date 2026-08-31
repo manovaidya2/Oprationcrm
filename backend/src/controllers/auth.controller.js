@@ -32,7 +32,7 @@ exports.me = asyncHandler(async (req, res) => {
 
 // POST /api/auth/users  — Admin or Counselor creates accounts
 exports.createUser = asyncHandler(async (req, res) => {
-  const { name, email, password, role, avatarColor, centerId, universityId, phone } = req.body;
+  const { name, email, password, role, avatarColor, centerId, centerIds, universityId, phone } = req.body;
 
   // Counselor can only create Center accounts
   if (req.user.role === 'Counselor' && role !== 'Center') {
@@ -46,8 +46,14 @@ exports.createUser = asyncHandler(async (req, res) => {
   let resolvedCenterId;
   let resolvedUniversityId;
 
-  if (role === 'Counselor') {
-    const c = await Counselor.create({ name, email, phone: phone || '', avatarColor: avatarColor || '#6366f1' });
+  if (['Counselor', 'ViewerCounselor'].includes(role)) {
+    const c = await Counselor.create({
+      name,
+      email,
+      phone: phone || '',
+      avatarColor: avatarColor || '#6366f1',
+      centers: role === 'ViewerCounselor' ? (centerIds || []) : [],
+    });
     counselorId = c._id;
   }
 
@@ -98,7 +104,9 @@ exports.listUsers = asyncHandler(async (req, res) => {
   }
 
   const users = await User.find(filter).select('-password +createdPassword')
-    .populate('counselorId centerId universityId').sort('-createdAt');
+    .populate({ path: 'counselorId', populate: { path: 'centers', select: 'name city' } })
+    .populate('centerId universityId')
+    .sort('-createdAt');
   res.json(users);
 });
 

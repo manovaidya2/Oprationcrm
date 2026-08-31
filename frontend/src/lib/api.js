@@ -64,6 +64,7 @@ export const centersApi = {
   update:  (id, data) => request(`/centers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete:     (id)    => request(`/centers/${id}`, { method: 'DELETE' }),
   getStudents:(id)    => request(`/centers/${id}/students`),
+  assignViewerCounselor: (id, counselorId) => request(`/centers/${id}/viewer-counselor`, { method: 'POST', body: JSON.stringify({ counselorId }) }),
   // University access control
   getUniversities: (id)     => request(`/centers/${id}/universities`),
   setUniversities: (id, ids)=> request(`/centers/${id}/universities`, { method: 'PUT', body: JSON.stringify({ universityIds: ids }) }),

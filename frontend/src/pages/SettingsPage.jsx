@@ -13,6 +13,7 @@ import { useAuth } from '@/context/AuthContext';
 
 const ROLE_COLORS = {
   Admin:'bg-red-100 text-red-700', Counselor:'bg-indigo-100 text-indigo-700',
+  ViewerCounselor:'bg-slate-100 text-slate-700',
   Center:'bg-sky-100 text-sky-700', Accountant:'bg-amber-100 text-amber-700',
   University:'bg-purple-100 text-purple-700', Dispatch:'bg-teal-100 text-teal-700',
   PaymentCoordinator:'bg-cyan-100 text-cyan-700',
@@ -21,6 +22,7 @@ const ROLE_COLORS = {
 const ROLE_OPTIONS = [
   { value: 'Admin', label: 'Admin' },
   { value: 'Counselor', label: 'Counselor' },
+  { value: 'ViewerCounselor', label: 'Viewer Counselor' },
   { value: 'Center', label: 'Center' },
   { value: 'Accountant', label: 'Accountant' },
   { value: 'PaymentCoordinator', label: 'Payment Coordinator' },
@@ -55,7 +57,7 @@ export default function SettingsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [pwdOpen,    setPwdOpen]    = useState(null);
   const [saving,     setSaving]     = useState(false);
-  const [form,  setForm]  = useState({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' });
+  const [form,  setForm]  = useState({ name:'', email:'', password:'', role:'', centerId:'', centerIds:[], universityId:'' });
   const [pwd,   setPwd]   = useState('');
 
   // Payment Accounts
@@ -126,7 +128,7 @@ export default function SettingsPage() {
     try {
       await authApi.createUser(form);
       toast.success('User created'); setCreateOpen(false);
-      setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' });
+      setForm({ name:'', email:'', password:'', role:'', centerId:'', centerIds:[], universityId:'' });
       clearSettingsPageCache();
       load();
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
@@ -189,7 +191,7 @@ export default function SettingsPage() {
           <Button size="sm" variant="outline" onClick={() => { setOwnPwdForm({ current:'', newPwd:'', confirm:'' }); setOwnPwdOpen(true); }}>
             <Key className="h-4 w-4 mr-1"/>Change My Password
           </Button>
-          <Button size="sm" onClick={() => { setForm({ name:'', email:'', password:'', role:'', centerId:'', universityId:'' }); setCreateOpen(true); }}>
+          <Button size="sm" onClick={() => { setForm({ name:'', email:'', password:'', role:'', centerId:'', centerIds:[], universityId:'' }); setCreateOpen(true); }}>
             <UserPlus className="h-4 w-4 mr-1"/>Create User
           </Button>
         </div>
@@ -218,6 +220,11 @@ export default function SettingsPage() {
                       {u.isActive===false && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{u.email}</div>
+                    {u.role === 'ViewerCounselor' && u.counselorId?.centers?.length > 0 && (
+                      <div className="text-xs text-slate-600">
+                        Viewer Centers: {u.counselorId.centers.map(c => c.name).filter(Boolean).join(', ')}
+                      </div>
+                    )}
                     {u.centerId?.name && <div className="text-xs text-sky-600">{u.centerId.name}</div>}
                     {u.universityId?.name && <div className="text-xs text-purple-600">🎓 {u.universityId.name}</div>}
                   </div>
@@ -351,7 +358,7 @@ export default function SettingsPage() {
             <div><Label>Password *</Label><Input type="password" value={form.password} onChange={e=>setForm(p=>({...p,password:e.target.value}))} placeholder="Min 6 characters"/></div>
             <div>
               <Label>Role *</Label>
-              <Select value={form.role} onValueChange={v=>setForm(p=>({...p,role:v,centerId:'',universityId:''}))}>
+              <Select value={form.role} onValueChange={v=>setForm(p=>({...p,role:v,centerId:'',centerIds:[],universityId:''}))}>
                 <SelectTrigger><SelectValue placeholder="Select role…"/></SelectTrigger>
                 <SelectContent>{ROLE_OPTIONS.map(r=><SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}</SelectContent>
               </Select>
@@ -363,6 +370,35 @@ export default function SettingsPage() {
                   <SelectTrigger><SelectValue placeholder="Select center…"/></SelectTrigger>
                   <SelectContent>{centers.map(c=><SelectItem key={c._id} value={c._id}>{c.name} — {c.city}</SelectItem>)}</SelectContent>
                 </Select>
+              </div>
+            )}
+            {form.role === 'ViewerCounselor' && (
+              <div>
+                <Label>Viewer Access Centers</Label>
+                <div className="mt-1 max-h-48 space-y-1 overflow-y-auto rounded-lg border p-2">
+                  {centers.length === 0 ? (
+                    <div className="px-2 py-6 text-center text-sm text-muted-foreground">No centers found</div>
+                  ) : centers.map(c => {
+                    const checked = form.centerIds.includes(c._id);
+                    return (
+                      <label key={c._id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-indigo-600"
+                          checked={checked}
+                          onChange={e => setForm(p => ({
+                            ...p,
+                            centerIds: e.target.checked
+                              ? [...p.centerIds, c._id]
+                              : p.centerIds.filter(id => id !== c._id),
+                          }))}
+                        />
+                        <span className="font-medium">{c.name}</span>
+                        {c.city && <span className="text-xs text-muted-foreground">{c.city}</span>}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {form.role === 'University' && (

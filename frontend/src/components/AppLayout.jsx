@@ -35,6 +35,13 @@ const NAV_CONFIG = {
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
     { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
   ],
+  ViewerCounselor: [
+    { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
+    { to: '/students',  label: 'Students',     icon: GraduationCap },
+    { to: '/centers',   label: 'Centers',      icon: Building2 },
+    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
+  ],
   Center: [
     { to: '/center', label: 'My Students', icon: GraduationCap },
     { to: '/help',   label: 'Help',        icon: LifeBuoy },
@@ -70,6 +77,7 @@ const NAV_CONFIG = {
 const ROLE_COLORS = {
   Admin:      'bg-red-500',
   Counselor:  'bg-indigo-500',
+  ViewerCounselor: 'bg-slate-500',
   Center:     'bg-sky-500',
   Accountant: 'bg-amber-500',
   University: 'bg-purple-500',

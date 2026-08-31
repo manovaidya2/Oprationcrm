@@ -85,7 +85,7 @@ function wantsCenterFlow(req) {
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
   if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
-  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
 }
@@ -95,6 +95,14 @@ async function assertStudentAccess(req, student) {
   const role = req.user.role;
   if (role === 'Center') {
     if (String(student.center?._id || student.center) !== String(req.user.centerId)) {
+      const e = new Error('Forbidden'); e.status = 403; throw e;
+    }
+  }
+  if (role === 'ViewerCounselor') {
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const centerAllowed = (counselor?.centers || []).some(id => String(id) === String(student.center?._id || student.center));
+    const counselorAllowed = String(student.counselor?._id || student.counselor || '') === String(req.user.counselorId || '');
+    if (!centerAllowed && !counselorAllowed) {
       const e = new Error('Forbidden'); e.status = 403; throw e;
     }
   }
@@ -122,7 +130,7 @@ exports.list = asyncHandler(async (req, res) => {
 
   if (role === 'Center') {
     andConditions.push({ center: centerId });
-  } else if (role === 'Counselor') {
+  } else if (['Counselor', 'ViewerCounselor'].includes(role)) {
     const counselorDoc = await Counselor.findById(counselorId).lean();
     const linkedCenterIds = counselorDoc?.centers || [];
     if (linkedCenterIds.length > 0) {
@@ -174,6 +182,9 @@ exports.list = asyncHandler(async (req, res) => {
         .populate('center', 'name city')
         .populate('counselor', 'name avatarColor')
         .populate('university', 'name shortName avatarColor')
+        .populate('createdBy', 'name role')
+        .populate('lastUpdatedBy', 'name role')
+        .populate('statusHistory.changedBy', 'name role')
         .sort('-createdAt')
         .skip(skip)
         .limit(limit),
@@ -185,6 +196,9 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('center', 'name city')
     .populate('counselor', 'name avatarColor')
     .populate('university', 'name shortName avatarColor')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role')
     .sort('-createdAt');
   res.json(students);
 });
@@ -194,7 +208,10 @@ exports.get = asyncHandler(async (req, res) => {
   const s = await Student.findById(req.params.id)
     .populate('center', 'name city state')
     .populate('counselor', 'name avatarColor email')
-    .populate('university', 'name shortName');
+    .populate('university', 'name shortName')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role');
   await assertStudentAccess(req, s);
   res.json(s);
 });
@@ -223,6 +240,15 @@ exports.create = asyncHandler(async (req, res) => {
     const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
     if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
     body.counselor = req.user.counselorId;
+    body.applicationStatus = 'Draft';
+  } else if (role === 'ViewerCounselor') {
+    if (!wantsCenterFlow(req)) { const e = new Error('Viewer counselors can add students only from center view'); e.status = 403; throw e; }
+    if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
+    if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
+    const primary = await Counselor.findOne({ centers: body.center, isActive: true, _id: { $ne: req.user.counselorId } }).select('_id').lean();
+    body.counselor = primary?._id || req.user.counselorId;
     body.applicationStatus = 'Draft';
   } else if (role === 'PaymentCoordinator') {
     if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
@@ -258,7 +284,10 @@ exports.create = asyncHandler(async (req, res) => {
   const populated = await Student.findById(student._id)
     .populate('center', 'name')
     .populate('counselor', 'name')
-    .populate('university', 'name shortName');
+    .populate('university', 'name shortName')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role');
   res.status(201).json(populated);
 });
 
@@ -267,6 +296,9 @@ exports.update = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
   await assertStudentAccess(req, student);
   const centerOriginated = await canUseCenterFlow(req, student.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can edit students only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
@@ -282,13 +314,17 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.user.role !== 'Admin') delete req.body.enrollmentNumber;
   if (req.body.gender === '') delete req.body.gender;
 
-  if (req.body.universityId && ['Admin','Counselor'].includes(req.user.role)) {
+  if (req.body.universityId && ['Admin','Counselor','ViewerCounselor'].includes(req.user.role)) {
     const uni = await University.findById(req.body.universityId);
     if (uni) { req.body.university = uni._id; req.body.universityName = uni.name; }
     delete req.body.universityId;
   }
 
   const updateData = { ...req.body };
+  if (req.user.role === 'ViewerCounselor' && centerOriginated) {
+    updateData.lastUpdatedBy = req.user._id;
+    updateData.lastUpdatedAt = new Date();
+  }
   let parsedDocs = null;
   validateSubmissionFiles(req.files || []);
   if (req.body.submissionDocs) {
@@ -321,7 +357,10 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   const updated = await Student.findByIdAndUpdate(req.params.id, updateData, { new: true })
-    .populate('center','name').populate('counselor','name').populate('university','name shortName');
+    .populate('center','name').populate('counselor','name').populate('university','name shortName')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role');
   await audit('student_updated', 'Student', student._id, req.user, {}, `Student ${student.name} updated`);
   res.json(updated);
 });
@@ -430,6 +469,9 @@ exports.submit = asyncHandler(async (req, res) => {
   const s = await Student.findById(req.params.id).populate('university','name');
   await assertStudentAccess(req, s);
   const centerOriginated = await canUseCenterFlow(req, s.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can submit applications only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }

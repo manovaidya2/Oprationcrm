@@ -35,8 +35,8 @@ exports.listCenters = asyncHandler(async (req, res) => {
   const { role, counselorId } = req.user;
   let filter = {};
 
-  // BUG FIX: Counselor should only see their assigned centers
-  if (role === 'Counselor' && counselorId) {
+  // Counselor and viewer counselor should only see their assigned centers.
+  if (['Counselor', 'ViewerCounselor'].includes(role) && counselorId) {
     const counselor = await Counselor.findById(counselorId).select('centers').lean();
     const assignedCenterIds = counselor?.centers || [];
     filter = { _id: { $in: assignedCenterIds } };
@@ -94,6 +94,14 @@ exports.getCenter = asyncHandler(async (req, res) => {
     .populate('allowedUniversities', 'name shortName avatarColor')
     .lean();
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
+  if (req.user.role === 'Center' && String(c._id) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (counselor?.centers || []).some(id => String(id) === String(c._id));
+    if (!allowed) { const e = new Error('Forbidden'); e.status = 403; throw e; }
+  }
   if (!c.verificationDocs)    c.verificationDocs    = [];
   if (!c.allowedUniversities) c.allowedUniversities = [];
   res.json(c);
@@ -210,7 +218,8 @@ exports.deleteCenter = asyncHandler(async (req, res) => {
 
 // ── COUNSELORS ───────────────────────────────────────────────
 exports.listCounselors = asyncHandler(async (_req, res) => {
-  res.json(await Counselor.find().populate('centers', 'name city').sort('-createdAt'));
+  const viewerCounselorIds = await User.find({ role: 'ViewerCounselor' }).distinct('counselorId');
+  res.json(await Counselor.find({ _id: { $nin: viewerCounselorIds.filter(Boolean) } }).populate('centers', 'name city').sort('-createdAt'));
 });
 
 exports.getCounselor = asyncHandler(async (req, res) => {
@@ -238,9 +247,11 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
   const { centerId } = req.body;
   if (!centerId) { const e = new Error('centerId required'); e.status = 400; throw e; }
 
-  // Remove this center from ALL other counselors first
+  const viewerCounselorIds = await User.find({ role: 'ViewerCounselor' }).distinct('counselorId');
+
+  // Remove this center from other primary counselors first.
   await Counselor.updateMany(
-    { _id: { $ne: req.params.id }, centers: centerId },
+    { _id: { $ne: req.params.id, $nin: viewerCounselorIds.filter(Boolean) }, centers: centerId },
     { $pull: { centers: centerId } }
   );
 
@@ -261,6 +272,42 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
 });
 
 // ── DASHBOARD ─────────────────────────────────────────────────
+exports.assignViewerCounselor = asyncHandler(async (req, res) => {
+  const { counselorId } = req.body;
+  const center = await Center.findById(req.params.id);
+  if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+
+  const viewerCounselorIds = await User.find({
+    role: 'ViewerCounselor',
+    counselorId: { $exists: true, $ne: null },
+  }).distinct('counselorId');
+
+  await Counselor.updateMany(
+    { _id: { $in: viewerCounselorIds.filter(Boolean) }, centers: center._id },
+    { $pull: { centers: center._id } }
+  );
+
+  if (!counselorId) {
+    return res.json({ ok: true, centerId: center._id, viewerCounselor: null });
+  }
+
+  const viewerUser = await User.findOne({
+    role: 'ViewerCounselor',
+    counselorId,
+    isActive: true,
+  }).populate({ path: 'counselorId', populate: { path: 'centers', select: 'name city' } });
+  if (!viewerUser) { const e = new Error('Viewer counselor not found'); e.status = 404; throw e; }
+
+  const viewerCounselor = await Counselor.findByIdAndUpdate(
+    counselorId,
+    { $addToSet: { centers: center._id } },
+    { new: true }
+  ).populate('centers', 'name city');
+
+  viewerUser.counselorId = viewerCounselor;
+  res.json({ ok: true, centerId: center._id, viewerCounselor: viewerUser });
+});
+
 exports.dashboardStats = asyncHandler(async (req, res) => {
   const role = req.user.role;
 
@@ -302,7 +349,14 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
   }
 
   // Admin / Counselor
-  const filter = role === 'Counselor' ? { counselor: req.user.counselorId } : {};
+  let filter = {};
+  if (['Counselor', 'ViewerCounselor'].includes(role)) {
+    const counselorDoc = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const linkedCenterIds = counselorDoc?.centers || [];
+    filter = linkedCenterIds.length > 0
+      ? { $or: [{ counselor: req.user.counselorId }, { center: { $in: linkedCenterIds } }] }
+      : { counselor: req.user.counselorId };
+  }
   const [studentCount, centerCount, counselorCount] = await Promise.all([
     Student.countDocuments(filter),
     Center.countDocuments(),
@@ -623,8 +677,19 @@ exports.accountantHistory = asyncHandler(async (req, res) => {
 });
 // GET /api/centers/:id/students - students with their stage breakdown
 exports.getCenterStudents = asyncHandler(async (req, res) => {
+  if (req.user.role === 'Center' && String(req.params.id) !== String(req.user.centerId)) {
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (counselor?.centers || []).some(id => String(id) === String(req.params.id));
+    if (!allowed) { const e = new Error('Forbidden'); e.status = 403; throw e; }
+  }
   const students = await Student.find({ center: req.params.id })
     .populate('counselor', 'name avatarColor')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role')
     .sort('-createdAt')
     .lean();
   res.json(students);

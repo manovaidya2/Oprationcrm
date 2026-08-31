@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2, XCircle, RotateCcw, Loader2, Send, Eye, Search,
   Building2, GraduationCap, FileText, ChevronRight, Users, Paperclip, RefreshCw, Download,
-  IndianRupee, AlertTriangle, Trash2,
+  IndianRupee, AlertTriangle, Trash2, User,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,18 @@ const getStudentSubmittedAt = student => {
 };
 
 const getPaymentSubmittedAt = tx => tx?.createdAt || tx?.submittedAt || tx?.paidAt;
+
+const isViewerActor = actor => actor?.role === 'ViewerCounselor';
+
+function ViewerAttribution({ label = 'Added', actor, at }) {
+  if (!isViewerActor(actor)) return null;
+  return (
+    <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-violet-600">
+      <User className="h-3 w-3"/>
+      <span>{label} by Viewer Counselor: <span className="font-bold">{actor.name}</span>{at ? ` - ${fmtDt(at)}` : ''}</span>
+    </p>
+  );
+}
 
 function CardRequestDate({ date, label = 'Submitted' }) {
   if (!date) return null;
@@ -74,6 +86,8 @@ function PaymentInfo({ tx, className = '' }) {
       {isBank && tx.ifscCode      && <div className="text-xs text-slate-500">IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
       {tx.note && <div className="text-xs text-slate-400 italic">"{tx.note}"</div>}
       <UtrDuplicateWarning tx={tx}/>
+      <ViewerAttribution label="Added" actor={tx.recordedBy} at={tx.createdAt || tx.paidAt}/>
+      {!isViewerActor(tx.recordedBy) && <ViewerAttribution label="Updated" actor={tx.lastUpdatedBy} at={tx.lastUpdatedAt}/>}
       {tx.paidToAccountLabel && (
         <div className="mt-1 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-1.5">
           <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider mr-1.5">Paid To</span>
@@ -391,7 +405,7 @@ function CenterModal({ center, onClose }) {
 }
 
 // ── Doc Modal ─────────────────────────────────────────────────
-function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment, accMap={} }) {
+function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment, accMap={}, readOnly=false }) {
   if (!doc) return null;
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -481,17 +495,17 @@ function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment
 
         <DialogFooter className="gap-2 flex-wrap">
           <Button variant="outline" onClick={onClose} className="border-slate-200 text-slate-600">Close</Button>
-          {doc.status==='Requested'&&(
+          {!readOnly && doc.status==='Requested'&&(
             <Button onClick={()=>{onForward(doc);onClose();}} className="bg-indigo-600 hover:bg-indigo-700">
               <Send className="h-4 w-4 mr-1.5"/>Forward to Accountant
             </Button>
           )}
-          {doc.status==='Counselor_Received'&&(
+          {!readOnly && doc.status==='Counselor_Received'&&(
             <Button onClick={()=>{onForwardToCenter(doc);onClose();}} className="bg-violet-600 hover:bg-violet-700">
               <Send className="h-4 w-4 mr-1.5"/>Forward to Center
             </Button>
           )}
-          {doc.status==='Payment_Submitted'&&(
+          {!readOnly && doc.status==='Payment_Submitted'&&(
             <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={()=>{onForwardPayment(doc);onClose();}}>
               <Send className="h-4 w-4 mr-1.5"/>Forward to Accountant
             </Button>
@@ -645,7 +659,7 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
 }
 
 // ── Empty State ───────────────────────────────────────────────
-function SettlementRequestCard({ student: s, saving, onForward }) {
+function SettlementRequestCard({ student: s, saving, onForward, readOnly=false }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note,     setNote]     = useState('');
 
@@ -674,7 +688,9 @@ function SettlementRequestCard({ student: s, saving, onForward }) {
         </div>
 
         {/* Forward action */}
-        {!noteOpen ? (
+        {readOnly ? (
+          <div className="text-xs font-medium text-slate-500">Viewer access only</div>
+        ) : !noteOpen ? (
           <div className="flex gap-2">
             <Button
               size="sm"
@@ -775,6 +791,7 @@ function PaidToAccountBox({ tx, accMap }) {
 // ── MAIN PAGE ─────────────────────────────────────────────────
 export default function CounselorPage() {
   const { user, switchToCenter } = useAuth();
+  const isViewerCounselor = user?.role === 'ViewerCounselor';
   const { dismiss, isDismissed } = usePanelDismissals(user, 'counselor');
   const navigate = useNavigate();
   const [allStudents, setAllStudents] = useState([]);
@@ -801,7 +818,8 @@ export default function CounselorPage() {
 
   const load = useCallback(async () => {
     // Stale-while-revalidate: show cached data instantly, then refresh in background
-    const cached = pageCache.get('counselor-dashboard');
+    const cacheKey = `counselor-dashboard-${user?.role || 'role'}-${user?.counselorId || user?.id || user?._id || 'user'}`;
+    const cached = pageCache.get(cacheKey);
     if (cached) {
       setAllStudents(cached.allStudents); setDocs(cached.docs); setCenters(cached.centers);
       setUniversities(cached.universities); setPayAccounts(cached.payAccounts);
@@ -876,18 +894,19 @@ export default function CounselorPage() {
         if (s.settlementRequested) return true;
         return (s.statusHistory || []).some(h => h.status === 'Settlement_Requested');
       });
-      pageCache.set('counselor-dashboard', {
+      pageCache.set(cacheKey, {
         allStudents: ss, docs: d, centers: c, universities: unis,
         payAccounts: accMap, settlementQueue: settlementQ,
         docPayments: payMap, studentFeeMap: feeMap, feePayments: pending,
       });
     } catch (e) { if (!cached) toast.error('Failed to load: ' + e.message); }
     finally { setLoading(false); }
-  }, []);
+  }, [user?.role, user?.counselorId, user?.id, user?._id]);
 
   useEffect(() => { load(); }, [load]);
 
   async function doAction() {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     const { student, action } = actionOpen;
     if ((action==='reject'||action==='changes'||action==='sendToCenter'||action==='sendToCenterFinal') && !note.trim()) return toast.error('Note required');
     setSaving(true);
@@ -903,6 +922,7 @@ export default function CounselorPage() {
   }
 
   async function forwardDoc(d) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     try { await docsApi.forward(d._id); toast.success('Forwarded to accountant'); load(); }
     catch(e) { toast.error(e.message); }
   }
@@ -912,6 +932,7 @@ export default function CounselorPage() {
   }
 
   async function batchForwardDocs(list, action, successLabel) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     const selected = list.filter(d => selectedDocIds.includes(String(d._id)));
     if (!selected.length) return toast.error('Select documents first');
     setSaving(true);
@@ -928,6 +949,7 @@ export default function CounselorPage() {
   }
 
   async function handleForwardSettlement(student, note) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     setSaving(true);
     try {
       await studentsApi.forwardSettlement(student._id, note);
@@ -938,16 +960,19 @@ export default function CounselorPage() {
   }
 
   async function forwardDocToCenter(d) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     try { await docsApi.forwardToCenter(d._id); toast.success('Forwarded to center'); load(); }
     catch(e) { toast.error(e.message); }
   }
 
   async function forwardPaymentToAccountant(d) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     try { await docsApi.forwardPayment(d._id); toast.success('Payment forwarded to accountant'); load(); }
     catch(e) { toast.error(e.message); }
   }
 
   async function forwardFeePaymentToAccountant(studentId, txId) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     try {
       await paymentsApi.counselorForwardPayment(studentId, txId);
       toast.success('Fee payment forwarded to accountant for verification');
@@ -961,6 +986,7 @@ export default function CounselorPage() {
   const [docChangeNote, setDocChangeNote] = useState('');
 
   async function rejectFeePayment() {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     if (!rejectFeeDialog) return;
     try {
       await paymentsApi.counselorRejectPayment(rejectFeeDialog.studentId, rejectFeeDialog.txId, rejectFeeNote);
@@ -970,6 +996,7 @@ export default function CounselorPage() {
   }
 
   async function requestDocChanges() {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
     if (!docChangeDialog) return;
     if (!docChangeNote.trim()) return toast.error('Note required');
     try {
@@ -1029,8 +1056,8 @@ export default function CounselorPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Counselor Dashboard</h1>
-          <p className="text-xs text-slate-400 mt-0.5">Manage applications, documents and center activity</p>
+          <h1 className="text-2xl font-bold text-slate-800">{isViewerCounselor ? 'Viewer Counselor Dashboard' : 'Counselor Dashboard'}</h1>
+          <p className="text-xs text-slate-400 mt-0.5">{isViewerCounselor ? 'View assigned center activity and switch to center view when needed' : 'Manage applications, documents and center activity'}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={()=>setCenterSwitchOpen(true)}
@@ -1101,22 +1128,22 @@ export default function CounselorPage() {
               <Button size="sm" variant="ghost" onClick={()=>setStudentModal(s)} className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600">
                 <Eye className="h-4 w-4"/>
               </Button>
-              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs"
+              {!isViewerCounselor && <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'approve'});setNote('');}}>
                 Approve
-              </Button>
-              <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 h-8 text-xs"
+              </Button>}
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'changes'});setNote('');}}>
                 Changes
-              </Button>
-              <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 h-8 text-xs"
+              </Button>}
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'reject'});setNote('');}}>
                 Reject
-              </Button>
-              <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-8 text-xs"
+              </Button>}
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 h-8 text-xs"
                 onClick={(e)=>{e.stopPropagation(); dismiss(`student:${s._id}:review`);}}>
                 <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-              </Button>
+              </Button>}
             </StudentCard>
           ))}
         </TabsContent>
@@ -1135,18 +1162,18 @@ export default function CounselorPage() {
               <Button size="sm" variant="ghost" onClick={()=>setStudentModal(s)} className="h-8 w-8 p-0 text-slate-400 hover:text-indigo-600">
                 <Eye className="h-4 w-4"/>
               </Button>
-              <Button size="sm" variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50 h-8 text-xs"
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'reforward'});setNote('');}}>
                 Re-forward
-              </Button>
-              <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 h-8 text-xs"
+              </Button>}
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'sendToCenter'});setNote('');}}>
                 Send to Center
-              </Button>
-              <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs"
+              </Button>}
+              {!isViewerCounselor && <Button size="sm" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50 h-8 text-xs"
                 onClick={()=>{setActionOpen({student:s,action:'sendToCenterFinal'});setNote(s.rejectionReason||'');}}>
                 Cancel → Center
-              </Button>
+              </Button>}
             </StudentCard>
           ))}
         </TabsContent>
@@ -1154,7 +1181,7 @@ export default function CounselorPage() {
         {/* ── Doc Requests Tab ───────────────────────────── */}
         <TabsContent value="docs" className="space-y-2 mt-4">
           <TabHint>New document requests from centers — forward to accountant for fee approval.</TabHint>
-          {newDocs.length > 0 && (
+          {!isViewerCounselor && newDocs.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -1177,7 +1204,7 @@ export default function CounselorPage() {
               badge={d.status?.replace(/_/g,' ')}
               badgeColor={DOC_COLORS[d.status]||'bg-slate-100 text-slate-600'}
               onClick={()=>setDocModal(d)}>
-              {d.status==='Requested'&&(
+              {!isViewerCounselor && d.status==='Requested'&&(
                 <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                   <input
                     type="checkbox"
@@ -1265,7 +1292,7 @@ export default function CounselorPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                {!isViewerCounselor && <div className="flex gap-2 flex-shrink-0">
                   <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
                     onClick={()=>dismiss(`fee-payment:${student._id}:${tx._id}`)}>
                     <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
@@ -1278,7 +1305,7 @@ export default function CounselorPage() {
                     onClick={()=>forwardFeePaymentToAccountant(student._id, tx._id)}>
                     <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
                   </Button>
-                </div>
+                </div>}
               </div>
               <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted"/>
               </div>
@@ -1289,7 +1316,7 @@ export default function CounselorPage() {
         {/* ── Doc Payments Tab ───────────────────────────── */}
         <TabsContent value="payment" className="space-y-2 mt-4">
           <TabHint>Center has submitted payment — review and forward to accountant for verification.</TabHint>
-          {paymentPending.length > 0 && (
+          {!isViewerCounselor && paymentPending.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -1312,7 +1339,7 @@ export default function CounselorPage() {
               badge="Payment Submitted"
               badgeColor="bg-emerald-50 text-emerald-700 border border-emerald-200"
               onClick={()=>setDocModal(d)}>
-              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              {!isViewerCounselor && <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                 <input
                   type="checkbox"
                   checked={selectedDocIds.includes(String(d._id))}
@@ -1328,7 +1355,7 @@ export default function CounselorPage() {
                   onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:payment`);}}>
                   <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
                 </Button>
-              </div>
+              </div>}
             </DocCard>
           ))}
         </TabsContent>
@@ -1336,7 +1363,7 @@ export default function CounselorPage() {
         {/* ── From Dispatch Tab ──────────────────────────── */}
         <TabsContent value="dispatch" className="space-y-2 mt-4">
           <TabHint>Scanned documents from Dispatch — review and forward to center.</TabHint>
-          {fromDisp.length > 0 && (
+          {!isViewerCounselor && fromDisp.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -1359,7 +1386,7 @@ export default function CounselorPage() {
               badge="Scan Ready"
               badgeColor="bg-violet-50 text-violet-700 border border-violet-200"
               onClick={()=>setDocModal(d)}>
-              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              {!isViewerCounselor && <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                 <input
                   type="checkbox"
                   checked={selectedDocIds.includes(String(d._id))}
@@ -1375,7 +1402,7 @@ export default function CounselorPage() {
                   onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:dispatch`);}}>
                   <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
                 </Button>
-              </div>
+              </div>}
             </DocCard>
           ))}
         </TabsContent>
@@ -1399,10 +1426,10 @@ export default function CounselorPage() {
             {[d.courierInfo.company, d.courierInfo.trackingNo, d.courierInfo.dispatchDate ? new Date(d.courierInfo.dispatchDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : ''].filter(Boolean).join(' · ')}
           </span>
         )}
-        <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
+        {!isViewerCounselor && <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
           onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:delivery`);}}>
           <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-        </Button>
+        </Button>}
       </div>
     </DocCard>
   ))}
@@ -1421,15 +1448,16 @@ export default function CounselorPage() {
             : visibleSettlementQueue.map(s => (
               <div key={s._id} className="space-y-2">
                 <div className="flex justify-end">
-                  <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50"
+                  {!isViewerCounselor && <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50"
                     onClick={() => dismiss(`student:${s._id}:settlement`)}>
                     <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-                  </Button>
+                  </Button>}
                 </div>
                 <SettlementRequestCard
                   student={s}
                   saving={saving}
                   onForward={handleForwardSettlement}
+                  readOnly={isViewerCounselor}
                 />
               </div>
             ))
@@ -1566,7 +1594,7 @@ export default function CounselorPage() {
       {/* Modals */}
       {studentModal && <StudentModal student={studentModal} onClose={()=>setStudentModal(null)}/>}
       {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}/>}
-      {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts}/>}
+      {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts} readOnly={isViewerCounselor}/>}
 
       <Dialog open={!!docChangeDialog} onOpenChange={()=>{ setDocChangeDialog(null); setDocChangeNote(''); }}>
         <DialogContent className="max-w-md">

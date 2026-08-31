@@ -28,6 +28,7 @@ const PROGRAMS      = ['UG','PG','Diploma/Certificate','Research/PhD (if applica
 const STREAMS_LIST  = ['Management','IT/Computer','Education','Arts','Science','Healthcare','Engineering','Other'];
 const FEE_STRUCTURES = ['Very Special', 'Special', 'Normal'];
 const LOGIN_PROVISION_OPTIONS = ['Login Provided', 'Login Not Provided'];
+const NO_VIEWER_COUNSELOR = '__no_viewer_counselor__';
 
 const csvEscape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 const csvDate = value => value ? new Date(value).toLocaleDateString('en-IN') : '';
@@ -204,7 +205,7 @@ function CenterStudentsModal({ center, onClose }) {
 }
 
 // ── Center detail card expand ────────────────────────────────
-function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
+function CenterCard({ center, isAdmin, isViewer = false, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
   const [expanded,    setExpanded]    = useState(false);
   const [uploadOpen,  setUploadOpen]  = useState(false);
   const [uploadName,  setUploadName]  = useState('');
@@ -365,15 +366,15 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
             <Button variant="ghost" size="sm" onClick={() => setExpanded(p => !p)} title="View details">
               {expanded ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => onAssignCounselor(center)} title="Assign Counselor">
+            {!isViewer && <Button variant="ghost" size="sm" onClick={() => onAssignCounselor(center)} title="Assign Counselor">
               <User className="h-3.5 w-3.5"/>
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => onEdit(center)} title="Edit">
+            </Button>}
+            {!isViewer && <Button variant="ghost" size="sm" onClick={() => onEdit(center)} title="Edit">
               <Edit2 className="h-3.5 w-3.5"/>
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => onCreateLogin(center)} title="Create Login">
+            </Button>}
+            {!isViewer && <Button variant="ghost" size="sm" onClick={() => onCreateLogin(center)} title="Create Login">
               <Key className="h-3.5 w-3.5"/>
-            </Button>
+            </Button>}
             {isAdmin && (
               <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-50"
                 onClick={() => onDelete(center._id)} title="Delete">
@@ -478,7 +479,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                       <span className="rounded-full border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700">
                         {center.loginProvisionStatus || 'Login Not Provided'}
                       </span>
-                      <Button
+                      {!isViewer && <Button
                         type="button"
                         size="sm"
                         variant="outline"
@@ -487,7 +488,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                       >
                         <Edit2 className="h-3.5 w-3.5" />
                         Edit
-                      </Button>
+                      </Button>}
                     </>
                   )}
                 </div>
@@ -519,7 +520,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                       <span className="rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-sm font-semibold text-emerald-700">
                         {center.feeStructureType || 'Normal'}
                       </span>
-                      <Button
+                      {!isViewer && <Button
                         type="button"
                         size="sm"
                         variant="outline"
@@ -528,7 +529,7 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                       >
                         <Edit2 className="h-3.5 w-3.5" />
                         Edit
-                      </Button>
+                      </Button>}
                     </>
                   )}
                 </div>
@@ -540,10 +541,10 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <Key className="h-3.5 w-3.5"/> Center Logins ({loginUsers.length})
                 </div>
-                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
                   onClick={e => { e.stopPropagation(); onCreateLogin(center); }}>
                   <Plus className="h-3 w-3"/> Create Login
-                </Button>
+                </Button>}
               </div>
               {loginUsers.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">No login created for this center yet</p>
@@ -560,10 +561,10 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                         <div className="font-mono font-semibold truncate">{u.createdPassword || 'Not saved'}</div>
                       </div>
                       <div className="flex items-end">
-                        <Button size="sm" variant="outline" className="h-8 text-xs"
+                        {!isViewer && <Button size="sm" variant="outline" className="h-8 text-xs"
                           onClick={e => { e.stopPropagation(); onResetLogin(u); }}>
                           Reset
-                        </Button>
+                        </Button>}
                       </div>
                     </div>
                   ))}
@@ -577,10 +578,10 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <Paperclip className="h-3.5 w-3.5"/> Verification Documents ({verDocs.length})
                 </div>
-                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
                   onClick={e => { e.stopPropagation(); setUploadOpen(true); }}>
                   <Plus className="h-3 w-3"/> Upload
-                </Button>
+                </Button>}
               </div>
 
               {verDocs.length === 0 ? (
@@ -648,9 +649,9 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <GraduationCap className="h-3.5 w-3.5"/> University Access ({allowedUnis.length})
                 </div>
-                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openUniManage}>
+                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openUniManage}>
                   <Plus className="h-3 w-3"/> Manage
-                </Button>
+                </Button>}
               </div>
               {allowedUnis.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">No universities assigned — center can see all universities</p>
@@ -672,9 +673,9 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <CreditCard className="h-3.5 w-3.5"/> Payment Account Access ({allowedPayAccts.length})
                 </div>
-                <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openPayManage}>
+                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openPayManage}>
                   <Plus className="h-3 w-3"/> Manage
-                </Button>
+                </Button>}
               </div>
               {allowedPayAccts.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">No accounts assigned — center can see all payment accounts</p>
@@ -791,9 +792,11 @@ function CenterCard({ center, isAdmin, loginUsers = [], selectedForExport = fals
 export default function CentersPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
+  const isViewer = user?.role === 'ViewerCounselor';
 
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
+  const [viewerCounselors, setViewerCounselors] = useState([]);
   const [centerUsers,setCenterUsers]= useState([]);
   const [centerSearch,setCenterSearch]= useState('');
   const [loading,    setLoading]    = useState(true);
@@ -825,15 +828,21 @@ export default function CentersPage() {
   // Assign counselor
   const [assignOpen,    setAssignOpen]    = useState(null);
   const [selCounselor,  setSelCounselor]  = useState('');
+  const [selViewerCounselor, setSelViewerCounselor] = useState(NO_VIEWER_COUNSELOR);
   const [viewCenter,    setViewCenter]    = useState(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [c, co, users] = await Promise.all([centersApi.getAll(), counselorsApi.getAll(), authApi.listUsers('Center').catch(()=>[])]);
-      setCenters(c); setCounselors(co); setCenterUsers(users);
+      const [c, co, users, viewers] = await Promise.all([
+        centersApi.getAll(),
+        counselorsApi.getAll(),
+        authApi.listUsers('Center').catch(()=>[]),
+        isAdmin ? authApi.listUsers('ViewerCounselor').catch(()=>[]) : Promise.resolve([]),
+      ]);
+      setCenters(c); setCounselors(co); setCenterUsers(users); setViewerCounselors(viewers);
     } catch { toast.error('Failed to load'); } finally { setLoading(false); }
-  }, []);
+  }, [isAdmin]);
   useEffect(() => { load(); }, [load]);
 
   function openAdd() {
@@ -945,6 +954,32 @@ export default function CentersPage() {
     try {
       await counselorsApi.addCenter(selCounselor, assignOpen._id);
       toast.success('Counselor assigned'); setAssignOpen(null); setSelCounselor(''); load();
+    } catch(e) { toast.error(e.message); }
+  }
+
+  function getViewerCounselorForCenter(centerId) {
+    return viewerCounselors.find(v => (
+      v.counselorId?.centers || []
+    ).some(c => String(c?._id || c) === String(centerId)));
+  }
+
+  function openAssignDialog(center) {
+    const currentViewer = getViewerCounselorForCenter(center._id);
+    const viewerId = currentViewer?.counselorId?._id || currentViewer?.counselorId;
+    setAssignOpen(center);
+    setSelCounselor('');
+    setSelViewerCounselor(viewerId ? String(viewerId) : NO_VIEWER_COUNSELOR);
+  }
+
+  async function assignViewerCounselor() {
+    if (!assignOpen) return;
+    try {
+      const counselorId = selViewerCounselor === NO_VIEWER_COUNSELOR ? '' : selViewerCounselor;
+      await centersApi.assignViewerCounselor(assignOpen._id, counselorId);
+      toast.success(counselorId ? 'Viewer counselor assigned' : 'Viewer counselor removed');
+      setAssignOpen(null);
+      setSelViewerCounselor(NO_VIEWER_COUNSELOR);
+      load();
     } catch(e) { toast.error(e.message); }
   }
 
@@ -1110,9 +1145,9 @@ export default function CentersPage() {
           <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} disabled={centers.length === 0}>
             <Download className="h-4 w-4 mr-1"/>CSV
           </Button>
-          <Button size="sm" onClick={openAdd}>
+          {!isViewer && <Button size="sm" onClick={openAdd}>
             <Plus className="h-4 w-4 mr-1"/>Add Center
-          </Button>
+          </Button>}
         </div>
       </div>
 
@@ -1181,7 +1216,7 @@ export default function CentersPage() {
       ) : (
         <div className="space-y-3">
           {filteredCenters.map(c => (
-            <CenterCard key={c._id} center={c} isAdmin={isAdmin}
+            <CenterCard key={c._id} center={c} isAdmin={isAdmin} isViewer={isViewer}
               loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
               selectedForExport={selectedCenters.has(c._id)}
               onToggleExport={toggleCenterSelection}
@@ -1189,7 +1224,7 @@ export default function CentersPage() {
               onDelete={deleteCenter}
               onCreateLogin={c => { setLoginTarget(c); setLoginForm({ name: c.fullName||'', email:'', password:'' }); setLoginOpen(true); }}
               onResetLogin={u => { setResetTarget(u); setResetPwd(''); }}
-              onAssignCounselor={c => { setAssignOpen(c); setSelCounselor(''); }}
+              onAssignCounselor={openAssignDialog}
               onViewStudents={setViewCenter}
               onRefresh={load}
             />
@@ -1576,16 +1611,37 @@ export default function CentersPage() {
         <DialogContent>
           <DialogHeader><DialogTitle>Assign Counselor — {assignOpen?.name}</DialogTitle></DialogHeader>
           {isAdmin ? (
-            <>
-              <Select value={selCounselor} onValueChange={setSelCounselor}>
-                <SelectTrigger><SelectValue placeholder="Select counselor…"/></SelectTrigger>
-                <SelectContent>{counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
-              </Select>
+            <div className="space-y-5">
+              <div className="space-y-2">
+                <Label>Assigned Counselor</Label>
+                <Select value={selCounselor} onValueChange={setSelCounselor}>
+                  <SelectTrigger><SelectValue placeholder="Select counselor..."/></SelectTrigger>
+                  <SelectContent>{counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+                <Label>Viewer Counselor</Label>
+                <Select value={selViewerCounselor} onValueChange={setSelViewerCounselor}>
+                  <SelectTrigger><SelectValue placeholder="Select viewer counselor..."/></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_VIEWER_COUNSELOR}>No viewer counselor</SelectItem>
+                    {viewerCounselors.map(v => {
+                      const id = v.counselorId?._id || v.counselorId;
+                      if (!id) return null;
+                      return <SelectItem key={v._id} value={String(id)}>{v.name || v.email}</SelectItem>;
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Viewer counselor ko is center aur iske students ka read-only access milega.
+                </p>
+              </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setAssignOpen(null)}>Cancel</Button>
-                <Button onClick={assignCounselor}>Assign</Button>
+                <Button variant="outline" onClick={assignViewerCounselor}>Assign Viewer</Button>
+                <Button onClick={assignCounselor}>Assign Counselor</Button>
               </DialogFooter>
-            </>
+            </div>
           ) : (
             <>
               <p className="text-sm text-muted-foreground">

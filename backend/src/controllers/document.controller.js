@@ -13,7 +13,9 @@ async function loadDoc(id) {
     .populate('center', 'name city state')
     .populate('university', 'name shortName')
     .populate('payments.recordedBy', 'name role')
+    .populate('payments.lastUpdatedBy', 'name role')
     .populate('uploadedBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
     .populate('statusHistory.changedBy', 'name role');
   if (!doc) { const e = new Error('Document not found'); e.status = 404; throw e; }
   return doc;
@@ -44,7 +46,7 @@ function wantsCenterFlow(req) {
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
   if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
-  if (req.user.role !== 'Counselor' || !wantsCenterFlow(req)) return false;
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
 }
@@ -176,8 +178,14 @@ exports.list = asyncHandler(async (req, res) => {
   if (role === 'Center') {
     filter.center = centerId;
   }
-  if (role === 'Counselor')  {
-    filter.counselor = counselorId;
+  if (['Counselor', 'ViewerCounselor'].includes(role))  {
+    const counselorDoc = await Counselor.findById(counselorId).select('centers').lean();
+    const linkedCenterIds = counselorDoc?.centers || [];
+    if (linkedCenterIds.length > 0) {
+      filter.$or = [{ counselor: counselorId }, { center: { $in: linkedCenterIds } }];
+    } else {
+      filter.counselor = counselorId;
+    }
     if (!req.query.studentId && !req.query.all) {
       filter.status = { $in: ['Requested','Changes_Requested','Forwarded','Fee_Pending','Fee_Rejected','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'] };
     }
@@ -188,7 +196,7 @@ exports.list = asyncHandler(async (req, res) => {
     filter.university = universityId;
   }
 
-  const bypassStatus = req.query.all && ['Admin','Counselor','Accountant','Dispatch','University'].includes(role);
+  const bypassStatus = req.query.all && ['Admin','Counselor','ViewerCounselor','Accountant','Dispatch','University'].includes(role);
 
   if (!bypassStatus) {
     if (role === 'Accountant') filter.status = { $in: ['Forwarded','Fee_Pending','Payment_Submitted','Accountant_Reviewed','Accountant_Received'] };
@@ -206,6 +214,10 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('center', 'name')
     .populate('university', 'name shortName')
     .populate('payments.recordedBy', 'name role')
+    .populate('payments.lastUpdatedBy', 'name role')
+    .populate('uploadedBy', 'name role')
+    .populate('lastUpdatedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role')
     .sort('-createdAt')
     .lean();
 
@@ -245,6 +257,9 @@ exports.create = asyncHandler(async (req, res) => {
   const student = await Student.findById(studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const centerOriginated = await canUseCenterFlow(req, student.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can request documents only from center view'); e.status = 403; throw e;
+  }
 
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
@@ -279,6 +294,8 @@ exports.create = asyncHandler(async (req, res) => {
       accountNumber: paymentAccountNumber||'', ifscCode: paymentIfscCode||'',
       paidAt: paymentDate ? new Date(paymentDate) : new Date(),
       recordedBy: req.user._id,
+      lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
+      lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
       paidToAccount: paymentPaidToAccount || undefined,
       paidToAccountLabel: paymentPaidToAccountLabel || '',
     });
@@ -304,10 +321,13 @@ exports.update = asyncHandler(async (req, res) => {
   const doc = await StudentDoc.findById(req.params.id);
   if (!doc) { const e = new Error('Not found'); e.status = 404; throw e; }
   const centerOriginated = await canUseCenterFlow(req, doc.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can edit documents only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
-  if (req.user.role === 'Counselor' && !centerOriginated && String(doc.counselor) !== String(req.user.counselorId)) {
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role) && !centerOriginated && String(doc.counselor) !== String(req.user.counselorId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   if (centerOriginated) {
@@ -322,6 +342,10 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.body.requestType !== undefined) doc.requestType = req.body.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy';
   if (req.body.chargeFee !== undefined) doc.chargeFee = Number(req.body.chargeFee);
   if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
+  if (req.user.role === 'ViewerCounselor' && centerOriginated) {
+    doc.lastUpdatedBy = req.user._id;
+    doc.lastUpdatedAt = new Date();
+  }
   if (centerOriginated && doc.status === 'Changes_Requested') {
     pushHistory(doc, 'Requested', req.user, 'Center updated document request after changes were requested');
   }
@@ -573,6 +597,9 @@ exports.addPayment = asyncHandler(async (req, res) => {
 
   const doc = await loadDoc(req.params.id);
   const centerOriginated = await canUseCenterFlow(req, doc.center?._id || doc.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can add document payments only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
@@ -588,6 +615,8 @@ exports.addPayment = asyncHandler(async (req, res) => {
     note: note || '',
     paidAt: paidAt ? new Date(paidAt) : new Date(),
     recordedBy: req.user._id,
+    lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
+    lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
     paidToAccount: paidToAccount || undefined,
     paidToAccountLabel: paidToAccountLabel || '',
     paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
@@ -629,6 +658,9 @@ exports.updatePayment = asyncHandler(async (req, res) => {
   const doc = await StudentDoc.findById(req.params.id);
   if (!doc) { const e = new Error('Document not found'); e.status = 404; throw e; }
   const centerOriginated = await canUseCenterFlow(req, doc.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can edit document payments only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
@@ -641,6 +673,10 @@ exports.updatePayment = asyncHandler(async (req, res) => {
       payment[f] = f === 'amount' ? Number(req.body[f]) : f === 'paidAt' ? new Date(req.body[f]) : req.body[f];
     }
   });
+  if (req.user.role === 'ViewerCounselor' && centerOriginated) {
+    payment.lastUpdatedBy = req.user._id;
+    payment.lastUpdatedAt = new Date();
+  }
   await doc.save();
   res.json(await loadDoc(doc._id));
 });
@@ -649,6 +685,9 @@ exports.updatePayment = asyncHandler(async (req, res) => {
 exports.requestDispatch = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   const centerOriginated = await canUseCenterFlow(req, doc.center?._id || doc.center);
+  if (req.user.role === 'ViewerCounselor' && !centerOriginated) {
+    const e = new Error('Viewer counselors can request dispatch only from center view'); e.status = 403; throw e;
+  }
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
@@ -881,7 +920,7 @@ exports.documentPaymentFollowup = asyncHandler(async (req, res) => {
 
 async function assertInventoryStudentAccess(req, student) {
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
-  if (req.user.role === 'Counselor') {
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
     const directMatch = String(student.counselor?._id || student.counselor) === String(req.user.counselorId);
     const counselorDoc = await Counselor.findById(req.user.counselorId).select('centers').lean();
     const centerMatch = (counselorDoc?.centers || []).some(id => String(id) === String(student.center?._id || student.center));
@@ -935,7 +974,7 @@ exports.accountantDocsQueue = asyncHandler(async (req, res) => {
 
 exports.inventoryList = asyncHandler(async (req, res) => {
   const filter = { applicationStatus: 'Enrolled', enrollmentNumber: { $exists: true, $ne: '' } };
-  if (req.user.role === 'Counselor') {
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
     const counselorDoc = await Counselor.findById(req.user.counselorId).select('centers').lean();
     const linkedCenterIds = counselorDoc?.centers || [];
     filter.$or = linkedCenterIds.length > 0

@@ -14,6 +14,8 @@ const docPaymentSchema = new mongoose.Schema({
   note:         { type: String, trim: true },
   paidAt:       { type: Date, default: Date.now },
   recordedBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedAt: { type: Date },
   verified:     { type: Boolean, default: false },
   verifiedBy:   { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   verifiedAt: { type: Date },
@@ -112,6 +114,8 @@ const studentDocSchema = new mongoose.Schema({
   nextCoordinatorFollowupDate: { type: Date },
 
   uploadedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastUpdatedAt: { type: Date },
   verifiedBy:  { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, { timestamps: true });
 

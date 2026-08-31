@@ -4,7 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
 const ROLE_HOME = {
-  Admin: '/', Counselor: '/counselor', Center: '/center',
+  Admin: '/', Counselor: '/counselor', ViewerCounselor: '/counselor', Center: '/center',
   Accountant: '/accountant', University: '/university', Dispatch: '/dispatch',
   PaymentCoordinator: '/payment-coordinator',
 };

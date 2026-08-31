@@ -406,7 +406,7 @@ const SBadge = ({status,map}) => {
 // ── Cancelled Application Banner with Settlement Request ──────
 function CancelledBanner({ student, onSettlementRequested }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [requesting, setRequesting] = useState(false);
   const [note,       setNote]       = useState('');
   const [noteOpen,   setNoteOpen]   = useState(false);
@@ -600,7 +600,7 @@ function FieldGroup({ label, children }) {
 }
 
 // ── Add Student Wizard ────────────────────────────────────────
-function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
+function AddStudentWizard({ onClose, onSaved, defCounselor, centerId, actingAsCenter = false }) {
   const [step,   setStep]   = useState(1);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_STUDENT });
@@ -643,11 +643,12 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
     if (docErr) return toast.error(docErr);
     setSaving(true);
     try {
-      const student = await studentsApi.create({ ...form, counselor: defCounselor, center: centerId });
+      const student = await studentsApi.create({ ...form, counselor: defCounselor, center: centerId, actingAsCenter });
       if (fee.totalFee && Number(fee.totalFee) > 0) {
         await paymentsApi.upsertFee(student._id, {
           totalFee: Number(fee.totalFee), discount: Number(fee.discount)||0, notes: fee.notes,
           installments: cleanInstallments(feeInstallments),
+          actingAsCenter,
         });
       }
       if (submissionPdf) {
@@ -987,7 +988,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId }) {
 function FeeSection({ studentId, appStatus, student }) {
   
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const isCancelled = appStatus === 'Cancelled';
   const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
@@ -1348,7 +1349,7 @@ function FeeSection({ studentId, appStatus, student }) {
 // ── DOCS SECTION ─────────────────────────────────────────────
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1970,7 +1971,7 @@ function PaymentsSection({ studentId }) {
 // ── STUDENT DETAIL ───────────────────────────────────────────
 function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const [s,setS]         = useState(student);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
@@ -2543,7 +2544,7 @@ function isPaymentPending(student) {
 export default function CenterPortalPage() {
   const {user, switchedCenter, switchBackToCounselor}=useAuth();
   const navigate = useNavigate();
-  const isCounselorSwitch = ['Counselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
   const centerId = isCounselorSwitch ? switchedCenter._id : user?.centerId;
   const [students,setStudents]=useState([]); const [centerInfo,setCenterInfo]=useState(null);
   const [defCounselor,setDef]=useState(null); const [loading,setLoading]=useState(true);
@@ -2609,7 +2610,7 @@ export default function CenterPortalPage() {
     }
   }
 
-  if (['Counselor','PaymentCoordinator'].includes(user?.role) && !centerId) {
+  if (['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && !centerId) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
         <h2 className="text-lg font-semibold">No center selected</h2>
@@ -2648,7 +2649,7 @@ export default function CenterPortalPage() {
         <div>
           {isCounselorSwitch && (
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-              {user?.role === 'PaymentCoordinator' ? 'Payment coordinator center view' : 'Counselor center view'}
+              {user?.role === 'PaymentCoordinator' ? 'Payment coordinator center view' : user?.role === 'ViewerCounselor' ? 'Viewer counselor center view' : 'Counselor center view'}
             </div>
           )}
           <h1 className="text-2xl font-bold text-slate-800">{centerInfo?.name||'Center Portal'}</h1>
@@ -2823,6 +2824,7 @@ export default function CenterPortalPage() {
             onSaved={loadAll}
             defCounselor={defCounselor}
             centerId={centerId}
+            actingAsCenter={isCounselorSwitch}
           />
         </DialogContent>
       </Dialog>

@@ -425,10 +425,12 @@ export default function StudentDetailPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
   if (!student) return <div className="text-center py-16 text-muted-foreground">Student not found</div>;
 
-  const canEdit = !student.coreLocked || user?.role === 'Admin';
+  const isViewerCounselor = user?.role === 'ViewerCounselor';
+  const canEdit = !isViewerCounselor && (!student.coreLocked || user?.role === 'Admin');
   const isCounselor = user?.role === 'Counselor';
   const isAdmin = user?.role === 'Admin';
   const canManageDocs = isCounselor || isAdmin;
+  const canManageFees = !isViewerCounselor && ['Admin', 'Counselor', 'Center', 'PaymentCoordinator'].includes(user?.role);
   const st = STATUS_COLORS[student.applicationStatus] || 'bg-gray-100 text-gray-700';
 
   const allPayments = [];
@@ -592,10 +594,10 @@ export default function StudentDetailPage() {
               </div>
               <div className={`flex items-center justify-between rounded-lg border p-3 ${payment.dueAmount>0?'border-amber-300 bg-amber-50':'border-emerald-300 bg-emerald-50'}`}>
                 <div><span className="text-sm font-medium">Balance Due: </span><span className={`text-lg font-bold ${payment.dueAmount>0?'text-amber-700':'text-emerald-700'}`}>{fmt(payment.dueAmount)}</span></div>
-                <div className="flex gap-2">
+                {canManageFees && <div className="flex gap-2">
                   <Button size="sm" variant="outline" onClick={()=>{setFf({totalFee:payment.totalFee,discount:payment.discount,notes:payment.notes||''});setFeeOpen(true);}}>Edit Fee</Button>
                   <Button size="sm" onClick={()=>setTxOpen(true)}><PlusCircle className="h-3.5 w-3.5 mr-1"/>Add Payment</Button>
-                </div>
+                </div>}
               </div>
               {payment.notes && <p className="text-sm text-muted-foreground">Note: {payment.notes}</p>}
               {(payment.installments?.length > 0 || payment.dueTimeline?.length > 0) && (
@@ -647,7 +649,7 @@ export default function StudentDetailPage() {
             <div className="text-center py-10 border border-dashed rounded-lg">
               <IndianRupee className="h-8 w-8 mx-auto text-muted-foreground mb-2"/>
               <p className="text-sm text-muted-foreground mb-3">No fee structure</p>
-              <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}}>Set Up Fees</Button>
+              {canManageFees && <Button onClick={()=>{setFf({totalFee:'',discount:'',notes:''});setFeeOpen(true);}}>Set Up Fees</Button>}
             </div>
           )}
           {payment?.transactions?.length > 0 && (
