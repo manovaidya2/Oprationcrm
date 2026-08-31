@@ -34,6 +34,64 @@ function submittedAt(student = {}) {
   return submitted?.at || null;
 }
 
+async function buildRows(students) {
+  const payments = await Payment.find({ student: { $in: students.map(student => student._id) } })
+    .populate('transactions.recordedBy', 'name role')
+    .populate('transactions.verifiedBy', 'name role')
+    .populate('transactions.paidToAccount', 'label mode upiId upiName bankName accountHolder accountNumber ifscCode branch')
+    .lean();
+
+  const paymentByStudent = new Map(payments.map(payment => [String(payment.student), payment]));
+  return students.map(student => {
+    const payment = paymentByStudent.get(String(student._id)) || {};
+    const summary = summarizePayment(payment);
+    const transactions = feeTransactions(payment).map(tx => ({
+      _id: tx._id,
+      amount: tx.amount || 0,
+      mode: tx.mode || '',
+      utrRef: tx.utrRef || '',
+      upiId: tx.upiId || '',
+      bankName: tx.bankName || '',
+      accountHolder: tx.accountHolder || '',
+      accountNumber: tx.accountNumber || '',
+      ifscCode: tx.ifscCode || '',
+      paidAt: tx.paidAt,
+      recordAddedAt: tx.createdAt,
+      verifiedAt: tx.verifiedAt,
+      verificationStatus: tx.verificationStatus || 'not_required',
+      paidToAccountLabel: tx.paidToAccountLabel || tx.paidToAccount?.label || '',
+      paidToAccount: tx.paidToAccount || null,
+    }));
+
+    return {
+      student: {
+        _id: student._id,
+        name: student.name,
+        enrollmentNumber: student.enrollmentNumber || '',
+        phone: student.phone || '',
+        courseName: student.courseName || '',
+        courseYear: student.courseYear || '',
+        applicationStatus: student.applicationStatus || '',
+        universityName: student.university?.name || student.universityName || '',
+        createdAt: student.createdAt,
+        submittedAt: submittedAt(student),
+      },
+      totalAmount: summary.netFee,
+      amountPaid: summary.paidAmount,
+      amountDue: summary.dueAmount,
+      transactions,
+    };
+  });
+}
+
+function totalsFor(rows) {
+  return rows.reduce((acc, row) => ({
+    totalAmount: acc.totalAmount + row.totalAmount,
+    amountPaid: acc.amountPaid + row.amountPaid,
+    amountDue: acc.amountDue + row.amountDue,
+  }), { totalAmount: 0, amountPaid: 0, amountDue: 0 });
+}
+
 exports.centers = asyncHandler(async (_req, res) => {
   const centers = await Center.find().sort('name organisationName').lean();
   const centerIds = centers.map(center => center._id);
@@ -90,64 +148,41 @@ exports.centerStudents = asyncHandler(async (req, res) => {
     limit ? Student.countDocuments({ center: center._id }) : Promise.resolve(null),
   ]);
 
-  const payments = await Payment.find({ student: { $in: students.map(student => student._id) } })
-    .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role')
-    .populate('transactions.paidToAccount', 'label mode upiId upiName bankName accountHolder accountNumber ifscCode branch')
-    .lean();
-
-  const paymentByStudent = new Map(payments.map(payment => [String(payment.student), payment]));
-  const rows = students.map(student => {
-    const payment = paymentByStudent.get(String(student._id)) || {};
-    const summary = summarizePayment(payment);
-    const transactions = feeTransactions(payment).map(tx => ({
-      _id: tx._id,
-      amount: tx.amount || 0,
-      mode: tx.mode || '',
-      utrRef: tx.utrRef || '',
-      upiId: tx.upiId || '',
-      bankName: tx.bankName || '',
-      accountHolder: tx.accountHolder || '',
-      accountNumber: tx.accountNumber || '',
-      ifscCode: tx.ifscCode || '',
-      paidAt: tx.paidAt,
-      recordAddedAt: tx.createdAt,
-      verifiedAt: tx.verifiedAt,
-      verificationStatus: tx.verificationStatus || 'not_required',
-      paidToAccountLabel: tx.paidToAccountLabel || tx.paidToAccount?.label || '',
-      paidToAccount: tx.paidToAccount || null,
-    }));
-
-    return {
-      student: {
-        _id: student._id,
-        name: student.name,
-        enrollmentNumber: student.enrollmentNumber || '',
-        phone: student.phone || '',
-        courseName: student.courseName || '',
-        courseYear: student.courseYear || '',
-        applicationStatus: student.applicationStatus || '',
-        universityName: student.university?.name || student.universityName || '',
-        createdAt: student.createdAt,
-        submittedAt: submittedAt(student),
-      },
-      totalAmount: summary.netFee,
-      amountPaid: summary.paidAmount,
-      amountDue: summary.dueAmount,
-      transactions,
-    };
-  });
-
-  const totals = rows.reduce((acc, row) => ({
-    totalAmount: acc.totalAmount + row.totalAmount,
-    amountPaid: acc.amountPaid + row.amountPaid,
-    amountDue: acc.amountDue + row.amountDue,
-  }), { totalAmount: 0, amountPaid: 0, amountDue: 0 });
+  const rows = await buildRows(students);
+  const totals = totalsFor(rows);
 
   res.json({
     center,
     rows,
     totals,
+    maxTransactions: Math.max(0, ...rows.map(row => row.transactions.length)),
+    page: limit ? page : 1,
+    limit,
+    totalStudents: limit ? totalStudents : rows.length,
+    partial: Boolean(limit),
+  });
+});
+
+exports.students = asyncHandler(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.max(0, Math.min(500, Number(req.query.limit || 0)));
+  const skip = limit ? (page - 1) * limit : 0;
+  const studentQuery = Student.find()
+    .populate('university', 'name shortName')
+    .sort('name');
+
+  if (limit) studentQuery.skip(skip).limit(limit);
+
+  const [students, totalStudents] = await Promise.all([
+    studentQuery.lean(),
+    limit ? Student.countDocuments() : Promise.resolve(null),
+  ]);
+
+  const rows = await buildRows(students);
+
+  res.json({
+    rows,
+    totals: totalsFor(rows),
     maxTransactions: Math.max(0, ...rows.map(row => row.transactions.length)),
     page: limit ? page : 1,
     limit,

@@ -24,6 +24,7 @@ const ChatPage             = lazy(() => import('@/pages/ChatPage'));
 const PaymentCoordinatorPage = lazy(() => import('@/pages/PaymentCoordinatorPage'));
 const OldPaymentTimelinePage = lazy(() => import('@/pages/OldPaymentTimelinePage'));
 const CentreBillingPage    = lazy(() => import('@/pages/CentreBillingPage'));
+const AccountLedgerPage    = lazy(() => import('@/pages/AccountLedgerPage'));
 const InvoicePage          = lazy(() => import('@/pages/InvoicePage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
@@ -33,11 +34,6 @@ const Spin = () => (
   </div>
 );
 const W = ({ children }) => <Suspense fallback={<Spin />}>{children}</Suspense>;
-
-function LegacyAccountLedgerRedirect() {
-  const location = useLocation();
-  return <Navigate to={location.pathname.replace('/account-ledger', '/centre-billing')} replace />;
-}
 
 // Role → home route mapping
 const ROLE_HOME = {
@@ -53,7 +49,7 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
@@ -108,8 +104,7 @@ export default function App() {
           <Route path="payment-due-timeline" element={<W><OldPaymentTimelinePage /></W>} />
           <Route path="centre-billing"           element={<W><CentreBillingPage /></W>} />
           <Route path="centre-billing/:centerId" element={<W><CentreBillingPage /></W>} />
-          <Route path="account-ledger"           element={<LegacyAccountLedgerRedirect />} />
-          <Route path="account-ledger/:centerId" element={<LegacyAccountLedgerRedirect />} />
+          <Route path="account-ledger"           element={<W><AccountLedgerPage /></W>} />
           <Route path="invoice"                  element={<W><InvoicePage /></W>} />
           <Route path="invoice/:centerId"        element={<W><InvoicePage /></W>} />
           <Route path="help"                element={<W><ChatPage /></W>} />

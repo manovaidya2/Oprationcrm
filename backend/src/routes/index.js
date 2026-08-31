@@ -176,6 +176,7 @@ router.delete('/payment-accounts/:id',      protect, requireRole('Admin'), payAc
 // ── DASHBOARD ─────────────────────────────────────────────────
 router.get('/dashboard/stats', protect, misc.dashboardStats);
 
+router.get('/account-ledger',                   protect, requireRole('Admin','Accountant'), accountLedgerC.students);
 router.get('/account-ledger/centers',           protect, requireRole('Admin','Accountant'), accountLedgerC.centers);
 router.get('/account-ledger/centers/:centerId', protect, requireRole('Admin','Accountant'), accountLedgerC.centerStudents);
 

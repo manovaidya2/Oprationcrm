@@ -205,6 +205,10 @@ export const dashApi = {
 };
 
 export const accountLedgerApi = {
+  students: (params = {}) => {
+    const query = new URLSearchParams(params);
+    return request(`/account-ledger${query.toString() ? `?${query}` : ''}`);
+  },
   centers: () => request('/account-ledger/centers'),
   centerStudents: (id, params = {}) => {
     const query = new URLSearchParams(params);
