@@ -164,11 +164,14 @@ function openInvoice(center, rows, rangeLabel = '') {
           .subject strong { color: #0f172a; }
           .meta { text-align: right; font-size: 13px; line-height: 1.7; color: #0f172a; }
           .meta strong { color: #0f172a; }
-          .billto { margin: 22px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-          .box { border: 1px solid #dbe3ef; border-radius: 8px; padding: 14px; background: #f8fafc; min-height: 108px; }
+          .billto { margin: 22px 0 18px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: stretch; }
+          .box { border: 1px solid #dbe3ef; border-radius: 8px; padding: 16px; background: #f8fafc; min-height: 104px; }
           .box h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: #475569; }
           .box strong { display: block; font-size: 15px; color: #0f172a; margin-bottom: 4px; }
-          .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
+          .invoice-chip { min-width: 220px; background: #fff; }
+          .invoice-chip div { display: flex; justify-content: space-between; gap: 20px; padding: 4px 0; font-size: 12px; color: #475569; }
+          .invoice-chip b { color: #0f172a; }
+          .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0 24px; }
           .stat { border-radius: 8px; padding: 14px; border: 1px solid #dbe3ef; }
           .stat span { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
           .stat strong { font-size: 20px; }
@@ -180,7 +183,8 @@ function openInvoice(center, rows, rangeLabel = '') {
           td { padding: 10px; border: 1px solid #dbe3ef; vertical-align: top; }
           td span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; }
           .num { text-align: right; white-space: nowrap; font-weight: 700; }
-          .foot { display: flex; justify-content: space-between; gap: 18px; margin-top: 28px; padding-top: 18px; border-top: 1px dashed #cbd5e1; color: #475569; font-size: 12px; }
+          .foot { display: flex; justify-content: flex-end; margin-top: 42px; color: #0f172a; font-size: 12px; }
+          .signature { width: 220px; border-top: 1px solid #94a3b8; padding-top: 10px; text-align: center; font-weight: 700; }
           .actions { position: sticky; top: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; background: rgba(244,247,251,.92); backdrop-filter: blur(8px); }
           button { border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 700; }
           .primary { background: #2563eb; color: white; }
@@ -218,9 +222,10 @@ function openInvoice(center, rows, rangeLabel = '') {
               <strong>${text(center?.name || 'Center')}</strong>
               <div class="muted">${text(centerAddress(center) || '-')}</div>
             </div>
-            <div class="box">
-              <h2>Payment Summary</h2>
-              <div class="muted">Verified paid amount is counted in paid total. Pending or unverified payment is not included.</div>
+            <div class="box invoice-chip">
+              <h2>Invoice Details</h2>
+              <div><span>Total Students</span><b>${rows.length}</b></div>
+              <div><span>Status</span><b>${Number(totals.amountDue || 0) > 0 ? 'Due' : 'Paid'}</b></div>
             </div>
           </section>
 
@@ -247,8 +252,7 @@ function openInvoice(center, rows, rangeLabel = '') {
           </table>
 
           <section class="foot">
-            <div>This invoice is generated from CRM account records.</div>
-            <div>Authorized Signatory</div>
+            <div class="signature">Authorized Signatory</div>
           </section>
         </main>
       </body>
