@@ -23,7 +23,8 @@ const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
 const ChatPage             = lazy(() => import('@/pages/ChatPage'));
 const PaymentCoordinatorPage = lazy(() => import('@/pages/PaymentCoordinatorPage'));
 const OldPaymentTimelinePage = lazy(() => import('@/pages/OldPaymentTimelinePage'));
-const AccountLedgerPage    = lazy(() => import('@/pages/AccountLedgerPage'));
+const CentreBillingPage    = lazy(() => import('@/pages/CentreBillingPage'));
+const InvoicePage          = lazy(() => import('@/pages/InvoicePage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -32,6 +33,11 @@ const Spin = () => (
   </div>
 );
 const W = ({ children }) => <Suspense fallback={<Spin />}>{children}</Suspense>;
+
+function LegacyAccountLedgerRedirect() {
+  const location = useLocation();
+  return <Navigate to={location.pathname.replace('/account-ledger', '/centre-billing')} replace />;
+}
 
 // Role → home route mapping
 const ROLE_HOME = {
@@ -47,7 +53,7 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/account-ledger', '/chat'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
@@ -100,8 +106,12 @@ export default function App() {
           <Route path="chat"                element={<W><ChatPage /></W>} />
           <Route path="payment-coordinator" element={<W><PaymentCoordinatorPage /></W>} />
           <Route path="payment-due-timeline" element={<W><OldPaymentTimelinePage /></W>} />
-          <Route path="account-ledger"           element={<W><AccountLedgerPage /></W>} />
-          <Route path="account-ledger/:centerId" element={<W><AccountLedgerPage /></W>} />
+          <Route path="centre-billing"           element={<W><CentreBillingPage /></W>} />
+          <Route path="centre-billing/:centerId" element={<W><CentreBillingPage /></W>} />
+          <Route path="account-ledger"           element={<LegacyAccountLedgerRedirect />} />
+          <Route path="account-ledger/:centerId" element={<LegacyAccountLedgerRedirect />} />
+          <Route path="invoice"                  element={<W><InvoicePage /></W>} />
+          <Route path="invoice/:centerId"        element={<W><InvoicePage /></W>} />
           <Route path="help"                element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />

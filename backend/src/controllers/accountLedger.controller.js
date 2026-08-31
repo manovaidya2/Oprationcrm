@@ -27,6 +27,13 @@ function summarizePayment(payment = {}) {
   };
 }
 
+function submittedAt(student = {}) {
+  const submitted = (student.statusHistory || [])
+    .filter(row => row.status === 'Submitted' && row.at)
+    .sort((a, b) => new Date(a.at) - new Date(b.at))[0];
+  return submitted?.at || null;
+}
+
 exports.centers = asyncHandler(async (_req, res) => {
   const centers = await Center.find().sort('name organisationName').lean();
   const centerIds = centers.map(center => center._id);
@@ -69,10 +76,19 @@ exports.centerStudents = asyncHandler(async (req, res) => {
     throw e;
   }
 
-  const students = await Student.find({ center: center._id })
+  const page = Math.max(1, Number(req.query.page || 1));
+  const limit = Math.max(0, Math.min(500, Number(req.query.limit || 0)));
+  const skip = limit ? (page - 1) * limit : 0;
+  const studentQuery = Student.find({ center: center._id })
     .populate('university', 'name shortName')
-    .sort('name')
-    .lean();
+    .sort('name');
+
+  if (limit) studentQuery.skip(skip).limit(limit);
+
+  const [students, totalStudents] = await Promise.all([
+    studentQuery.lean(),
+    limit ? Student.countDocuments({ center: center._id }) : Promise.resolve(null),
+  ]);
 
   const payments = await Payment.find({ student: { $in: students.map(student => student._id) } })
     .populate('transactions.recordedBy', 'name role')
@@ -95,6 +111,7 @@ exports.centerStudents = asyncHandler(async (req, res) => {
       accountNumber: tx.accountNumber || '',
       ifscCode: tx.ifscCode || '',
       paidAt: tx.paidAt,
+      recordAddedAt: tx.createdAt,
       verifiedAt: tx.verifiedAt,
       verificationStatus: tx.verificationStatus || 'not_required',
       paidToAccountLabel: tx.paidToAccountLabel || tx.paidToAccount?.label || '',
@@ -111,6 +128,8 @@ exports.centerStudents = asyncHandler(async (req, res) => {
         courseYear: student.courseYear || '',
         applicationStatus: student.applicationStatus || '',
         universityName: student.university?.name || student.universityName || '',
+        createdAt: student.createdAt,
+        submittedAt: submittedAt(student),
       },
       totalAmount: summary.netFee,
       amountPaid: summary.paidAmount,
@@ -130,5 +149,9 @@ exports.centerStudents = asyncHandler(async (req, res) => {
     rows,
     totals,
     maxTransactions: Math.max(0, ...rows.map(row => row.transactions.length)),
+    page: limit ? page : 1,
+    limit,
+    totalStudents: limit ? totalStudents : rows.length,
+    partial: Boolean(limit),
   });
 });

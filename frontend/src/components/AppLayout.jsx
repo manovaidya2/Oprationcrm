@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check, FileSpreadsheet,
+  CalendarClock, Check, FileSpreadsheet, FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -19,7 +19,8 @@ const NAV_CONFIG = {
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
-    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
+    { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',         label: 'Team Chat',    icon: MessageSquare },
     { to: '/universities', label: 'Universities', icon: University },
     { to: '/activity',          label: 'Activity Log',      icon: Activity },
@@ -41,7 +42,8 @@ const NAV_CONFIG = {
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
-    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
+    { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',       label: 'Team Chat',        icon: MessageSquare },
   ],
   University: [
@@ -191,7 +193,7 @@ export function AppLayout() {
       {/* Main */}
       <div className="flex-1 min-w-0 overflow-x-hidden flex flex-col lg:ml-60 min-h-screen">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 flex h-14 min-w-0 items-center overflow-x-hidden border-b bg-card/95 backdrop-blur px-4 gap-3">
+        <header className="sticky top-0 z-[80] flex h-14 min-w-0 items-center overflow-visible border-b bg-card/95 backdrop-blur px-4 gap-3">
           <button className="lg:hidden" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
           <div className="flex-1" />
 
@@ -207,7 +209,7 @@ export function AppLayout() {
             </button>
 
             {showNotifs && (
-              <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border bg-card shadow-xl z-50">
+              <div className="absolute right-0 top-full z-[120] mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-xl border bg-card shadow-xl">
                 <div className="flex items-center justify-between border-b px-4 py-2.5">
                   <span className="text-sm font-semibold">Notifications</span>
                   <div className="flex items-center gap-2">
@@ -253,7 +255,7 @@ export function AppLayout() {
         </header>
 
         {/* Page content */}
-        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/account-ledger') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
+        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/centre-billing') || location.pathname.startsWith('/invoice') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
           <Outlet />
         </main>
       </div>

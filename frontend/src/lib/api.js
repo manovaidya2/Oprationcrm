@@ -206,7 +206,10 @@ export const dashApi = {
 
 export const accountLedgerApi = {
   centers: () => request('/account-ledger/centers'),
-  centerStudents: (id) => request(`/account-ledger/centers/${id}`),
+  centerStudents: (id, params = {}) => {
+    const query = new URLSearchParams(params);
+    return request(`/account-ledger/centers/${id}${query.toString() ? `?${query}` : ''}`);
+  },
 };
 
 // ── AUDIT LOG ────────────────────────────────────────────────
