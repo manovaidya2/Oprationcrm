@@ -23,6 +23,7 @@ const ActivityLogPage      = lazy(() => import('@/pages/ActivityLogPage'));
 const ChatPage             = lazy(() => import('@/pages/ChatPage'));
 const PaymentCoordinatorPage = lazy(() => import('@/pages/PaymentCoordinatorPage'));
 const OldPaymentTimelinePage = lazy(() => import('@/pages/OldPaymentTimelinePage'));
+const AccountLedgerPage    = lazy(() => import('@/pages/AccountLedgerPage'));
 const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -46,7 +47,7 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/chat'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/account-ledger', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
@@ -99,6 +100,8 @@ export default function App() {
           <Route path="chat"                element={<W><ChatPage /></W>} />
           <Route path="payment-coordinator" element={<W><PaymentCoordinatorPage /></W>} />
           <Route path="payment-due-timeline" element={<W><OldPaymentTimelinePage /></W>} />
+          <Route path="account-ledger"           element={<W><AccountLedgerPage /></W>} />
+          <Route path="account-ledger/:centerId" element={<W><AccountLedgerPage /></W>} />
           <Route path="help"                element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />

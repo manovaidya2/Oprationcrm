@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check,
+  CalendarClock, Check, FileSpreadsheet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,7 @@ const NAV_CONFIG = {
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/chat',         label: 'Team Chat',    icon: MessageSquare },
     { to: '/universities', label: 'Universities', icon: University },
     { to: '/activity',          label: 'Activity Log',      icon: Activity },
@@ -40,6 +41,7 @@ const NAV_CONFIG = {
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/chat',       label: 'Team Chat',        icon: MessageSquare },
   ],
   University: [
@@ -187,9 +189,9 @@ export function AppLayout() {
       {open && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       {/* Main */}
-      <div className="flex-1 flex flex-col lg:ml-60 min-h-screen">
+      <div className="flex-1 min-w-0 overflow-x-hidden flex flex-col lg:ml-60 min-h-screen">
         {/* Top bar */}
-        <header className="sticky top-0 z-20 flex h-14 items-center border-b bg-card/95 backdrop-blur px-4 gap-3">
+        <header className="sticky top-0 z-20 flex h-14 min-w-0 items-center overflow-x-hidden border-b bg-card/95 backdrop-blur px-4 gap-3">
           <button className="lg:hidden" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
           <div className="flex-1" />
 
@@ -251,7 +253,7 @@ export function AppLayout() {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-4 md:p-6 max-w-6xl mx-auto w-full">
+        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/account-ledger') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
           <Outlet />
         </main>
       </div>

@@ -204,6 +204,11 @@ export const dashApi = {
   stats: () => request('/dashboard/stats'),
 };
 
+export const accountLedgerApi = {
+  centers: () => request('/account-ledger/centers'),
+  centerStudents: (id) => request(`/account-ledger/centers/${id}`),
+};
+
 // ── AUDIT LOG ────────────────────────────────────────────────
 export const auditApi = {
   list: (params = {}) => request(`/audit?${new URLSearchParams(params)}`),
