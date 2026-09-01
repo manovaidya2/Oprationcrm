@@ -205,7 +205,7 @@ function CenterStudentsModal({ center, onClose }) {
 }
 
 // ── Center detail card expand ────────────────────────────────
-function CenterCard({ center, isAdmin, isViewer = false, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
+function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
   const [expanded,    setExpanded]    = useState(false);
   const [uploadOpen,  setUploadOpen]  = useState(false);
   const [uploadName,  setUploadName]  = useState('');
@@ -358,6 +358,11 @@ function CenterCard({ center, isAdmin, isViewer = false, loginUsers = [], select
             {center.assignedCounselor && (
               <div className="text-xs text-indigo-600 mt-1 flex items-center gap-1">
                 <User className="h-3 w-3"/>Counselor: {center.assignedCounselor.name}
+              </div>
+            )}
+            {viewerCounselor && (
+              <div className="text-xs text-violet-600 mt-1 flex items-center gap-1">
+                <Eye className="h-3 w-3"/>Viewer Counselor: {viewerCounselor.name || viewerCounselor.email}
               </div>
             )}
             </div>
@@ -1217,6 +1222,7 @@ export default function CentersPage() {
         <div className="space-y-3">
           {filteredCenters.map(c => (
             <CenterCard key={c._id} center={c} isAdmin={isAdmin} isViewer={isViewer}
+              viewerCounselor={getViewerCounselorForCenter(c._id)}
               loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
               selectedForExport={selectedCenters.has(c._id)}
               onToggleExport={toggleCenterSelection}

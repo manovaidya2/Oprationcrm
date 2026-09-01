@@ -31,11 +31,33 @@ const getStudentSubmittedAt = student => {
 
 const getPaymentSubmittedAt = tx => tx?.createdAt || tx?.submittedAt || tx?.paidAt;
 
-function CardRequestDate({ date, label = 'Submitted' }) {
-  if (!date) return null;
+const isViewerActor = actor => actor?.role === 'ViewerCounselor';
+
+function CardRequestDate({ date, label = 'Submitted', actor, actorLabel = 'Added', updatedActor }) {
+  const showAdded   = isViewerActor(actor);
+  const showUpdated = !showAdded && isViewerActor(updatedActor);
+  if (!date && !showAdded && !showUpdated) return null;
   return (
-    <div className="mt-3 flex justify-end text-xs font-medium text-muted-foreground">
-      {label}: {fmtD(date)}
+    <div className="mt-3 flex items-end justify-between gap-2">
+      <div className="min-w-0">
+        {showAdded && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-violet-600">
+            <User className="h-3 w-3 flex-shrink-0"/>
+            <span>{actorLabel} by Viewer Counselor: <span className="font-bold">{actor.name}</span></span>
+          </p>
+        )}
+        {showUpdated && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-violet-600">
+            <User className="h-3 w-3 flex-shrink-0"/>
+            <span>Updated by Viewer Counselor: <span className="font-bold">{updatedActor.name}</span></span>
+          </p>
+        )}
+      </div>
+      {date && (
+        <div className="text-xs font-medium text-muted-foreground whitespace-nowrap flex-shrink-0">
+          {label}: {fmtD(date)}
+        </div>
+      )}
     </div>
   );
 }
@@ -1104,7 +1126,7 @@ export default function AccountantPage() {
                   <Button size="sm" onClick={() => { setDialog({type:'adm',item:s}); setNote(''); }}>Review</Button>
                 </div>
               </div>
-              <CardRequestDate date={getStudentSubmittedAt(s)}/>
+              <CardRequestDate date={getStudentSubmittedAt(s)} actor={s.createdBy} updatedActor={s.lastUpdatedBy}/>
               </CardContent>
             </Card>
           ))}
@@ -1146,7 +1168,7 @@ export default function AccountantPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-emerald-600 text-base">{fmt(tx.amount)}</span>
                       {tx.mode && <span className="text-xs bg-background border border-border text-muted-foreground px-2 py-0.5 rounded-md font-medium">{tx.mode}</span>}
-                      {tx.paidAt && <span className="text-xs text-muted-foreground ml-auto">📅 {fmtD(tx.paidAt)}</span>}
+                      {tx.paidAt && <span className="text-xs text-muted-foreground ml-auto">📅 Paid date: {fmtD(tx.paidAt)}</span>}
                     </div>
                     {tx.mode==='UPI' && tx.upiId && <div className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-semibold text-foreground">{tx.upiId}</span></div>}
                     {tx.utrRef && <div className="text-xs text-muted-foreground">UTR: <span className="font-mono font-semibold text-foreground">{tx.utrRef}</span></div>}
@@ -1182,7 +1204,7 @@ export default function AccountantPage() {
                   </Button>
                 </div>
               </div>
-              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted"/>
+              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted" actor={tx.recordedBy} actorLabel="Recorded" updatedActor={tx.lastUpdatedBy}/>
               </CardContent>
             </Card>
           ))}

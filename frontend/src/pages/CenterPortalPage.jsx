@@ -406,7 +406,7 @@ const SBadge = ({status,map}) => {
 // ── Cancelled Application Banner with Settlement Request ──────
 function CancelledBanner({ student, onSettlementRequested }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const [requesting, setRequesting] = useState(false);
   const [note,       setNote]       = useState('');
   const [noteOpen,   setNoteOpen]   = useState(false);
@@ -988,7 +988,7 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId, actingAsCe
 function FeeSection({ studentId, appStatus, student }) {
   
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const isCancelled = appStatus === 'Cancelled';
   const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
@@ -1349,7 +1349,7 @@ function FeeSection({ studentId, appStatus, student }) {
 // ── DOCS SECTION ─────────────────────────────────────────────
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1971,7 +1971,7 @@ function PaymentsSection({ studentId }) {
 // ── STUDENT DETAIL ───────────────────────────────────────────
 function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const [s,setS]         = useState(student);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
@@ -2544,7 +2544,7 @@ function isPaymentPending(student) {
 export default function CenterPortalPage() {
   const {user, switchedCenter, switchBackToCounselor}=useAuth();
   const navigate = useNavigate();
-  const isCounselorSwitch = ['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id;
+  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const centerId = isCounselorSwitch ? switchedCenter._id : user?.centerId;
   const [students,setStudents]=useState([]); const [centerInfo,setCenterInfo]=useState(null);
   const [defCounselor,setDef]=useState(null); const [loading,setLoading]=useState(true);

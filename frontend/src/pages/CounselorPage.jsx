@@ -41,11 +41,31 @@ function ViewerAttribution({ label = 'Added', actor, at }) {
   );
 }
 
-function CardRequestDate({ date, label = 'Submitted' }) {
-  if (!date) return null;
+function CardRequestDate({ date, label = 'Submitted', actor, actorLabel = 'Added', updatedActor }) {
+  const showAdded   = isViewerActor(actor);
+  const showUpdated = !showAdded && isViewerActor(updatedActor);
+  if (!date && !showAdded && !showUpdated) return null;
   return (
-    <div className="mt-3 flex justify-end text-xs font-medium text-slate-400">
-      {label}: {fmtDt(date)}
+    <div className="mt-3 flex items-end justify-between gap-2">
+      <div className="min-w-0">
+        {showAdded && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-violet-600">
+            <User className="h-3 w-3 flex-shrink-0"/>
+            <span>{actorLabel} by Viewer Counselor: <span className="font-bold">{actor.name}</span></span>
+          </p>
+        )}
+        {showUpdated && (
+          <p className="flex items-center gap-1 text-[11px] font-medium text-violet-600">
+            <User className="h-3 w-3 flex-shrink-0"/>
+            <span>Updated by Viewer Counselor: <span className="font-bold">{updatedActor.name}</span></span>
+          </p>
+        )}
+      </div>
+      {date && (
+        <div className="text-xs font-medium text-slate-400 whitespace-nowrap flex-shrink-0">
+          {label}: {fmtDt(date)}
+        </div>
+      )}
     </div>
   );
 }
@@ -561,7 +581,7 @@ function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePaym
           {children}
         </div>
       </div>
-      <CardRequestDate date={requestDate} label={requestDateLabel}/>
+      <CardRequestDate date={requestDate} label={requestDateLabel} actor={s.createdBy} updatedActor={s.lastUpdatedBy}/>
       </div>
     </div>
   );
@@ -571,7 +591,8 @@ function StudentCard({ s, accent = 'border-blue-200', children, onClick, feePaym
 function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, accMap }) {
   return (
     <div className={`bg-white rounded-xl border ${accent} shadow-sm hover:shadow transition-shadow cursor-pointer`} onClick={onClick}>
-      <div className="p-4 flex items-center justify-between gap-3">
+      <div className="p-4">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="h-9 w-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
             <FileText className="h-4 w-4 text-slate-500"/>
@@ -643,6 +664,8 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
     </a>
   </div>
 )}
+                    <ViewerAttribution label="Added" actor={p.recordedBy} at={p.createdAt || p.paidAt}/>
+                    {!isViewerActor(p.recordedBy) && <ViewerAttribution label="Updated" actor={p.lastUpdatedBy} at={p.lastUpdatedAt}/>}
                     {(p.paidToAccountLabel || p.paidToAccount) && (
                       <PaidToAccountBox tx={p} accMap={accMap}/>
                     )}
@@ -653,6 +676,8 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
           </div>
         </div>
         <div className="flex-shrink-0">{children}</div>
+      </div>
+      <CardRequestDate date={d.createdAt} label="Request submitted" actor={d.uploadedBy} actorLabel="Added" updatedActor={d.lastUpdatedBy}/>
       </div>
     </div>
   );
@@ -1269,7 +1294,7 @@ export default function CounselorPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-emerald-600 text-base">{fmt(tx.amount)}</span>
                         {tx.mode && <span className="text-xs bg-white border border-slate-300 text-slate-600 px-2 py-0.5 rounded-md font-medium">{tx.mode}</span>}
-                        {tx.paidAt && <span className="text-xs text-slate-400 ml-auto">📅 {fmtDt(tx.paidAt)}</span>}
+                        {tx.paidAt && <span className="text-xs text-slate-400 ml-auto">📅 Paid date: {fmtDt(tx.paidAt)}</span>}
                       </div>
                       {tx.mode==='UPI' && tx.upiId && <div className="text-xs text-slate-500">UPI ID: <span className="font-mono font-semibold text-slate-700">{tx.upiId}</span></div>}
                       {tx.utrRef && <div className="text-xs text-slate-500">UTR: <span className="font-mono font-semibold text-slate-700">{tx.utrRef}</span></div>}
@@ -1307,7 +1332,7 @@ export default function CounselorPage() {
                   </Button>
                 </div>}
               </div>
-              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted"/>
+              <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted" actor={tx.recordedBy} actorLabel="Added" updatedActor={tx.lastUpdatedBy}/>
               </div>
             </div>
           ))}

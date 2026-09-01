@@ -1109,6 +1109,8 @@ exports.accountantStudentsQueue = asyncHandler(async (req, res) => {
       .populate('center', 'name city')
       .populate('counselor', 'name avatarColor')
       .populate('university', 'name shortName avatarColor')
+      .populate('createdBy', 'name role')
+      .populate('lastUpdatedBy', 'name role')
       .sort('-updatedAt')
       .skip(skip)
       .limit(limit),
