@@ -220,11 +220,6 @@ export default function SettingsPage() {
                       {u.isActive===false && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
                     </div>
                     <div className="text-xs text-muted-foreground truncate">{u.email}</div>
-                    {u.role === 'ViewerCounselor' && u.counselorId?.centers?.length > 0 && (
-                      <div className="text-xs text-slate-600">
-                        Viewer Centers: {u.counselorId.centers.map(c => c.name).filter(Boolean).join(', ')}
-                      </div>
-                    )}
                     {u.centerId?.name && <div className="text-xs text-sky-600">{u.centerId.name}</div>}
                     {u.universityId?.name && <div className="text-xs text-purple-600">🎓 {u.universityId.name}</div>}
                   </div>
