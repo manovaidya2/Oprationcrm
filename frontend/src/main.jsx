@@ -1,6 +1,5 @@
 // ============================================================
-// main.jsx — AuthProvider wrap kiya gaya hai
-// Existing main.jsx ki jagah yeh file use karo
+// main.jsx - AuthProvider wrapper
 // ============================================================
 
 import { StrictMode } from 'react'

@@ -1641,7 +1641,7 @@ export default function CentersPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Viewer counselor ko is center aur iske students ka read-only access milega.
+                  The viewer counselor will get read-only access to this center and its students.
                 </p>
               </div>}
               <DialogFooter>

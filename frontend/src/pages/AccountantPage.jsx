@@ -1177,7 +1177,7 @@ export default function AccountantPage() {
                     {tx.mode==='Bank Transfer' && tx.accountNumber && <div className="text-xs text-muted-foreground">Account No: <span className="font-mono font-semibold text-foreground">{tx.accountNumber}</span></div>}
                     {tx.mode==='Bank Transfer' && tx.ifscCode && <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{tx.ifscCode}</span></div>}
                     {tx.note && <div className="text-xs text-muted-foreground italic">Note: "{tx.note}"</div>}
-                    {tx.paymentScreenshot && (   // ← YE DAALO
+                    {tx.paymentScreenshot && (
   <div className="mt-1.5">
     <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
       target="_blank" rel="noreferrer"

@@ -655,7 +655,7 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
                     {p.mode==='Bank Transfer' && p.accountNumber && <div className="text-xs text-slate-500">Account No: <span className="font-mono font-semibold text-slate-700">{p.accountNumber}</span></div>}
                     {p.mode==='Bank Transfer' && p.ifscCode && <div className="text-xs text-slate-500">IFSC: <span className="font-mono font-semibold text-slate-700">{p.ifscCode}</span></div>}
                     {p.note && <div className="text-xs text-slate-400 italic">"{p.note}"</div>}
-                    {p.paymentScreenshot && (   // ← YE DAALO
+                    {p.paymentScreenshot && (
   <div className="mt-1.5">
     <a href={`${MEDIA}${p.paymentScreenshot}`}
       target="_blank" rel="noreferrer"
