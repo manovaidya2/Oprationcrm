@@ -34,8 +34,8 @@ exports.me = asyncHandler(async (req, res) => {
 exports.createUser = asyncHandler(async (req, res) => {
   const { name, email, password, role, avatarColor, centerId, centerIds, universityId, phone } = req.body;
 
-  // Counselor can only create Center accounts
-  if (req.user.role === 'Counselor' && role !== 'Center') {
+  // Counselor-type users can only create Center accounts.
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role) && role !== 'Center') {
     const e = new Error('Counselors can only create Center accounts'); e.status = 403; throw e;
   }
 
@@ -61,7 +61,7 @@ exports.createUser = asyncHandler(async (req, res) => {
     if (!centerId) { const e = new Error('centerId required for Center role'); e.status = 400; throw e; }
     const center = await Center.findById(centerId);
     if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
-    if (req.user.role === 'Counselor') {
+    if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
       const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
       const canCreateForCenter = (counselor?.centers || []).some(id => String(id) === String(center._id));
       if (!canCreateForCenter) {
@@ -93,8 +93,8 @@ exports.createUser = asyncHandler(async (req, res) => {
 // GET /api/auth/users  — Admin + Counselor
 exports.listUsers = asyncHandler(async (req, res) => {
   const filter = {};
-  // Counselor only sees active Center users; Admin sees all (active + inactive)
-  if (req.user.role === 'Counselor') {
+  // Counselor-type users only see active Center users for their assigned centers; Admin sees all.
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
     const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
     filter.role = 'Center';
     filter.isActive = true;
@@ -116,7 +116,7 @@ exports.resetPassword = asyncHandler(async (req, res) => {
   if (!password || password.length < 6) { const e = new Error('Password min 6 chars'); e.status = 400; throw e; }
   const user = await User.findById(req.params.id);
   if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
-  if (req.user.role === 'Counselor') {
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
     if (user.role !== 'Center') {
       const e = new Error('Counselors can reset only Center logins'); e.status = 403; throw e;
     }

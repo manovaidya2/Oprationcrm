@@ -13,6 +13,20 @@ const AuditLog     = require('../models/AuditLog');
 const User         = require('../models/User');
 const PaymentAccount = require('../models/PaymentAccount');
 
+async function assertCenterAccess(req, centerId) {
+  if (req.user.role === 'Admin') return;
+  if (req.user.role === 'Center') {
+    if (String(req.user.centerId) === String(centerId)) return;
+    const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {
+    const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (counselor?.centers || []).some(id => String(id) === String(centerId));
+    if (allowed) return;
+  }
+  const e = new Error('Forbidden'); e.status = 403; throw e;
+}
+
 // ── NOTIFICATIONS ────────────────────────────────────────────
 exports.listNotifications = asyncHandler(async (req, res) => {
   const notifs = await Notification.find({ userId: req.user._id })
@@ -109,6 +123,7 @@ exports.getCenter = asyncHandler(async (req, res) => {
 
 // GET /api/centers/:id/universities  — list allowed universities for this center
 exports.getCenterUniversities = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const c = await Center.findById(req.params.id)
     .populate('allowedUniversities', 'name shortName avatarColor city').lean();
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
@@ -117,6 +132,7 @@ exports.getCenterUniversities = asyncHandler(async (req, res) => {
 
 // PUT /api/centers/:id/universities  — set allowed universities (replace whole list)
 exports.setCenterUniversities = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const { universityIds } = req.body; // array of IDs
   if (!Array.isArray(universityIds)) { const e = new Error('universityIds array required'); e.status = 400; throw e; }
   const c = await Center.findByIdAndUpdate(
@@ -130,6 +146,7 @@ exports.setCenterUniversities = asyncHandler(async (req, res) => {
 
 // GET /api/centers/:id/payment-accounts  — list allowed payment accounts for this center
 exports.getCenterPaymentAccounts = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const c = await Center.findById(req.params.id)
     .populate('allowedPaymentAccounts').lean();
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
@@ -138,6 +155,7 @@ exports.getCenterPaymentAccounts = asyncHandler(async (req, res) => {
 
 // PUT /api/centers/:id/payment-accounts  — set allowed payment accounts (replace whole list)
 exports.setCenterPaymentAccounts = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const { accountIds } = req.body; // array of IDs
   if (!Array.isArray(accountIds)) { const e = new Error('accountIds array required'); e.status = 400; throw e; }
   const c = await Center.findByIdAndUpdate(
@@ -157,6 +175,10 @@ exports.createCenter = asyncHandler(async (req, res) => {
 
   const center = await Center.create(body);
 
+  if (req.user.role === 'ViewerCounselor' && req.user.counselorId) {
+    await Counselor.findByIdAndUpdate(req.user.counselorId, { $addToSet: { centers: center._id } });
+  }
+
   // Handle verification docs upload
   if (req.files && req.files.length > 0) {
     const docNames = body.docNames ? (typeof body.docNames === 'string' ? JSON.parse(body.docNames) : body.docNames) : [];
@@ -173,6 +195,7 @@ exports.createCenter = asyncHandler(async (req, res) => {
 });
 
 exports.updateCenter = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const body = { ...req.body };
   if (typeof body.programInterest === 'string') { try { body.programInterest = JSON.parse(body.programInterest); } catch { body.programInterest = []; } }
   if (typeof body.streams === 'string')         { try { body.streams         = JSON.parse(body.streams);         } catch { body.streams = []; } }
@@ -187,6 +210,7 @@ exports.updateCenter = asyncHandler(async (req, res) => {
 
 // POST /api/centers/:id/docs  — upload verification doc
 exports.uploadCenterDoc = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const center = await Center.findById(req.params.id);
   if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
 
@@ -204,6 +228,7 @@ exports.uploadCenterDoc = asyncHandler(async (req, res) => {
 
 // DELETE /api/centers/:id/docs/:docId  — remove a verification doc
 exports.deleteCenterDoc = asyncHandler(async (req, res) => {
+  await assertCenterAccess(req, req.params.id);
   const center = await Center.findById(req.params.id);
   if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
   center.verificationDocs = center.verificationDocs.filter(d => String(d._id) !== req.params.docId);
@@ -246,6 +271,12 @@ exports.deleteCounselor = asyncHandler(async (req, res) => {
 exports.addCenterToCounselor = asyncHandler(async (req, res) => {
   const { centerId } = req.body;
   if (!centerId) { const e = new Error('centerId required'); e.status = 400; throw e; }
+
+  if (req.user.role === 'ViewerCounselor') {
+    const viewer = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const allowed = (viewer?.centers || []).some(id => String(id) === String(centerId));
+    if (!allowed) { const e = new Error('You can assign counselor only for your viewer centers'); e.status = 403; throw e; }
+  }
 
   const viewerCounselorIds = await User.find({ role: 'ViewerCounselor' }).distinct('counselorId');
 

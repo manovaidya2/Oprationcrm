@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { accountLedgerApi } from '@/lib/api';
 import { useInstantResource } from '@/lib/useInstantResource';
 import { toast } from 'sonner';
+import { useAuth } from '@/context/AuthContext';
 
 const fmt = value => `Rs ${(Number(value) || 0).toLocaleString('en-IN')}`;
 const fmtDate = value => value ? new Date(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -95,6 +96,8 @@ function accountText(tx) {
 }
 
 export default function AccountLedgerPage() {
+  const { user } = useAuth();
+  const cacheScope = `${user?.role || 'role'}-${user?.counselorId || user?.id || user?._id || 'user'}`;
   const [search, setSearch] = useState('');
   const [dateBasis, setDateBasis] = useState('createdAt');
   const [dateMode, setDateMode] = useState('all');
@@ -109,7 +112,7 @@ export default function AccountLedgerPage() {
   const fetchFull = useCallback(() => accountLedgerApi.students(), []);
 
   const { data, loading, refreshing } = useInstantResource(
-    'account-ledger-all-students',
+    `account-ledger-all-students-${cacheScope}`,
     fetchFast,
     {
       fetchFull,

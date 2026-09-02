@@ -2,6 +2,24 @@ const asyncHandler = require('express-async-handler');
 const Center = require('../models/Center');
 const Student = require('../models/Student');
 const Payment = require('../models/Payment');
+const Counselor = require('../models/Counselor');
+
+async function assignedCenterFilter(req) {
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user?.role)) return {};
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  return { _id: { $in: counselor?.centers || [] } };
+}
+
+async function assertLedgerCenterAccess(req, centerId) {
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user?.role)) return;
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  const allowed = (counselor?.centers || []).some(id => String(id) === String(centerId));
+  if (!allowed) {
+    const e = new Error('Forbidden');
+    e.status = 403;
+    throw e;
+  }
+}
 
 function feeTransactions(payment = {}) {
   return (payment.transactions || [])
@@ -92,8 +110,8 @@ function totalsFor(rows) {
   }), { totalAmount: 0, amountPaid: 0, amountDue: 0 });
 }
 
-exports.centers = asyncHandler(async (_req, res) => {
-  const centers = await Center.find().sort('name organisationName').lean();
+exports.centers = asyncHandler(async (req, res) => {
+  const centers = await Center.find(await assignedCenterFilter(req)).sort('name organisationName').lean();
   const centerIds = centers.map(center => center._id);
 
   const [studentCounts, payments] = await Promise.all([
@@ -127,6 +145,7 @@ exports.centers = asyncHandler(async (_req, res) => {
 });
 
 exports.centerStudents = asyncHandler(async (req, res) => {
+  await assertLedgerCenterAccess(req, req.params.centerId);
   const center = await Center.findById(req.params.centerId).lean();
   if (!center) {
     const e = new Error('Center not found');
@@ -164,10 +183,13 @@ exports.centerStudents = asyncHandler(async (req, res) => {
 });
 
 exports.students = asyncHandler(async (req, res) => {
+  const centerFilter = await assignedCenterFilter(req);
+  const allowedCenters = centerFilter._id?.$in || null;
+  const filter = allowedCenters ? { center: { $in: allowedCenters } } : {};
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.max(0, Math.min(500, Number(req.query.limit || 0)));
   const skip = limit ? (page - 1) * limit : 0;
-  const studentQuery = Student.find()
+  const studentQuery = Student.find(filter)
     .populate('university', 'name shortName')
     .sort('name');
 
@@ -175,7 +197,7 @@ exports.students = asyncHandler(async (req, res) => {
 
   const [students, totalStudents] = await Promise.all([
     studentQuery.lean(),
-    limit ? Student.countDocuments() : Promise.resolve(null),
+    limit ? Student.countDocuments(filter) : Promise.resolve(null),
   ]);
 
   const rows = await buildRows(students);

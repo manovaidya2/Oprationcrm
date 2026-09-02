@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { accountLedgerApi } from '@/lib/api';
 import { useInstantResource } from '@/lib/useInstantResource';
 import { toast } from 'sonner';
+import { useAuth } from '@/context/AuthContext';
 
 const fmt = value => `Rs ${(Number(value) || 0).toLocaleString('en-IN')}`;
 const fmtDate = value => value ? new Date(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
@@ -98,10 +99,12 @@ function accountText(tx) {
 
 function CenterList() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const cacheScope = `${user?.role || 'role'}-${user?.counselorId || user?.id || user?._id || 'user'}`;
   const [search, setSearch] = useState('');
   const fetchCenters = useCallback(() => accountLedgerApi.centers(), []);
   const { data: centers = [], loading, refreshing } = useInstantResource(
-    'centre-billing-centers',
+    `centre-billing-centers-${cacheScope}`,
     fetchCenters,
     { initialData: [], onError: () => toast.error('Failed to load account ledger centers') }
   );
@@ -196,6 +199,8 @@ function CenterList() {
 function CenterBilling() {
   const navigate = useNavigate();
   const { centerId } = useParams();
+  const { user } = useAuth();
+  const cacheScope = `${user?.role || 'role'}-${user?.counselorId || user?.id || user?._id || 'user'}`;
   const [search, setSearch] = useState('');
   const [dateBasis, setDateBasis] = useState('createdAt');
   const [dateMode, setDateMode] = useState('all');
@@ -210,7 +215,7 @@ function CenterBilling() {
   const fetchFull = useCallback(() => accountLedgerApi.centerStudents(centerId), [centerId]);
 
   const { data, loading, refreshing } = useInstantResource(
-    `centre-billing-center-${centerId}`,
+    `centre-billing-center-${cacheScope}-${centerId}`,
     fetchFast,
     {
       fetchFull,

@@ -205,7 +205,7 @@ function CenterStudentsModal({ center, onClose }) {
 }
 
 // ── Center detail card expand ────────────────────────────────
-function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
+function CenterCard({ center, isAdmin, isViewer = false, canViewerManage = false, viewerCounselor, loginUsers = [], selectedForExport = false, onToggleExport, onEdit, onDelete, onCreateLogin, onResetLogin, onAssignCounselor, onViewStudents, onRefresh }) {
   const [expanded,    setExpanded]    = useState(false);
   const [uploadOpen,  setUploadOpen]  = useState(false);
   const [uploadName,  setUploadName]  = useState('');
@@ -371,13 +371,13 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
             <Button variant="ghost" size="sm" onClick={() => setExpanded(p => !p)} title="View details">
               {expanded ? <ChevronUp className="h-4 w-4"/> : <ChevronDown className="h-4 w-4"/>}
             </Button>
-            {!isViewer && <Button variant="ghost" size="sm" onClick={() => onAssignCounselor(center)} title="Assign Counselor">
+            {(!isViewer || canViewerManage) && <Button variant="ghost" size="sm" onClick={() => onAssignCounselor(center)} title="Assign Counselor">
               <User className="h-3.5 w-3.5"/>
             </Button>}
             {!isViewer && <Button variant="ghost" size="sm" onClick={() => onEdit(center)} title="Edit">
               <Edit2 className="h-3.5 w-3.5"/>
             </Button>}
-            {!isViewer && <Button variant="ghost" size="sm" onClick={() => onCreateLogin(center)} title="Create Login">
+            {(!isViewer || canViewerManage) && <Button variant="ghost" size="sm" onClick={() => onCreateLogin(center)} title="Create Login">
               <Key className="h-3.5 w-3.5"/>
             </Button>}
             {isAdmin && (
@@ -546,7 +546,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <Key className="h-3.5 w-3.5"/> Center Logins ({loginUsers.length})
                 </div>
-                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                {(!isViewer || canViewerManage) && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
                   onClick={e => { e.stopPropagation(); onCreateLogin(center); }}>
                   <Plus className="h-3 w-3"/> Create Login
                 </Button>}
@@ -566,7 +566,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                         <div className="font-mono font-semibold truncate">{u.createdPassword || 'Not saved'}</div>
                       </div>
                       <div className="flex items-end">
-                        {!isViewer && <Button size="sm" variant="outline" className="h-8 text-xs"
+                        {(!isViewer || canViewerManage) && <Button size="sm" variant="outline" className="h-8 text-xs"
                           onClick={e => { e.stopPropagation(); onResetLogin(u); }}>
                           Reset
                         </Button>}
@@ -583,7 +583,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <Paperclip className="h-3.5 w-3.5"/> Verification Documents ({verDocs.length})
                 </div>
-                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                {(!isViewer || canViewerManage) && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
                   onClick={e => { e.stopPropagation(); setUploadOpen(true); }}>
                   <Plus className="h-3 w-3"/> Upload
                 </Button>}
@@ -608,7 +608,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                             View
                           </a>
                         )}
-                        {(isAdmin) && (
+                        {(isAdmin || canViewerManage) && (
                           <button onClick={e => { e.stopPropagation(); handleDeleteDoc(d._id); }}
                             className="text-destructive hover:text-destructive/80 text-xs">
                             Remove
@@ -654,7 +654,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <GraduationCap className="h-3.5 w-3.5"/> University Access ({allowedUnis.length})
                 </div>
-                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openUniManage}>
+                {(!isViewer || canViewerManage) && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openUniManage}>
                   <Plus className="h-3 w-3"/> Manage
                 </Button>}
               </div>
@@ -678,7 +678,7 @@ function CenterCard({ center, isAdmin, isViewer = false, viewerCounselor, loginU
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                   <CreditCard className="h-3.5 w-3.5"/> Payment Account Access ({allowedPayAccts.length})
                 </div>
-                {!isViewer && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openPayManage}>
+                {(!isViewer || canViewerManage) && <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1" onClick={openPayManage}>
                   <Plus className="h-3 w-3"/> Manage
                 </Button>}
               </div>
@@ -798,6 +798,8 @@ export default function CentersPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
   const isViewer = user?.role === 'ViewerCounselor';
+  const canViewerManage = isViewer;
+  const canCreateCenters = ['Admin', 'Counselor', 'ViewerCounselor'].includes(user?.role);
 
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
@@ -1150,7 +1152,7 @@ export default function CentersPage() {
           <Button size="sm" variant="outline" onClick={() => setExportOpen(true)} disabled={centers.length === 0}>
             <Download className="h-4 w-4 mr-1"/>CSV
           </Button>
-          {!isViewer && <Button size="sm" onClick={openAdd}>
+          {canCreateCenters && <Button size="sm" onClick={openAdd}>
             <Plus className="h-4 w-4 mr-1"/>Add Center
           </Button>}
         </div>
@@ -1221,7 +1223,7 @@ export default function CentersPage() {
       ) : (
         <div className="space-y-3">
           {filteredCenters.map(c => (
-            <CenterCard key={c._id} center={c} isAdmin={isAdmin} isViewer={isViewer}
+            <CenterCard key={c._id} center={c} isAdmin={isAdmin} isViewer={isViewer} canViewerManage={canViewerManage}
               viewerCounselor={getViewerCounselorForCenter(c._id)}
               loginUsers={centerUsers.filter(u => String(u.centerId?._id || u.centerId) === String(c._id))}
               selectedForExport={selectedCenters.has(c._id)}
@@ -1616,7 +1618,7 @@ export default function CentersPage() {
       <Dialog open={!!assignOpen} onOpenChange={() => setAssignOpen(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Assign Counselor — {assignOpen?.name}</DialogTitle></DialogHeader>
-          {isAdmin ? (
+          {(isAdmin || isViewer) ? (
             <div className="space-y-5">
               <div className="space-y-2">
                 <Label>Assigned Counselor</Label>
@@ -1625,7 +1627,7 @@ export default function CentersPage() {
                   <SelectContent>{counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+              {isAdmin && <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
                 <Label>Viewer Counselor</Label>
                 <Select value={selViewerCounselor} onValueChange={setSelViewerCounselor}>
                   <SelectTrigger><SelectValue placeholder="Select viewer counselor..."/></SelectTrigger>
@@ -1641,10 +1643,10 @@ export default function CentersPage() {
                 <p className="text-xs text-muted-foreground">
                   Viewer counselor ko is center aur iske students ka read-only access milega.
                 </p>
-              </div>
+              </div>}
               <DialogFooter>
                 <Button variant="outline" onClick={() => setAssignOpen(null)}>Cancel</Button>
-                <Button variant="outline" onClick={assignViewerCounselor}>Assign Viewer</Button>
+                {isAdmin && <Button variant="outline" onClick={assignViewerCounselor}>Assign Viewer</Button>}
                 <Button onClick={assignCounselor}>Assign Counselor</Button>
               </DialogFooter>
             </div>

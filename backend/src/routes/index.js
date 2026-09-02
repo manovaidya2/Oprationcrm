@@ -35,9 +35,9 @@ const avatarSchema        = z.object({ avatarSeed: z.string().min(2).max(40) });
 // ── AUTH ─────────────────────────────────────────────────────
 router.post('/auth/login',               val(loginSchema), authC.login);
 router.get ('/auth/me',                  protect, authC.me);
-router.get ('/auth/users',               protect, requireRole('Admin','Counselor'), authC.listUsers);
-router.post('/auth/users',               protect, requireRole('Admin','Counselor'), val(userCreateSchema), authC.createUser);
-router.patch('/auth/users/:id/password', protect, requireRole('Admin','Counselor'), val(pwdSchema), authC.resetPassword);
+router.get ('/auth/users',               protect, requireRole('Admin','Counselor','ViewerCounselor'), authC.listUsers);
+router.post('/auth/users',               protect, requireRole('Admin','Counselor','ViewerCounselor'), val(userCreateSchema), authC.createUser);
+router.patch('/auth/users/:id/password', protect, requireRole('Admin','Counselor','ViewerCounselor'), val(pwdSchema), authC.resetPassword);
 router.patch('/auth/me/password',        protect, val(changePwdSchema), authC.changeOwnPassword);
 router.patch('/auth/me/avatar',          protect, val(avatarSchema), authC.updateAvatar);
 router.patch('/auth/users/:id/toggle',   protect, requireRole('Admin'), authC.toggleUser);
@@ -63,18 +63,18 @@ router.delete('/universities/:id',      protect, requireRole('Admin'), uniC.remo
 // ── CENTERS ──────────────────────────────────────────────────
 router.get   ('/centers',          protect, misc.listCenters);
 router.get   ('/centers/:id',      protect, misc.getCenter);
-router.post  ('/centers',          protect, requireRole('Admin','Counselor'), upload.array('verificationDocs', 10), misc.createCenter);
+router.post  ('/centers',          protect, requireRole('Admin','Counselor','ViewerCounselor'), upload.array('verificationDocs', 10), misc.createCenter);
 router.put   ('/centers/:id',      protect, requireRole('Admin','Counselor'), misc.updateCenter);
 router.delete('/centers/:id',      protect, requireRole('Admin'), misc.deleteCenter);
 router.get   ('/centers/:id/students',     protect, misc.getCenterStudents);
 router.post  ('/centers/:id/viewer-counselor', protect, requireRole('Admin'), misc.assignViewerCounselor);
-router.post  ('/centers/:id/docs',         protect, requireRole('Admin','Counselor'), upload.single('file'), misc.uploadCenterDoc);
-router.delete('/centers/:id/docs/:docId',  protect, requireRole('Admin','Counselor'), misc.deleteCenterDoc);
+router.post  ('/centers/:id/docs',         protect, requireRole('Admin','Counselor','ViewerCounselor'), upload.single('file'), misc.uploadCenterDoc);
+router.delete('/centers/:id/docs/:docId',  protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.deleteCenterDoc);
 // Allowed universities per center
 router.get   ('/centers/:id/universities', protect, misc.getCenterUniversities);
-router.put   ('/centers/:id/universities', protect, requireRole('Admin','Counselor'), misc.setCenterUniversities);
+router.put   ('/centers/:id/universities', protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.setCenterUniversities);
 router.get   ('/centers/:id/payment-accounts', protect, misc.getCenterPaymentAccounts);
-router.put   ('/centers/:id/payment-accounts', protect, requireRole('Admin','Counselor'), misc.setCenterPaymentAccounts);
+router.put   ('/centers/:id/payment-accounts', protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.setCenterPaymentAccounts);
 
 // ── COUNSELORS ───────────────────────────────────────────────
 router.get   ('/counselors',             protect, misc.listCounselors);
@@ -82,7 +82,7 @@ router.get   ('/counselors/:id',         protect, misc.getCounselor);
 router.post  ('/counselors',             protect, requireRole('Admin'), misc.createCounselor);
 router.put   ('/counselors/:id',         protect, requireRole('Admin'), misc.updateCounselor);
 router.delete('/counselors/:id',         protect, requireRole('Admin'), misc.deleteCounselor);
-router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor'), misc.addCenterToCounselor);
+router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.addCenterToCounselor);
 
 // ── STUDENTS ─────────────────────────────────────────────────
 router.get   ('/students',     protect, studentC.list);
@@ -178,9 +178,9 @@ router.delete('/payment-accounts/:id',      protect, requireRole('Admin'), payAc
 // ── DASHBOARD ─────────────────────────────────────────────────
 router.get('/dashboard/stats', protect, misc.dashboardStats);
 
-router.get('/account-ledger',                   protect, requireRole('Admin','Accountant'), accountLedgerC.students);
-router.get('/account-ledger/centers',           protect, requireRole('Admin','Accountant'), accountLedgerC.centers);
-router.get('/account-ledger/centers/:centerId', protect, requireRole('Admin','Accountant'), accountLedgerC.centerStudents);
+router.get('/account-ledger',                   protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), accountLedgerC.students);
+router.get('/account-ledger/centers',           protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), accountLedgerC.centers);
+router.get('/account-ledger/centers/:centerId', protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), accountLedgerC.centerStudents);
 
 // ── AUDIT LOG ─────────────────────────────────────────────────
 router.get('/audit', protect, requireRole('Admin'), misc.listAudit);

@@ -33,6 +33,9 @@ const NAV_CONFIG = {
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
+    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
   ],
   ViewerCounselor: [
@@ -40,6 +43,9 @@ const NAV_CONFIG = {
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
+    { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
   ],
   Center: [
