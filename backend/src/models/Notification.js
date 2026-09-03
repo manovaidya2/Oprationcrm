@@ -12,7 +12,7 @@ const notificationSchema = new mongoose.Schema({
       'student_submitted', 'application_approved', 'application_rejected',
       'changes_requested', 'enrollment_assigned',
       'doc_requested', 'doc_forwarded', 'doc_fee_approved', 'doc_fee_rejected',
-      'doc_scanned', 'doc_payment_received', 'doc_dispatched',
+      'doc_scanned', 'doc_payment_received', 'doc_payment_required', 'doc_dispatched',
       'payment_verified', 'doc_delivered',
       'installment_updated',
       'help_ticket', 'ticket_message', 'chat_message',

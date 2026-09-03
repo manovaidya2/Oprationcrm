@@ -847,9 +847,19 @@ export default function AccountantPage() {
     finally { setSaving(false); }
   }
 
+  // A doc still in "Forwarded"/"Fee_Pending" carries its payment inside the request —
+  // approving the request (accountantAction) also verifies the attached payment.
+  // A standalone "Payment_Submitted" doc (post-scan payment) uses verifyPayment.
+  const isRequestStagePayDoc = d => ['Forwarded', 'Fee_Pending'].includes(d?.status);
+
   async function doPayVerify(approved) {
     setSaving(true);
-    try { await docsApi.verifyPayment(dialog.item._id, approved, note); toast.success(approved?'Verified':'Rejected'); setDialog(null); setNote(''); refreshCurrentTab(); }
+    try {
+      const d = dialog.item;
+      if (isRequestStagePayDoc(d)) await docsApi.accountantAction(d._id, approved ? 'approve' : 'reject', note);
+      else await docsApi.verifyPayment(d._id, approved, note);
+      toast.success(approved?'Verified':'Rejected'); setDialog(null); setNote(''); refreshCurrentTab();
+    }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
@@ -858,7 +868,10 @@ export default function AccountantPage() {
     if (!selected.length) return toast.error('Select payments first');
     setSaving(true);
     try {
-      for (const doc of selected) await docsApi.verifyPayment(doc._id, true, '');
+      for (const doc of selected) {
+        if (isRequestStagePayDoc(doc)) await docsApi.accountantAction(doc._id, 'approve', '');
+        else await docsApi.verifyPayment(doc._id, true, '');
+      }
       toast.success(`${selected.length} document payments verified`);
       setSelectedDocIds([]);
       refreshCurrentTab();
@@ -1465,7 +1478,7 @@ export default function AccountantPage() {
                       aria-label={`Select ${d.name}`}
                     />
                     <span className="font-medium">{d.name}</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Payment Submitted</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{['Forwarded','Fee_Pending'].includes(d.status) ? 'Request + Payment' : 'Payment Submitted'}</span>
                   </div>
                   <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
   Student: {d.student?.name}

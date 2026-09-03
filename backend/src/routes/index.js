@@ -86,6 +86,7 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 
 // ── STUDENTS ─────────────────────────────────────────────────
 router.get   ('/students',     protect, studentC.list);
+router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
 router.post  ('/students',     protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.create);
 router.put   ('/students/:id', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.any(), studentC.update);

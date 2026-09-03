@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi } from '@/lib/api';
+import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi, counselorsApi, universitiesApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
@@ -59,6 +59,41 @@ const STATUS_COLORS = {
   Cancelled:'bg-slate-100 text-slate-600',
 };
 
+const ADMIN_EDIT_STATUSES = [
+  'Draft',
+  'Submitted',
+  'Changes_Requested',
+  'Counselor_Approved',
+  'Accountant_Pending',
+  'Accountant_Approved',
+  'Sent_To_University',
+  'University_Rejected',
+  'Accountant_Rejected',
+  'Rejected',
+  'Enrolled',
+  'Cancelled',
+];
+
+const ADMIN_DOC_STATUSES = [
+  'Requested',
+  'Changes_Requested',
+  'Forwarded',
+  'Fee_Pending',
+  'Fee_Rejected',
+  'Fee_Approved',
+  'Sent_To_University',
+  'University_Dispatched',
+  'Dispatch_Received',
+  'Scanned',
+  'Accountant_Received',
+  'Counselor_Received',
+  'Center_Notified',
+  'Payment_Submitted',
+  'Payment_Verified',
+  'Dispatched',
+  'Delivered',
+];
+
 const DOC_STATUS_COLORS = {
   Requested:'bg-blue-100 text-blue-700', Forwarded:'bg-indigo-100 text-indigo-700',
   Fee_Approved:'bg-green-100 text-green-700', Fee_Rejected:'bg-red-100 text-red-700',
@@ -85,7 +120,8 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
     ifscCode: tx.ifscCode || '',
     note: tx.note || '',
     paidAt: toDateInput(tx.paidAt),
-    verificationStatus: tx.verificationStatus || 'pending',
+    verifiedAt: toDateInput(tx.verifiedAt),
+    verificationStatus: tx.verificationStatus || 'not_required',
     paidToAccount: tx.paidToAccount || '',
   });
   const [screenshotFile, setScreenshotFile] = useState(null);
@@ -146,14 +182,21 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
               <Select value={f.verificationStatus} onValueChange={v=>setF(p=>({...p,verificationStatus:v}))}>
                 <SelectTrigger><SelectValue/></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="not_required">Not Required</SelectItem>
                   <SelectItem value="pending_counselor">Pending Counselor</SelectItem>
+                  <SelectItem value="pending_accountant">Pending Accountant</SelectItem>
                   <SelectItem value="verified">Verified</SelectItem>
                   <SelectItem value="rejected">Rejected</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
+          {f.verificationStatus === 'verified' && (
+            <div>
+              <Label>Verified Date</Label>
+              <Input type="date" value={f.verifiedAt} onChange={e=>setF(p=>({...p,verifiedAt:e.target.value}))}/>
+            </div>
+          )}
           <div>
             <Label>UTR / Reference Number</Label>
             <Input value={f.utrRef} onChange={e=>setF(p=>({...p,utrRef:e.target.value}))} placeholder="Transaction reference"/>
@@ -240,6 +283,8 @@ export default function StudentDetailPage() {
   const [payment, setPayment] = useState(null);
   const [docs,    setDocs]    = useState([]);
   const [centers, setCenters]  = useState([]);
+  const [counselors, setCounselors] = useState([]);
+  const [universities, setUniversities] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [editOpen,   setEditOpen]   = useState(false);
@@ -271,7 +316,7 @@ export default function StudentDetailPage() {
   const [docForm, setDocForm] = useState({ name:'', names:[], chargeFee:'', note:'' });
   const [docFile, setDocFile] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
-  const [editDocForm, setEditDocForm] = useState({ name:'', chargeFee:'', note:'' });
+  const [editDocForm, setEditDocForm] = useState({ name:'', chargeFee:'', note:'', status:'Requested', verifyPayments:false });
   const [editDocFile, setEditDocFile] = useState(null);
   const fileRef = useRef();
   const editDocFileRef = useRef();
@@ -281,13 +326,15 @@ export default function StudentDetailPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [s, p, d, c] = await Promise.all([
+      const [s, p, d, c, co, u] = await Promise.all([
         studentsApi.getOne(id),
         paymentsApi.get(id, { checkDuplicates: true }).catch(()=>null),
         docsApi.list({ studentId: id, all: '1' }).catch(()=>[]),
         centersApi.getAll().catch(()=>[]),
+        counselorsApi.getAll().catch(()=>[]),
+        universitiesApi.getAll().catch(()=>[]),
       ]);
-      setStudent(s); setPayment(p); setDocs(d); setCenters(c);
+      setStudent(s); setPayment(p); setDocs(d); setCenters(c); setCounselors(co); setUniversities(u);
     } catch(e) { toast.error(e.message); } finally { setLoading(false); }
   }, [id]);
 
@@ -411,11 +458,15 @@ export default function StudentDetailPage() {
       fd.append('name', editDocForm.name);
       fd.append('note', editDocForm.note || '');
       fd.append('chargeFee', editDocForm.chargeFee || 0);
+      if (isAdmin) {
+        fd.append('status', editDocForm.status || editDoc.status);
+        fd.append('verifyPayments', editDocForm.verifyPayments ? 'true' : 'false');
+      }
       if (editDocFile) fd.append('file', editDocFile);
       await docsApi.update(editDoc._id, fd);
       toast.success('Document updated');
       setEditDoc(null);
-      setEditDocForm({ name:'', chargeFee:'', note:'' });
+      setEditDocForm({ name:'', chargeFee:'', note:'', status:'Requested', verifyPayments:false });
       setEditDocFile(null);
       if (editDocFileRef.current) editDocFileRef.current.value = '';
       load();
@@ -484,6 +535,10 @@ export default function StudentDetailPage() {
                 twelfth_board: student.twelfth_board||'',
                 // Admin-only fields
                 enrollmentNumber: student.enrollmentNumber||'',
+                enrollmentNumberChecked: Boolean(student.enrollmentNumberChecked),
+                center: student.center?._id || student.center || '',
+                counselor: student.counselor?._id || student.counselor || '',
+                applicationStatus: student.applicationStatus || 'Draft',
               });
               setEditOpen(true);
             }}>
@@ -711,7 +766,7 @@ export default function StudentDetailPage() {
         <TabsContent value="docs" className="mt-4 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">{docs.length} document{docs.length!==1?'s':''}</p>
-            {canManageDocs && student.applicationStatus==='Enrolled' && (
+            {canManageDocs && (isAdmin || student.applicationStatus==='Enrolled') && (
               <Button size="sm" onClick={()=>setDocOpen(true)}><Plus className="h-4 w-4 mr-1"/>Request Document</Button>
             )}
           </div>
@@ -759,7 +814,13 @@ export default function StudentDetailPage() {
                     <div className="flex flex-col gap-2">
                       <Button size="sm" variant="outline" onClick={() => {
                         setEditDoc(d);
-                        setEditDocForm({ name: d.name || '', chargeFee: d.chargeFee || '', note: d.note || '' });
+                        setEditDocForm({
+                          name: d.name || '',
+                          chargeFee: d.chargeFee || '',
+                          note: d.note || '',
+                          status: d.status || 'Requested',
+                          verifyPayments: false,
+                        });
                         setEditDocFile(null);
                         if (editDocFileRef.current) editDocFileRef.current.value = '';
                       }}>
@@ -951,6 +1012,51 @@ export default function StudentDetailPage() {
                 <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider flex items-center gap-1.5">
                   <Shield className="h-3.5 w-3.5"/>Admin Only Fields
                 </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <Label>Application Status</Label>
+                    <Select value={form.applicationStatus || 'Draft'} onValueChange={v=>setForm(p=>({...p,applicationStatus:v}))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {ADMIN_EDIT_STATUSES.map(status => (
+                          <SelectItem key={status} value={status}>{status.replace(/_/g, ' ')}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>University</Label>
+                    <Select value={form.university || '__none__'} onValueChange={v=>setForm(p=>({...p,university:v === '__none__' ? '' : v}))}>
+                      <SelectTrigger><SelectValue placeholder="Select university" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Not Set</SelectItem>
+                        {universities.map(u => <SelectItem key={u._id} value={u._id}>{u.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Center</Label>
+                    <Select value={form.center || ''} onValueChange={v=>setForm(p=>({...p,center:v}))}>
+                      <SelectTrigger><SelectValue placeholder="Select center" /></SelectTrigger>
+                      <SelectContent>{centers.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Counselor</Label>
+                    <Select value={form.counselor || ''} onValueChange={v=>setForm(p=>({...p,counselor:v}))}>
+                      <SelectTrigger><SelectValue placeholder="Select counselor" /></SelectTrigger>
+                      <SelectContent>{counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.enrollmentNumberChecked)}
+                    onChange={e=>setForm(p=>({...p,enrollmentNumberChecked:e.target.checked}))}
+                  />
+                  Mark enrollment checked
+                </label>
                 <div>
                   <Label>Enrollment Number</Label>
                   <Input
@@ -1166,6 +1272,32 @@ export default function StudentDetailPage() {
             </div>
             <div><Label>Charge (₹)</Label><Input type="number" value={editDocForm.chargeFee} onChange={e=>setEditDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
             <div><Label>Note</Label><Input value={editDocForm.note} onChange={e=>setEditDocForm(p=>({...p,note:e.target.value}))}/></div>
+            {isAdmin && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-3">
+                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Shield className="h-3.5 w-3.5"/>Admin Approval
+                </p>
+                <div>
+                  <Label>Document Status</Label>
+                  <Select value={editDocForm.status || 'Requested'} onValueChange={v=>setEditDocForm(p=>({...p,status:v}))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ADMIN_DOC_STATUSES.map(status => (
+                        <SelectItem key={status} value={status}>{status.replace(/_/g, ' ')}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editDocForm.verifyPayments)}
+                    onChange={e=>setEditDocForm(p=>({...p,verifyPayments:e.target.checked}))}
+                  />
+                  Mark document payments verified
+                </label>
+              </div>
+            )}
             <div>
               <Label>Replace File</Label>
               <input ref={editDocFileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setEditDocFile(e.target.files[0] || null)} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-muted"/>

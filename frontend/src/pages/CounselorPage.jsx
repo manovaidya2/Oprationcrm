@@ -990,9 +990,16 @@ export default function CounselorPage() {
     catch(e) { toast.error(e.message); }
   }
 
+  // A doc that still sits in "Requested" carries the payment inside the request itself —
+  // forwarding the request sends both. Once it's a standalone "Payment_Submitted" (post-scan
+  // payment) we use the dedicated payment-forward endpoint.
   async function forwardPaymentToAccountant(d) {
     if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
-    try { await docsApi.forwardPayment(d._id); toast.success('Payment forwarded to accountant'); load(); }
+    try {
+      await (d.status === 'Requested' ? docsApi.forward(d._id) : docsApi.forwardPayment(d._id));
+      toast.success('Forwarded to accountant');
+      load();
+    }
     catch(e) { toast.error(e.message); }
   }
 
@@ -1038,7 +1045,10 @@ export default function CounselorPage() {
   const newDocs           = docs.filter(d => d.status === 'Requested' && !isDismissed(`doc:${d._id}:request`));
   const fromDisp          = docs.filter(d => d.status === 'Counselor_Received' && !isDismissed(`doc:${d._id}:dispatch`));
   const deliveryPending   = docs.filter(d => d.status === 'Dispatched' && !isDismissed(`doc:${d._id}:delivery`));
-  const paymentPending    = docs.filter(d => d.status === 'Payment_Submitted' && !isDismissed(`doc:${d._id}:payment`));
+  const paymentPending    = docs.filter(d => (
+    d.status === 'Payment_Submitted' ||
+    (d.status === 'Requested' && (d.payments?.length > 0))
+  ) && !isDismissed(`doc:${d._id}:payment`));
   const visibleSettlementQueue = settlementQueue.filter(s => !isDismissed(`student:${s._id}:settlement`));
   const visibleFeePayments = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
   const switchCenters = centers.filter(c => {
@@ -1352,7 +1362,7 @@ export default function CounselorPage() {
                 />
                 Select all payment requests
               </label>
-              <Button size="sm" onClick={() => batchForwardDocs(paymentPending, d => docsApi.forwardPayment(d._id), 'payment requests forwarded to accountant')} disabled={saving || !paymentPending.some(d => selectedDocIds.includes(String(d._id)))}>
+              <Button size="sm" onClick={() => batchForwardDocs(paymentPending, d => (d.status === 'Requested' ? docsApi.forward(d._id) : docsApi.forwardPayment(d._id)), 'payment requests forwarded to accountant')} disabled={saving || !paymentPending.some(d => selectedDocIds.includes(String(d._id)))}>
                 <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
               </Button>
             </div>
@@ -1361,7 +1371,7 @@ export default function CounselorPage() {
           paymentPending.map(d=>(
             <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
               accent="border-emerald-200"
-              badge="Payment Submitted"
+              badge={d.status === 'Requested' ? 'Request + Payment' : 'Payment Submitted'}
               badgeColor="bg-emerald-50 text-emerald-700 border border-emerald-200"
               onClick={()=>setDocModal(d)}>
               {!isViewerCounselor && <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>

@@ -207,7 +207,7 @@ export function AppLayout() {
       {/* Main */}
       <div className="flex-1 min-w-0 overflow-x-hidden flex flex-col lg:ml-60 min-h-screen">
         {/* Top bar */}
-        <header className="sticky top-0 z-[80] flex h-14 min-w-0 items-center overflow-visible border-b bg-card/95 backdrop-blur px-4 gap-3">
+        <header className="sticky top-0 z-40 flex h-14 min-w-0 items-center overflow-visible border-b bg-card/95 backdrop-blur px-4 gap-3">
           <button className="lg:hidden" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
           <div className="flex-1" />
 

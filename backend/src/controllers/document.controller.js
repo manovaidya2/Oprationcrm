@@ -64,6 +64,26 @@ function markDocPaymentsVerified(doc, user) {
   return changed;
 }
 
+const ADMIN_DOCUMENT_STATUSES = [
+  'Requested',
+  'Changes_Requested',
+  'Forwarded',
+  'Fee_Pending',
+  'Fee_Rejected',
+  'Fee_Approved',
+  'Sent_To_University',
+  'University_Dispatched',
+  'Dispatch_Received',
+  'Scanned',
+  'Accountant_Received',
+  'Counselor_Received',
+  'Center_Notified',
+  'Payment_Submitted',
+  'Payment_Verified',
+  'Dispatched',
+  'Delivered',
+];
+
 const INVENTORY_DOC_NAMES = [
   'Marksheet Year One',
   'Marksheet Year Two',
@@ -302,6 +322,13 @@ exports.create = asyncHandler(async (req, res) => {
     doc.statusHistory.push({ status: 'Requested', changedBy: req.user._id, at: new Date(), note: `Payment of ₹${paidAmount} attached at request time` });
   }
 
+  // Request + payment submitted together (soft OR hard copy) travel as one document.
+  // The doc stays in "Requested" so it shows in the counselor's Document Request tab,
+  // AND — because it carries a payment — it also surfaces in the Doc Payments tab.
+  // Forwarding / approving it from either tab moves the whole thing (see the
+  // `payments.0 exists` clauses in the counselor list + accountant docpayments queue,
+  // and markDocPaymentsVerified inside accountantAction).
+
   await doc.save();
 
   const counselorUser = await User.findOne({ counselorId: student.counselor, isActive: true });
@@ -310,7 +337,8 @@ exports.create = asyncHandler(async (req, res) => {
       message: paidAmount > 0
         ? `Doc request with payment: "${name}" for ${student.name} — ₹${paidAmount} paid`
         : `Document request: "${name}" for ${student.name}`,
-      type: 'doc_requested', role: 'Counselor', studentId, documentId: doc._id,
+      type: paidAmount > 0 ? 'doc_payment_received' : 'doc_requested',
+      role: 'Counselor', studentId, documentId: doc._id,
     });
   }
   await audit('doc_requested', 'StudentDocument', doc._id, req.user, { name }, `Doc request: ${name}`);
@@ -342,6 +370,18 @@ exports.update = asyncHandler(async (req, res) => {
   if (req.body.requestType !== undefined) doc.requestType = req.body.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy';
   if (req.body.chargeFee !== undefined) doc.chargeFee = Number(req.body.chargeFee);
   if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
+  if (req.user.role === 'Admin') {
+    if (req.body.verifyPayments === true || req.body.verifyPayments === 'true') {
+      const verifiedPayments = markDocPaymentsVerified(doc, req.user);
+      if (verifiedPayments > 0) addHistoryOnly(doc, 'Payment_Verified', req.user, `${verifiedPayments} document payment${verifiedPayments > 1 ? 's' : ''} verified by Admin`);
+    }
+    if (req.body.status && ADMIN_DOCUMENT_STATUSES.includes(req.body.status) && req.body.status !== doc.status) {
+      pushHistory(doc, req.body.status, req.user, req.body.statusNote || 'Document status updated by Admin');
+      if (req.body.status === 'Payment_Verified') markDocPaymentsVerified(doc, req.user);
+    }
+    doc.lastUpdatedBy = req.user._id;
+    doc.lastUpdatedAt = new Date();
+  }
   if (req.user.role === 'ViewerCounselor' && centerOriginated) {
     doc.lastUpdatedBy = req.user._id;
     doc.lastUpdatedAt = new Date();
@@ -549,8 +589,25 @@ exports.counselorForwardToCenter = asyncHandler(async (req, res) => {
   const totalPaid = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
   doc.totalPaid = totalPaid;
 
-  // If already fully paid — skip Center_Notified and go straight to Payment_Submitted
+  // If already fully paid — skip Center_Notified
   if (doc.chargeFee > 0 && totalPaid >= doc.chargeFee) {
+    const allVerified = doc.payments.length > 0 && doc.payments.every(p => p.verified);
+    if (allVerified) {
+      // Upfront payment was already verified by the accountant before the doc went to
+      // the university. Scan is back, nothing left to pay — straight to dispatch.
+      pushHistory(doc, 'Payment_Verified', req.user, 'Scan received — payment already verified, ready for dispatch');
+      await doc.save();
+      await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
+      const centerUserPaid = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
+      if (centerUserPaid) {
+        await notify(centerUserPaid._id, {
+          message: `Your document "${doc.name}" is verified — dispatch will courier it to you soon`,
+          type: 'doc_scanned', documentId: doc._id, role: 'Center',
+        });
+      }
+      await audit('counselor_forwarded_to_center_prepaid', 'StudentDocument', doc._id, req.user, {}, `Forwarded to dispatch (pre-paid & verified)`);
+      return res.json(doc);
+    }
     pushHistory(doc, 'Payment_Submitted', req.user, 'Forwarded to center — payment already complete, auto-forwarded to accountant');
     await doc.save();
     // Notify accountant directly
@@ -942,9 +999,15 @@ exports.accountantDocsQueue = asyncHandler(async (req, res) => {
   } else if (queue === 'docrequest') {
     filter.status = { $in: ['Forwarded','Fee_Pending'] };
   } else if (queue === 'docpayments') {
-    filter.status = 'Payment_Submitted';
+    // Payments awaiting the accountant: the post-scan "Payment_Submitted" ones, PLUS
+    // request-stage docs that were forwarded with a payment attached (request + payment
+    // travel together — approving the request here also verifies its payment).
+    filter.$or = [
+      { status: 'Payment_Submitted' },
+      { status: { $in: ['Forwarded','Fee_Pending'] }, 'payments.0': { $exists: true } },
+    ];
   } else if (queue === 'docpayments_all') {
-    filter.status = { $in: ['Payment_Submitted','Payment_Verified','Center_Notified','Fee_Rejected'] };
+    filter.status = { $in: ['Forwarded','Fee_Pending','Payment_Submitted','Payment_Verified','Center_Notified','Fee_Rejected'] };
     filter['payments.0'] = { $exists: true };
   } else {
     const e = new Error('Invalid queue'); e.status = 400; throw e;

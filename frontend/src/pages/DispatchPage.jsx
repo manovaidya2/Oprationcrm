@@ -309,11 +309,14 @@ export default function DispatchPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [d, inventoryRows] = await Promise.all([
+      const [d, inventoryResp] = await Promise.all([
         docsApi.list({ all: '1' }),
-        documentInventoryApi.list().catch(() => []),
+        documentInventoryApi.list({ limit: 100 }).catch(() => ({ rows: [] })),
       ]);
       setAll(d);
+      // /document-inventory returns a paginated { rows: [...] } object (older versions
+      // returned a bare array) — normalise both shapes.
+      const inventoryRows = Array.isArray(inventoryResp) ? inventoryResp : (inventoryResp?.rows || []);
       const keys = new Set();
       inventoryRows.forEach(({ student, docs = [] }) => {
         docs.forEach(doc => {
@@ -323,7 +326,10 @@ export default function DispatchPage() {
         });
       });
       setInventoryReceivedKeys(keys);
-    } catch { toast.error('Failed'); } finally { setLoading(false); }
+    } catch (e) {
+      console.error('DispatchPage load failed', e);
+      toast.error(e?.message || 'Failed to load dispatch queue');
+    } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 

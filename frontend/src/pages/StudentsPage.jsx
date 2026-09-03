@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLazyList } from '@/lib/useLazyList';
 import { useNavigate } from 'react-router-dom';
-import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2, ArrowRightLeft, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2, ArrowRightLeft, CheckCircle2, Upload, FileText } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { studentsApi, centersApi, counselorsApi, paymentsApi, docsApi } from '@/lib/api';
+import { studentsApi, centersApi, counselorsApi, paymentsApi, docsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
 const STATUS_COLORS = {
@@ -38,6 +39,25 @@ function getSubmittedDate(student) {
   return entry?.at ? fmtDate(entry.at) : '';
 }
 
+function emptyExistingForm() {
+  return {
+    student: {
+      name: '', fatherName: '', motherName: '', dob: '', gender: '', phone: '', email: '',
+      address: '', aadharNumber: '', courseName: '', courseYear: '', university: '',
+      center: '', counselor: '', enrollmentNumber: '', enrollmentNumberChecked: true,
+      applicationStatus: 'Enrolled', tenth_percent: '', tenth_year: '', tenth_board: '',
+      twelfth_percent: '', twelfth_year: '', twelfth_board: '', note: '',
+    },
+    fee: { totalFee: '', discount: '', notes: '' },
+    transaction: {
+      amount: '', mode: 'UPI', upiId: '', utrRef: '', bankName: '', accountHolder: '',
+      accountNumber: '', ifscCode: '', paidAt: '', verifiedAt: '', paidToAccount: '',
+      paidToAccountLabel: '', note: '',
+    },
+    documents: [],
+  };
+}
+
 export default function StudentsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -45,6 +65,8 @@ export default function StudentsPage() {
 
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
+  const [universities, setUniversities] = useState([]);
+  const [paymentAccounts, setPaymentAccounts] = useState([]);
 
   // Filters
   const [search,    setSearch]    = useState('');
@@ -64,6 +86,9 @@ export default function StudentsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [form,    setForm]    = useState({ name:'', phone:'', email:'', courseName:'', courseYear:'', center:'', counselor:'' });
   const [saving,  setSaving]  = useState(false);
+  const [existingOpen, setExistingOpen] = useState(false);
+  const [existingSaving, setExistingSaving] = useState(false);
+  const [existingForm, setExistingForm] = useState(() => emptyExistingForm());
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -132,9 +157,19 @@ export default function StudentsPage() {
     useLazyList(fetchStudentsPage, { limit: 30, deps: [search, statusF, centerF] });
 
   useEffect(() => {
-    Promise.all([centersApi.getAll(), counselorsApi.getAll()])
-      .then(([c, co]) => { setCenters(c); setCounselors(co); })
-      .catch(() => toast.error('Failed to load centers/counselors'));
+    Promise.all([
+      centersApi.getAll(),
+      counselorsApi.getAll(),
+      universitiesApi.getAll(),
+      paymentAccountsApi.listAll().catch(() => []),
+    ])
+      .then(([c, co, u, accounts]) => {
+        setCenters(c);
+        setCounselors(co);
+        setUniversities(u);
+        setPaymentAccounts(accounts);
+      })
+      .catch(() => toast.error('Failed to load setup data'));
   }, []);
 
   useEffect(() => { setSelected(new Set()); }, [students]);
@@ -321,6 +356,72 @@ export default function StudentsPage() {
     } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
+  function updateExisting(section, key, value) {
+    setExistingForm(prev => ({
+      ...prev,
+      [section]: { ...prev[section], [key]: value },
+    }));
+  }
+
+  function updateExistingDoc(index, key, value) {
+    setExistingForm(prev => ({
+      ...prev,
+      documents: prev.documents.map((doc, i) => i === index ? { ...doc, [key]: value } : doc),
+    }));
+  }
+
+  function addExistingDocRow() {
+    setExistingForm(prev => ({
+      ...prev,
+      documents: [...prev.documents, { name: '', type: 'Academic', status: 'Requested', requestType: 'Hard Copy', chargeFee: '', note: '', file: null }],
+    }));
+  }
+
+  function removeExistingDocRow(index) {
+    setExistingForm(prev => ({
+      ...prev,
+      documents: prev.documents.filter((_, i) => i !== index),
+    }));
+  }
+
+  function openExistingAdmission() {
+    setExistingForm(emptyExistingForm());
+    setExistingOpen(true);
+  }
+
+  async function saveExistingAdmission() {
+    const selectedCenter = centers.find(c => c._id === existingForm.student.center);
+    const selectedCounselor = existingForm.student.counselor || selectedCenter?.assignedCounselor?._id || selectedCenter?.assignedCounselor || '';
+    if (!existingForm.student.name || !existingForm.student.center) return toast.error('Student name and center are required');
+    if (!selectedCounselor) return toast.error('Selected center has no counselor. Assign counselor first.');
+    if (existingForm.student.applicationStatus === 'Enrolled' && !existingForm.student.enrollmentNumber) {
+      return toast.error('Enrollment number is required for enrolled student');
+    }
+
+    const details = {
+      student: { ...existingForm.student, counselor: selectedCounselor },
+      fee: existingForm.fee,
+      transaction: existingForm.transaction,
+      documents: existingForm.documents.map(({ file, ...doc }) => doc),
+    };
+    const fd = new FormData();
+    fd.append('details', JSON.stringify(details));
+    existingForm.documents.forEach((doc, index) => {
+      if (doc.file) fd.append(`documentFile_${index}`, doc.file);
+    });
+
+    setExistingSaving(true);
+    try {
+      const created = await studentsApi.createExistingAdmission(fd);
+      toast.success('Existing admission added');
+      setExistingOpen(false);
+      setExistingForm(emptyExistingForm());
+      load();
+      navigate(`/students/${created._id}`);
+    } catch(e) { toast.error(e.message); }
+    finally { setExistingSaving(false); }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -337,7 +438,14 @@ export default function StudentsPage() {
           <Button variant="outline" size="sm" onClick={() => setCsvOpen(true)}>
             <Download className="h-4 w-4 mr-1"/>CSV
           </Button>
-          {isAdmin && <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1"/>Add Student</Button>}
+          {isAdmin && (
+            <>
+              <Button variant="outline" size="sm" onClick={openExistingAdmission}>
+                <FileText className="h-4 w-4 mr-1"/>Add Existing Admission
+              </Button>
+              <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4 mr-1"/>Add Student</Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -603,6 +711,192 @@ export default function StudentsPage() {
 
       {/* Add Student Dialog */}
       {/* ── Delete Confirm Dialog ─────────────────────────── */}
+      <Dialog open={existingOpen} onOpenChange={setExistingOpen}>
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-4 w-4"/>Add Existing Admission
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="md:col-span-2"><Label>Student Name *</Label><Input value={existingForm.student.name} onChange={e => updateExisting('student', 'name', e.target.value)} /></div>
+              <div><Label>Phone</Label><Input value={existingForm.student.phone} onChange={e => updateExisting('student', 'phone', e.target.value)} /></div>
+              <div><Label>Email</Label><Input value={existingForm.student.email} onChange={e => updateExisting('student', 'email', e.target.value)} /></div>
+              <div><Label>Father Name</Label><Input value={existingForm.student.fatherName} onChange={e => updateExisting('student', 'fatherName', e.target.value)} /></div>
+              <div><Label>Mother Name</Label><Input value={existingForm.student.motherName} onChange={e => updateExisting('student', 'motherName', e.target.value)} /></div>
+              <div><Label>Date of Birth</Label><Input type="date" value={existingForm.student.dob} onChange={e => updateExisting('student', 'dob', e.target.value)} /></div>
+              <div>
+                <Label>Gender</Label>
+                <Select value={existingForm.student.gender || 'none'} onValueChange={v => updateExisting('student', 'gender', v === 'none' ? '' : v)}>
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not Set</SelectItem>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2"><Label>Address</Label><Input value={existingForm.student.address} onChange={e => updateExisting('student', 'address', e.target.value)} /></div>
+              <div><Label>Aadhaar Number</Label><Input value={existingForm.student.aadharNumber} onChange={e => updateExisting('student', 'aadharNumber', e.target.value)} /></div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div>
+                <Label>Center *</Label>
+                <Select value={existingForm.student.center} onValueChange={v => {
+                  const c = centers.find(row => row._id === v);
+                  updateExisting('student', 'center', v);
+                  updateExisting('student', 'counselor', c?.assignedCounselor?._id || c?.assignedCounselor || '');
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Select center" /></SelectTrigger>
+                  <SelectContent>{centers.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Counselor</Label>
+                <Select value={existingForm.student.counselor || 'auto'} onValueChange={v => updateExisting('student', 'counselor', v === 'auto' ? '' : v)}>
+                  <SelectTrigger><SelectValue placeholder="Auto from center" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto from center</SelectItem>
+                    {counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>University</Label>
+                <Select value={existingForm.student.university || 'none'} onValueChange={v => updateExisting('student', 'university', v === 'none' ? '' : v)}>
+                  <SelectTrigger><SelectValue placeholder="Select university" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not Set</SelectItem>
+                    {universities.map(u => <SelectItem key={u._id} value={u._id}>{u.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Current Flow Status</Label>
+                <Select value={existingForm.student.applicationStatus} onValueChange={v => updateExisting('student', 'applicationStatus', v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Submitted">Submitted</SelectItem>
+                    <SelectItem value="Counselor_Approved">Counselor Approved</SelectItem>
+                    <SelectItem value="Sent_To_University">Sent To University</SelectItem>
+                    <SelectItem value="Enrolled">Enrolled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div><Label>Course</Label><Input value={existingForm.student.courseName} onChange={e => updateExisting('student', 'courseName', e.target.value)} /></div>
+              <div><Label>Session / Year</Label><Input value={existingForm.student.courseYear} onChange={e => updateExisting('student', 'courseYear', e.target.value)} /></div>
+              <div><Label>Enrollment Number</Label><Input value={existingForm.student.enrollmentNumber} onChange={e => updateExisting('student', 'enrollmentNumber', e.target.value)} /></div>
+              <label className="flex items-end gap-2 text-sm text-slate-600 pb-2">
+                <input type="checkbox" checked={existingForm.student.enrollmentNumberChecked} onChange={e => updateExisting('student', 'enrollmentNumberChecked', e.target.checked)} />
+                Mark enrollment checked
+              </label>
+              <div><Label>10th %</Label><Input value={existingForm.student.tenth_percent} onChange={e => updateExisting('student', 'tenth_percent', e.target.value)} /></div>
+              <div><Label>10th Year</Label><Input value={existingForm.student.tenth_year} onChange={e => updateExisting('student', 'tenth_year', e.target.value)} /></div>
+              <div><Label>12th %</Label><Input value={existingForm.student.twelfth_percent} onChange={e => updateExisting('student', 'twelfth_percent', e.target.value)} /></div>
+              <div><Label>12th Year</Label><Input value={existingForm.student.twelfth_year} onChange={e => updateExisting('student', 'twelfth_year', e.target.value)} /></div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <div><Label>Total Fee</Label><Input type="number" value={existingForm.fee.totalFee} onChange={e => updateExisting('fee', 'totalFee', e.target.value)} /></div>
+              <div><Label>Discount</Label><Input type="number" value={existingForm.fee.discount} onChange={e => updateExisting('fee', 'discount', e.target.value)} /></div>
+              <div><Label>Approved Paid Amount</Label><Input type="number" value={existingForm.transaction.amount} onChange={e => updateExisting('transaction', 'amount', e.target.value)} /></div>
+              <div>
+                <Label>Mode</Label>
+                <Select value={existingForm.transaction.mode} onValueChange={v => updateExisting('transaction', 'mode', v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UPI">UPI</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div><Label>UTR</Label><Input value={existingForm.transaction.utrRef} onChange={e => updateExisting('transaction', 'utrRef', e.target.value)} /></div>
+              <div><Label>Paid Date</Label><Input type="date" value={existingForm.transaction.paidAt} onChange={e => updateExisting('transaction', 'paidAt', e.target.value)} /></div>
+              <div><Label>Verified Date</Label><Input type="date" value={existingForm.transaction.verifiedAt} onChange={e => updateExisting('transaction', 'verifiedAt', e.target.value)} /></div>
+              <div>
+                <Label>Paid To Account</Label>
+                <Select value={existingForm.transaction.paidToAccount || 'none'} onValueChange={v => {
+                  const acc = paymentAccounts.find(a => a._id === v);
+                  updateExisting('transaction', 'paidToAccount', v === 'none' ? '' : v);
+                  updateExisting('transaction', 'paidToAccountLabel', acc?.displayName || acc?.accountName || acc?.upiId || '');
+                }}>
+                  <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not Set</SelectItem>
+                    {paymentAccounts.map(a => <SelectItem key={a._id} value={a._id}>{a.displayName || a.accountName || a.upiId || 'Account'}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-2"><Label>Payment Note</Label><Input value={existingForm.transaction.note} onChange={e => updateExisting('transaction', 'note', e.target.value)} /></div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">Certificates / Marksheets / Documents</Label>
+                <Button type="button" variant="outline" size="sm" onClick={addExistingDocRow}><Plus className="h-4 w-4 mr-1"/>Add Document</Button>
+              </div>
+              {existingForm.documents.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-sm text-slate-500">
+                  No document will be added unless you add a document row.
+                </div>
+              )}
+              {existingForm.documents.map((doc, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 rounded-lg border border-slate-200 p-3">
+                  <div className="md:col-span-3"><Label>Name</Label><Input value={doc.name} onChange={e => updateExistingDoc(index, 'name', e.target.value)} /></div>
+                  <div className="md:col-span-2"><Label>Type</Label><Input value={doc.type} onChange={e => updateExistingDoc(index, 'type', e.target.value)} /></div>
+                  <div className="md:col-span-2">
+                    <Label>Status</Label>
+                    <Select value={doc.status} onValueChange={v => updateExistingDoc(index, 'status', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Requested">Requested</SelectItem>
+                        <SelectItem value="Sent_To_University">Sent To University</SelectItem>
+                        <SelectItem value="Dispatch_Received">Dispatch Received</SelectItem>
+                        <SelectItem value="Payment_Verified">Payment Verified</SelectItem>
+                        <SelectItem value="Dispatched">Dispatched</SelectItem>
+                        <SelectItem value="Delivered">Delivered</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="md:col-span-2"><Label>Charge</Label><Input type="number" value={doc.chargeFee} onChange={e => updateExistingDoc(index, 'chargeFee', e.target.value)} /></div>
+                  <div className="md:col-span-2">
+                    <Label>Upload</Label>
+                    <label className="mt-0 flex h-10 cursor-pointer items-center gap-2 rounded-md border border-input bg-background px-3 text-sm text-slate-500">
+                      <Upload className="h-4 w-4"/>
+                      <span className="truncate">{doc.file?.name || 'Choose file'}</span>
+                      <input type="file" className="hidden" onChange={e => updateExistingDoc(index, 'file', e.target.files?.[0] || null)} />
+                    </label>
+                  </div>
+                  <div className="md:col-span-1 flex items-end justify-end">
+                    <Button type="button" variant="ghost" size="icon" onClick={() => removeExistingDocRow(index)}><Trash2 className="h-4 w-4 text-red-500"/></Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <Label>Admin Note</Label>
+              <Textarea className="mt-1" value={existingForm.student.note} onChange={e => updateExisting('student', 'note', e.target.value)} placeholder="Optional note for history" />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExistingOpen(false)}>Cancel</Button>
+            <Button onClick={saveExistingAdmission} disabled={existingSaving} className="bg-indigo-600 hover:bg-indigo-700">
+              {existingSaving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
+              Save Existing Admission
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={deleteOpen} onOpenChange={v => { setDeleteOpen(v); if (!v) setDeleteStudent(null); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>

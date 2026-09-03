@@ -87,6 +87,7 @@ export const studentsApi = {
   getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`), // pass {page, limit} for paginated response
   getOne:          (id)          => request(`/students/${id}`),
   create:          (data)        => request('/students', { method: 'POST', body: JSON.stringify(data) }),
+  createExistingAdmission: (formData) => uploadRequest('/students/existing-admission', 'POST', formData),
   update:          (id, data)    => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete:          (id, data)    => request(`/students/${id}`, { method: 'DELETE', body: JSON.stringify(data || {}) }),
   // Flow actions

@@ -122,6 +122,7 @@ export default function AccountLedgerPage() {
 
   const rows = data?.rows || [];
   const maxTransactions = Math.max(1, Number(data?.maxTransactions || 0), ...rows.map(row => row.transactions?.length || 0));
+  const maxDocTransactions = Math.max(0, Number(data?.maxDocTransactions || 0), ...rows.map(row => row.docTransactions?.length || 0));
   const q = search.trim().toLowerCase();
   const searchedRows = rows.filter(row => {
     const student = row.student || {};
@@ -138,7 +139,15 @@ export default function AccountLedgerPage() {
     totalAmount: acc.totalAmount + Number(row.totalAmount || 0),
     amountPaid: acc.amountPaid + Number(row.amountPaid || 0),
     amountDue: acc.amountDue + Number(row.amountDue || 0),
-  }), { totalAmount: 0, amountPaid: 0, amountDue: 0 }), [filteredRows]);
+    docTotalAmount: acc.docTotalAmount + Number(row.docTotalAmount || 0),
+    docAmountPaid: acc.docAmountPaid + Number(row.docAmountPaid || 0),
+    docAmountDue: acc.docAmountDue + Number(row.docAmountDue || 0),
+  }), { totalAmount: 0, amountPaid: 0, amountDue: 0, docTotalAmount: 0, docAmountPaid: 0, docAmountDue: 0 }), [filteredRows]);
+  const grand = {
+    total: totals.totalAmount + totals.docTotalAmount,
+    paid: totals.amountPaid + totals.docAmountPaid,
+    due: totals.amountDue + totals.docAmountDue,
+  };
 
   function setDateFilter(key, value) {
     setDateFilters(prev => ({ ...prev, [key]: value }));
@@ -153,16 +162,32 @@ export default function AccountLedgerPage() {
     const txHeaders = [];
     for (let index = 0; index < maxTransactions; index += 1) {
       const no = index + 1;
-      txHeaders.push(`Transaction ${no} Amount Paid`, `Transaction ${no} Mode`, `Transaction ${no} UTR`, `Transaction ${no} Paid Date`, `Transaction ${no} Record Added Date`, `Transaction ${no} Verified Date`, `Transaction ${no} Paid To`);
+      txHeaders.push(`Fee Payment ${no} Amount`, `Fee Payment ${no} Mode`, `Fee Payment ${no} UTR`, `Fee Payment ${no} Paid Date`, `Fee Payment ${no} Record Added Date`, `Fee Payment ${no} Verified Date`, `Fee Payment ${no} Paid To`);
+    }
+    const docHeaders = [];
+    for (let index = 0; index < maxDocTransactions; index += 1) {
+      const no = index + 1;
+      docHeaders.push(`Doc Payment ${no} Document`, `Doc Payment ${no} Amount`, `Doc Payment ${no} Mode`, `Doc Payment ${no} UTR`, `Doc Payment ${no} Paid Date`, `Doc Payment ${no} Verified Date`, `Doc Payment ${no} Status`, `Doc Payment ${no} Paid To`);
     }
 
     const dateHeader = dateBasis === 'submittedAt' ? 'Submitted Date' : 'Added Date';
-    const headers = ['Student Name', 'Enrollment Number', 'Course', dateHeader, 'Total Amount', 'Amount Paid', 'Amount Due', ...txHeaders];
+    const headers = [
+      'Student Name', 'Enrollment Number', 'Course', dateHeader,
+      'Course Fee Total', 'Course Fee Paid', 'Course Fee Due',
+      'Document Charge Total', 'Document Charge Paid', 'Document Charge Due',
+      'Grand Total', 'Grand Paid', 'Grand Due',
+      ...txHeaders, ...docHeaders,
+    ];
     const csvRows = filteredRows.map(row => {
       const txValues = [];
       for (let index = 0; index < maxTransactions; index += 1) {
         const tx = row.transactions?.[index];
         txValues.push(tx?.amount || '', tx?.mode || '', tx?.utrRef || '', fmtDate(tx?.paidAt), fmtDate(tx?.recordAddedAt), fmtDate(tx?.verifiedAt), accountText(tx));
+      }
+      const docValues = [];
+      for (let index = 0; index < maxDocTransactions; index += 1) {
+        const tx = row.docTransactions?.[index];
+        docValues.push(tx?.documentName || '', tx?.amount || '', tx?.mode || '', tx?.utrRef || '', fmtDate(tx?.paidAt), fmtDate(tx?.verifiedAt), tx?.status || '', accountText(tx));
       }
       return [
         row.student?.name || '',
@@ -172,7 +197,14 @@ export default function AccountLedgerPage() {
         row.totalAmount || 0,
         row.amountPaid || 0,
         row.amountDue || 0,
+        row.docTotalAmount || 0,
+        row.docAmountPaid || 0,
+        row.docAmountDue || 0,
+        (Number(row.totalAmount || 0) + Number(row.docTotalAmount || 0)),
+        (Number(row.amountPaid || 0) + Number(row.docAmountPaid || 0)),
+        (Number(row.amountDue || 0) + Number(row.docAmountDue || 0)),
         ...txValues,
+        ...docValues,
       ];
     });
 
@@ -221,18 +253,51 @@ export default function AccountLedgerPage() {
         </div>
       )}
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-        <div className="min-w-0 rounded-lg border bg-indigo-50 px-4 py-3">
-          <div className="text-xs font-medium text-indigo-600">Total Amount</div>
-          <div className="truncate text-lg font-bold text-indigo-700">{fmt(totals.totalAmount)}</div>
+      <div className="space-y-2">
+        <div className="text-xs font-semibold uppercase tracking-wide text-indigo-500">Course Fee</div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+          <div className="min-w-0 rounded-lg border bg-indigo-50 px-4 py-3">
+            <div className="text-xs font-medium text-indigo-600">Total Amount</div>
+            <div className="truncate text-lg font-bold text-indigo-700">{fmt(totals.totalAmount)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-emerald-50 px-4 py-3">
+            <div className="text-xs font-medium text-emerald-600">Amount Paid</div>
+            <div className="truncate text-lg font-bold text-emerald-700">{fmt(totals.amountPaid)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-amber-50 px-4 py-3">
+            <div className="text-xs font-medium text-amber-600">Amount Due</div>
+            <div className="truncate text-lg font-bold text-amber-700">{fmt(totals.amountDue)}</div>
+          </div>
         </div>
-        <div className="min-w-0 rounded-lg border bg-emerald-50 px-4 py-3">
-          <div className="text-xs font-medium text-emerald-600">Amount Paid</div>
-          <div className="truncate text-lg font-bold text-emerald-700">{fmt(totals.amountPaid)}</div>
+        <div className="pt-1 text-xs font-semibold uppercase tracking-wide text-violet-500">Document Charges</div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+          <div className="min-w-0 rounded-lg border bg-violet-50 px-4 py-3">
+            <div className="text-xs font-medium text-violet-600">Doc Total</div>
+            <div className="truncate text-lg font-bold text-violet-700">{fmt(totals.docTotalAmount)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-emerald-50 px-4 py-3">
+            <div className="text-xs font-medium text-emerald-600">Doc Paid</div>
+            <div className="truncate text-lg font-bold text-emerald-700">{fmt(totals.docAmountPaid)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-amber-50 px-4 py-3">
+            <div className="text-xs font-medium text-amber-600">Doc Due</div>
+            <div className="truncate text-lg font-bold text-amber-700">{fmt(totals.docAmountDue)}</div>
+          </div>
         </div>
-        <div className="min-w-0 rounded-lg border bg-amber-50 px-4 py-3">
-          <div className="text-xs font-medium text-amber-600">Amount Due</div>
-          <div className="truncate text-lg font-bold text-amber-700">{fmt(totals.amountDue)}</div>
+        <div className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Grand Total (Fee + Documents)</div>
+        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+          <div className="min-w-0 rounded-lg border bg-slate-100 px-4 py-3">
+            <div className="text-xs font-medium text-slate-600">Total</div>
+            <div className="truncate text-lg font-bold text-slate-800">{fmt(grand.total)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-emerald-100 px-4 py-3">
+            <div className="text-xs font-medium text-emerald-700">Paid</div>
+            <div className="truncate text-lg font-bold text-emerald-800">{fmt(grand.paid)}</div>
+          </div>
+          <div className="min-w-0 rounded-lg border bg-amber-100 px-4 py-3">
+            <div className="text-xs font-medium text-amber-700">Due</div>
+            <div className="truncate text-lg font-bold text-amber-800">{fmt(grand.due)}</div>
+          </div>
         </div>
       </div>
 
@@ -299,25 +364,39 @@ export default function AccountLedgerPage() {
 
       <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border bg-white shadow-sm">
         <div className="max-h-[68vh] w-full min-w-0 max-w-full overflow-auto">
-          <table className="border-collapse text-left text-xs" style={{ minWidth: `${860 + (maxTransactions * 780)}px` }}>
+          <table className="border-collapse text-left text-xs" style={{ minWidth: `${1180 + (maxTransactions * 780) + (maxDocTransactions * 900)}px` }}>
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700">
               <tr>
                 <th className="sticky left-0 z-30 border-b border-r bg-slate-100 px-3 py-2" rowSpan="2">Student Name</th>
                 <th className="border-b border-r px-3 py-2" rowSpan="2">Enrollment Number</th>
                 <th className="border-b border-r px-3 py-2" rowSpan="2">Course</th>
-                <th className="border-b border-r px-3 py-2 text-right" rowSpan="2">Total Amount</th>
-                <th className="border-b border-r px-3 py-2 text-right" rowSpan="2">Amount Paid</th>
-                <th className="border-b border-r px-3 py-2 text-right" rowSpan="2">Amount Due</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-indigo-700" rowSpan="2">Fee Total</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-indigo-700" rowSpan="2">Fee Paid</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-indigo-700" rowSpan="2">Fee Due</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-violet-700" rowSpan="2">Doc Total</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-violet-700" rowSpan="2">Doc Paid</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-violet-700" rowSpan="2">Doc Due</th>
+                <th className="border-b border-r bg-slate-200 px-3 py-2 text-right text-slate-800" rowSpan="2">Grand Due</th>
                 {Array.from({ length: maxTransactions }).map((_, index) => (
-                  <th key={index} className="border-b border-r bg-indigo-50 px-3 py-2 text-center font-bold text-indigo-700" colSpan="7">
-                    Transaction {index + 1}
+                  <th key={`fee-${index}`} className="border-b border-r bg-indigo-50 px-3 py-2 text-center font-bold text-indigo-700" colSpan="7">
+                    Fee Payment {index + 1}
+                  </th>
+                ))}
+                {Array.from({ length: maxDocTransactions }).map((_, index) => (
+                  <th key={`doc-${index}`} className="border-b border-r bg-violet-50 px-3 py-2 text-center font-bold text-violet-700" colSpan="8">
+                    Doc Payment {index + 1}
                   </th>
                 ))}
               </tr>
               <tr>
                 {Array.from({ length: maxTransactions }).flatMap((_, index) => (
-                  ['Amount Paid', 'Mode', 'UTR', 'Paid Date', 'Record Added Date', 'Verified Date', 'Paid To'].map(label => (
-                    <th key={`${index}-${label}`} className="border-b border-r bg-indigo-50 px-3 py-2 font-semibold text-indigo-700">{label}</th>
+                  ['Amount', 'Mode', 'UTR', 'Paid Date', 'Record Added Date', 'Verified Date', 'Paid To'].map(label => (
+                    <th key={`fee-${index}-${label}`} className="border-b border-r bg-indigo-50 px-3 py-2 font-semibold text-indigo-700">{label}</th>
+                  ))
+                ))}
+                {Array.from({ length: maxDocTransactions }).flatMap((_, index) => (
+                  ['Document', 'Amount', 'Mode', 'UTR', 'Paid Date', 'Verified Date', 'Status', 'Paid To'].map(label => (
+                    <th key={`doc-${index}-${label}`} className="border-b border-r bg-violet-50 px-3 py-2 font-semibold text-violet-700">{label}</th>
                   ))
                 ))}
               </tr>
@@ -325,26 +404,43 @@ export default function AccountLedgerPage() {
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={6 + (maxTransactions * 7)}>No students found</td>
+                  <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={10 + (maxTransactions * 7) + (maxDocTransactions * 8)}>No students found</td>
                 </tr>
               ) : filteredRows.map(row => (
                 <tr key={row.student?._id} className="hover:bg-slate-50">
                   <td className="sticky left-0 z-10 min-w-56 border-b border-r bg-white px-3 py-2 font-semibold text-slate-800">{row.student?.name || ''}</td>
                   <td className="min-w-40 border-b border-r px-3 py-2 font-mono text-emerald-700">{row.student?.enrollmentNumber || ''}</td>
                   <td className="min-w-48 border-b border-r px-3 py-2 font-medium text-slate-700">{row.student?.courseName || ''}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-2 text-right font-semibold">{fmt(row.totalAmount)}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{fmt(row.amountPaid)}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-2 text-right font-semibold text-amber-700">{fmt(row.amountDue)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold">{fmt(row.totalAmount)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{fmt(row.amountPaid)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-amber-700">{fmt(row.amountDue)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-violet-700">{fmt(row.docTotalAmount)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{fmt(row.docAmountPaid)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-amber-700">{fmt(row.docAmountDue)}</td>
+                  <td className="min-w-28 border-b border-r bg-slate-50 px-3 py-2 text-right font-bold text-slate-800">{fmt(Number(row.amountDue || 0) + Number(row.docAmountDue || 0))}</td>
                   {Array.from({ length: maxTransactions }).flatMap((_, index) => {
                     const tx = row.transactions?.[index];
                     return [
-                      <td key={`${index}-amount`} className="min-w-32 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{tx ? fmt(tx.amount) : ''}</td>,
-                      <td key={`${index}-mode`} className="min-w-32 border-b border-r px-3 py-2">{tx?.mode || ''}</td>,
-                      <td key={`${index}-utr`} className="min-w-40 border-b border-r px-3 py-2 font-mono">{tx?.utrRef || ''}</td>,
-                      <td key={`${index}-paid`} className="min-w-32 border-b border-r px-3 py-2">{fmtDate(tx?.paidAt)}</td>,
-                      <td key={`${index}-added`} className="min-w-32 border-b border-r px-3 py-2">{fmtDate(tx?.recordAddedAt)}</td>,
-                      <td key={`${index}-verified`} className="min-w-32 border-b border-r px-3 py-2">{fmtDate(tx?.verifiedAt)}</td>,
-                      <td key={`${index}-account`} className="min-w-64 border-b border-r px-3 py-2">{accountText(tx)}</td>,
+                      <td key={`fee-${index}-amount`} className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{tx ? fmt(tx.amount) : ''}</td>,
+                      <td key={`fee-${index}-mode`} className="min-w-28 border-b border-r px-3 py-2">{tx?.mode || ''}</td>,
+                      <td key={`fee-${index}-utr`} className="min-w-40 border-b border-r px-3 py-2 font-mono">{tx?.utrRef || ''}</td>,
+                      <td key={`fee-${index}-paid`} className="min-w-28 border-b border-r px-3 py-2">{fmtDate(tx?.paidAt)}</td>,
+                      <td key={`fee-${index}-added`} className="min-w-28 border-b border-r px-3 py-2">{fmtDate(tx?.recordAddedAt)}</td>,
+                      <td key={`fee-${index}-verified`} className="min-w-28 border-b border-r px-3 py-2">{fmtDate(tx?.verifiedAt)}</td>,
+                      <td key={`fee-${index}-account`} className="min-w-56 border-b border-r px-3 py-2">{accountText(tx)}</td>,
+                    ];
+                  })}
+                  {Array.from({ length: maxDocTransactions }).flatMap((_, index) => {
+                    const tx = row.docTransactions?.[index];
+                    return [
+                      <td key={`doc-${index}-name`} className="min-w-44 border-b border-r px-3 py-2 font-medium text-violet-800">{tx?.documentName || ''}{tx?.requestType ? <span className="ml-1 text-[10px] text-slate-400">({tx.requestType})</span> : null}</td>,
+                      <td key={`doc-${index}-amount`} className="min-w-28 border-b border-r px-3 py-2 text-right font-semibold text-emerald-700">{tx ? fmt(tx.amount) : ''}</td>,
+                      <td key={`doc-${index}-mode`} className="min-w-28 border-b border-r px-3 py-2">{tx?.mode || ''}</td>,
+                      <td key={`doc-${index}-utr`} className="min-w-40 border-b border-r px-3 py-2 font-mono">{tx?.utrRef || ''}</td>,
+                      <td key={`doc-${index}-paid`} className="min-w-28 border-b border-r px-3 py-2">{fmtDate(tx?.paidAt)}</td>,
+                      <td key={`doc-${index}-verified`} className="min-w-28 border-b border-r px-3 py-2">{fmtDate(tx?.verifiedAt)}</td>,
+                      <td key={`doc-${index}-status`} className="min-w-24 border-b border-r px-3 py-2">{tx ? (tx.verified ? <span className="font-semibold text-emerald-600">Verified</span> : <span className="font-semibold text-amber-600">Pending</span>) : ''}</td>,
+                      <td key={`doc-${index}-account`} className="min-w-56 border-b border-r px-3 py-2">{accountText(tx)}</td>,
                     ];
                   })}
                 </tr>

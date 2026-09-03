@@ -109,11 +109,29 @@ function centerAddress(center) {
 }
 
 function totalsFor(rows) {
-  return rows.reduce((acc, row) => ({
-    totalAmount: acc.totalAmount + Number(row.totalAmount || 0),
-    amountPaid: acc.amountPaid + Number(row.amountPaid || 0),
-    amountDue: acc.amountDue + Number(row.amountDue || 0),
-  }), { totalAmount: 0, amountPaid: 0, amountDue: 0 });
+  return rows.reduce((acc, row) => {
+    const feeTotal = Number(row.totalAmount || 0);
+    const feePaid = Number(row.amountPaid || 0);
+    const feeDue = Number(row.amountDue || 0);
+    const docTotal = Number(row.docTotalAmount || 0);
+    const docPaid = Number(row.docAmountPaid || 0);
+    const docDue = Number(row.docAmountDue || 0);
+    return {
+      totalAmount: acc.totalAmount + feeTotal,
+      amountPaid: acc.amountPaid + feePaid,
+      amountDue: acc.amountDue + feeDue,
+      docTotalAmount: acc.docTotalAmount + docTotal,
+      docAmountPaid: acc.docAmountPaid + docPaid,
+      docAmountDue: acc.docAmountDue + docDue,
+      grandTotalAmount: acc.grandTotalAmount + feeTotal + docTotal,
+      grandAmountPaid: acc.grandAmountPaid + feePaid + docPaid,
+      grandAmountDue: acc.grandAmountDue + feeDue + docDue,
+    };
+  }, {
+    totalAmount: 0, amountPaid: 0, amountDue: 0,
+    docTotalAmount: 0, docAmountPaid: 0, docAmountDue: 0,
+    grandTotalAmount: 0, grandAmountPaid: 0, grandAmountDue: 0,
+  });
 }
 
 function openInvoice(center, rows, rangeLabel = '') {
@@ -125,23 +143,57 @@ function openInvoice(center, rows, rangeLabel = '') {
   const totals = totalsFor(rows);
   const invoiceSubject = rows.length === 1 ? displayStudentName(rows[0]) : 'Students';
   const invoiceNo = `INV-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const hasDocCharges = Number(totals.docTotalAmount || 0) > 0 || rows.some(r => (r.documents || []).length > 0);
+
   const rowsHtml = rows.map((row, index) => {
-    const due = Number(row.amountDue || 0);
+    const feeTotal = Number(row.totalAmount || 0);
+    const feePaid = Number(row.amountPaid || 0);
+    const feeDue = Number(row.amountDue || 0);
+    const docTotal = Number(row.docTotalAmount || 0);
+    const docPaid = Number(row.docAmountPaid || 0);
+    const docDue = Number(row.docAmountDue || 0);
+    const grandTotal = feeTotal + docTotal;
+    const grandPaid = feePaid + docPaid;
+    const grandDue = feeDue + docDue;
+    const sub = [row.student?.enrollmentNumber, row.student?.courseName].filter(Boolean).join(' · ');
     return `
       <tr>
         <td>${index + 1}</td>
-        <td>
-          <strong>${text(displayStudentName(row))}</strong>
-        </td>
-        <td>${text(row.student?.enrollmentNumber || '-')}</td>
-        <td>${text(row.student?.courseName || '-')}</td>
-        <td class="num">${fmt(row.totalAmount)}</td>
-        <td class="num paid">${fmt(row.amountPaid)}</td>
-        <td class="num due">${fmt(row.amountDue)}</td>
-        <td>${due > 0 ? 'Due' : 'Paid'}</td>
+        <td><strong>${text(displayStudentName(row))}</strong>${sub ? `<span>${text(sub)}</span>` : ''}</td>
+        <td class="num">${fmt(feeTotal)}</td>
+        <td class="num">${fmt(docTotal)}</td>
+        <td class="num total">${fmt(grandTotal)}</td>
+        <td class="num paid">${fmt(grandPaid)}</td>
+        <td class="num due">${fmt(grandDue)}</td>
       </tr>
     `;
   }).join('');
+
+  const docDetailRows = rows.flatMap(row => (row.documents || []).map(doc => `
+      <tr>
+        <td>${text(displayStudentName(row))}</td>
+        <td>${text(doc.name || '-')}<span>${text(doc.requestType || 'Soft Copy')}</span></td>
+        <td class="num">${fmt(doc.chargeFee)}</td>
+        <td class="num paid">${fmt(doc.paidAmount)}</td>
+        <td class="num due">${fmt(doc.dueAmount)}</td>
+      </tr>
+    `)).join('');
+
+  const docDetailHtml = hasDocCharges && docDetailRows ? `
+          <h3 class="section-title">Document Charges — Detail</h3>
+          <table class="doc-detail">
+            <thead>
+              <tr>
+                <th style="width:30%">Student</th>
+                <th>Document</th>
+                <th class="num" style="width:16%">Charge</th>
+                <th class="num" style="width:16%">Paid</th>
+                <th class="num" style="width:16%">Due</th>
+              </tr>
+            </thead>
+            <tbody>${docDetailRows}</tbody>
+          </table>
+  ` : '';
 
   const win = window.open('', '_blank');
   if (!win) {
@@ -172,18 +224,22 @@ function openInvoice(center, rows, rangeLabel = '') {
           .invoice-chip { min-width: 220px; background: #fff; }
           .invoice-chip div { display: flex; justify-content: space-between; gap: 20px; padding: 4px 0; font-size: 12px; color: #475569; }
           .invoice-chip b { color: #0f172a; }
-          .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0 24px; }
-          .stat { border-radius: 8px; padding: 14px; border: 1px solid #dbe3ef; }
-          .stat span { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
-          .stat strong { font-size: 20px; }
-          .total strong { color: #1d4ed8; }
-          .paid strong { color: #047857; }
-          .due strong { color: #b45309; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
-          th { background: #eff6ff; color: #1e3a8a; text-align: left; padding: 10px; border: 1px solid #cbd5e1; }
-          td { padding: 10px; border: 1px solid #dbe3ef; vertical-align: top; }
-          td span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; }
+          .breakdown { width: 100%; border-collapse: collapse; margin: 18px 0 24px; font-size: 12px; table-layout: auto; }
+          .breakdown th { background: #eff6ff; color: #1e3a8a; padding: 9px 10px; border: 1px solid #cbd5e1; text-align: right; }
+          .breakdown th:first-child { text-align: left; }
+          .breakdown td { padding: 9px 10px; border: 1px solid #dbe3ef; text-align: right; font-weight: 700; }
+          .breakdown td:first-child { text-align: left; font-weight: 600; color: #475569; }
+          .breakdown tr.grand td { background: #eff6ff; color: #1d4ed8; font-size: 13px; }
+          .section-title { margin: 26px 0 0; font-size: 14px; color: #1e3a8a; }
+          .total { color: #1d4ed8; }
+          .paid { color: #047857; }
+          .due { color: #b45309; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 11px; table-layout: fixed; }
+          th { background: #eff6ff; color: #1e3a8a; text-align: left; padding: 7px 8px; border: 1px solid #cbd5e1; word-break: break-word; }
+          td { padding: 7px 8px; border: 1px solid #dbe3ef; vertical-align: top; word-break: break-word; }
+          td span { display: block; margin-top: 2px; color: #64748b; font-size: 10px; font-weight: 400; }
           .num { text-align: right; white-space: nowrap; font-weight: 700; }
+          th.num { text-align: right; }
           .foot { display: flex; justify-content: flex-end; margin-top: 42px; color: #0f172a; font-size: 12px; }
           .signature { width: 220px; border-top: 1px solid #94a3b8; padding-top: 10px; text-align: center; font-weight: 700; }
           .actions { position: sticky; top: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; background: rgba(244,247,251,.92); backdrop-filter: blur(8px); }
@@ -207,7 +263,7 @@ function openInvoice(center, rows, rangeLabel = '') {
           <section class="top">
             <div>
               <h1>Invoice</h1>
-              <div class="subject">Student fee summary for <strong>${text(invoiceSubject)}</strong></div>
+              <div class="subject">Fee &amp; document charge summary for <strong>${text(invoiceSubject)}</strong></div>
             </div>
             <div class="meta">
               <div><strong>Invoice No:</strong> ${text(invoiceNo)}</div>
@@ -226,31 +282,37 @@ function openInvoice(center, rows, rangeLabel = '') {
             <div class="box invoice-chip">
               <h2>Invoice Details</h2>
               <div><span>Total Students</span><b>${rows.length}</b></div>
-              <div><span>Status</span><b>${Number(totals.amountDue || 0) > 0 ? 'Due' : 'Paid'}</b></div>
+              <div><span>Status</span><b>${Number(totals.grandAmountDue || 0) > 0 ? 'Due' : 'Paid'}</b></div>
             </div>
           </section>
 
-          <section class="stats">
-            <div class="stat total"><span>Total Amount</span><strong>${fmt(totals.totalAmount)}</strong></div>
-            <div class="stat paid"><span>Amount Paid</span><strong>${fmt(totals.amountPaid)}</strong></div>
-            <div class="stat due"><span>Amount Due</span><strong>${fmt(totals.amountDue)}</strong></div>
-          </section>
+          <table class="breakdown">
+            <thead>
+              <tr><th>Summary</th><th>Total</th><th>Paid</th><th>Due</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Course Fee</td><td>${fmt(totals.totalAmount)}</td><td>${fmt(totals.amountPaid)}</td><td>${fmt(totals.amountDue)}</td></tr>
+              <tr><td>Document Charges</td><td>${fmt(totals.docTotalAmount)}</td><td>${fmt(totals.docAmountPaid)}</td><td>${fmt(totals.docAmountDue)}</td></tr>
+              <tr class="grand"><td>Grand Total</td><td>${fmt(totals.grandTotalAmount)}</td><td>${fmt(totals.grandAmountPaid)}</td><td>${fmt(totals.grandAmountDue)}</td></tr>
+            </tbody>
+          </table>
 
-          <table>
+          <h3 class="section-title">Student Summary</h3>
+          <table class="student-summary">
             <thead>
               <tr>
-                <th style="width:44px">#</th>
-                <th>Student Name</th>
-                <th>Enrollment No.</th>
-                <th>Course</th>
-                <th class="num">Total Amount</th>
-                <th class="num">Amount Paid</th>
-                <th class="num">Amount Due</th>
-                <th>Status</th>
+                <th style="width:26px">#</th>
+                <th>Student</th>
+                <th class="num" style="width:15%">Course Fee</th>
+                <th class="num" style="width:16%">Doc Charges</th>
+                <th class="num" style="width:15%">Grand Total</th>
+                <th class="num" style="width:14%">Paid</th>
+                <th class="num" style="width:15%">Balance Due</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
           </table>
+          ${docDetailHtml}
 
           <section class="foot">
             <div class="signature">Authorized Signatory</div>
@@ -335,16 +397,16 @@ function CenterList() {
                     <div className="font-bold">{center.studentCount || 0}</div>
                   </div>
                   <div className="rounded-lg bg-blue-50 px-3 py-2">
-                    <div className="text-xs text-blue-600">Total</div>
-                    <div className="truncate font-bold text-blue-700">{fmt(center.totalAmount)}</div>
+                    <div className="text-xs text-blue-600">Total (Fee + Docs)</div>
+                    <div className="truncate font-bold text-blue-700">{fmt(center.grandTotalAmount ?? center.totalAmount)}</div>
                   </div>
                   <div className="rounded-lg bg-emerald-50 px-3 py-2">
-                    <div className="text-xs text-emerald-600">Paid</div>
-                    <div className="truncate font-bold text-emerald-700">{fmt(center.paidAmount)}</div>
+                    <div className="text-xs text-emerald-600">Paid (Fee + Docs)</div>
+                    <div className="truncate font-bold text-emerald-700">{fmt(center.grandPaidAmount ?? center.paidAmount)}</div>
                   </div>
                   <div className="rounded-lg bg-amber-50 px-3 py-2">
-                    <div className="text-xs text-amber-600">Due</div>
-                    <div className="truncate font-bold text-amber-700">{fmt(center.dueAmount)}</div>
+                    <div className="text-xs text-amber-600">Due (Fee + Docs)</div>
+                    <div className="truncate font-bold text-amber-700">{fmt(center.grandDueAmount ?? center.dueAmount)}</div>
                   </div>
                 </div>
                 <ChevronRight className="hidden h-4 w-4 shrink-0 text-slate-300 md:block" />
@@ -526,28 +588,46 @@ function CenterInvoice() {
 
       <div className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border bg-white shadow-sm">
         <div className="max-h-[62vh] w-full min-w-0 max-w-full overflow-auto">
-          <table className="w-full min-w-[1180px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[1720px] border-collapse text-left text-sm">
             <thead className="sticky top-0 z-20 bg-slate-100 text-slate-700">
               <tr>
-                <th className="w-12 border-b border-r px-3 py-3">
+                <th className="w-12 border-b border-r px-3 py-3" rowSpan="2">
                   <input type="checkbox" checked={allVisibleSelected} onChange={toggleVisible} />
                 </th>
-                <th className="border-b border-r px-3 py-3">Student Name</th>
-                <th className="border-b border-r px-3 py-3">Enrollment Number</th>
-                <th className="border-b border-r px-3 py-3">Course</th>
-                <th className="border-b border-r px-3 py-3 text-right">Total Amount</th>
-                <th className="border-b border-r px-3 py-3 text-right">Amount Paid</th>
-                <th className="border-b border-r px-3 py-3 text-right">Amount Due</th>
-                <th className="border-b border-r px-3 py-3">{dateBasis === 'submittedAt' ? 'Submitted Date' : 'Added Date'}</th>
-                <th className="border-b px-3 py-3 text-center">Invoice</th>
+                <th className="border-b border-r px-3 py-3" rowSpan="2">Student Name</th>
+                <th className="border-b border-r px-3 py-3" rowSpan="2">Enrollment Number</th>
+                <th className="border-b border-r px-3 py-3" rowSpan="2">Course</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-center text-indigo-700" colSpan="3">Course Fee</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-center text-violet-700" colSpan="3">Document Charges</th>
+                <th className="border-b border-r bg-slate-200 px-3 py-2 text-center text-slate-800" colSpan="3">Grand Total</th>
+                <th className="border-b border-r px-3 py-3" rowSpan="2">{dateBasis === 'submittedAt' ? 'Submitted Date' : 'Added Date'}</th>
+                <th className="border-b px-3 py-3 text-center" rowSpan="2">Invoice</th>
+              </tr>
+              <tr>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-indigo-700">Total</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-emerald-700">Paid</th>
+                <th className="border-b border-r bg-indigo-50 px-3 py-2 text-right text-amber-700">Due</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-violet-700">Total</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-emerald-700">Paid</th>
+                <th className="border-b border-r bg-violet-50 px-3 py-2 text-right text-amber-700">Due</th>
+                <th className="border-b border-r bg-slate-100 px-3 py-2 text-right text-slate-800">Total</th>
+                <th className="border-b border-r bg-slate-100 px-3 py-2 text-right text-emerald-700">Paid</th>
+                <th className="border-b border-r bg-slate-100 px-3 py-2 text-right text-amber-700">Due</th>
               </tr>
             </thead>
             <tbody>
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={9}>No students found</td>
+                  <td className="px-4 py-10 text-center text-sm text-muted-foreground" colSpan={15}>No students found</td>
                 </tr>
-              ) : filteredRows.map(row => (
+              ) : filteredRows.map(row => {
+                const feeTotal = Number(row.totalAmount || 0);
+                const feePaid = Number(row.amountPaid || 0);
+                const feeDue = Number(row.amountDue || 0);
+                const docTotal = Number(row.docTotalAmount || 0);
+                const docPaid = Number(row.docAmountPaid || 0);
+                const docDue = Number(row.docAmountDue || 0);
+                return (
                 <tr key={row.student?._id} className="hover:bg-slate-50">
                   <td className="border-b border-r px-3 py-3">
                     <input type="checkbox" checked={selected.has(row.student?._id)} onChange={() => toggleStudent(row.student?._id)} />
@@ -557,9 +637,15 @@ function CenterInvoice() {
                   </td>
                   <td className="min-w-40 border-b border-r px-3 py-3 font-mono text-emerald-700">{row.student?.enrollmentNumber || ''}</td>
                   <td className="min-w-48 border-b border-r px-3 py-3 font-medium text-slate-700">{row.student?.courseName || ''}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-3 text-right font-semibold">{fmt(row.totalAmount)}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-3 text-right font-semibold text-emerald-700">{fmt(row.amountPaid)}</td>
-                  <td className="min-w-32 border-b border-r px-3 py-3 text-right font-semibold text-amber-700">{fmt(row.amountDue)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-slate-800">{fmt(feeTotal)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-emerald-700">{fmt(feePaid)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-amber-700">{fmt(feeDue)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-slate-800">{fmt(docTotal)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-emerald-700">{fmt(docPaid)}</td>
+                  <td className="min-w-28 border-b border-r px-3 py-3 text-right font-semibold text-amber-700">{fmt(docDue)}</td>
+                  <td className="min-w-28 border-b border-r bg-slate-50 px-3 py-3 text-right font-bold text-slate-900">{fmt(feeTotal + docTotal)}</td>
+                  <td className="min-w-28 border-b border-r bg-slate-50 px-3 py-3 text-right font-bold text-emerald-800">{fmt(feePaid + docPaid)}</td>
+                  <td className="min-w-28 border-b border-r bg-slate-50 px-3 py-3 text-right font-bold text-amber-800">{fmt(feeDue + docDue)}</td>
                   <td className="min-w-32 border-b border-r px-3 py-3 text-slate-600">{fmtDate(dateValue(row, dateBasis)) || '-'}</td>
                   <td className="min-w-36 border-b px-3 py-3 text-center">
                     <Button size="sm" variant="outline" onClick={() => openInvoice(data?.center, [row], activeRangeLabel)}>
@@ -568,7 +654,8 @@ function CenterInvoice() {
                     </Button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -585,19 +672,37 @@ function CenterInvoice() {
             {selectedRows.length ? 'Generate Selected Invoice' : 'Generate All Invoice'}
           </Button>
         </div>
-        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-          <div className="min-w-0 rounded-lg border bg-blue-50 px-4 py-3">
-            <div className="text-xs font-medium text-blue-600">Total Amount</div>
-            <div className="truncate text-lg font-bold text-blue-700">{fmt(footerTotals.totalAmount)}</div>
-          </div>
-          <div className="min-w-0 rounded-lg border bg-emerald-50 px-4 py-3">
-            <div className="text-xs font-medium text-emerald-600">Amount Paid</div>
-            <div className="truncate text-lg font-bold text-emerald-700">{fmt(footerTotals.amountPaid)}</div>
-          </div>
-          <div className="min-w-0 rounded-lg border bg-amber-50 px-4 py-3">
-            <div className="text-xs font-medium text-amber-600">Amount Due</div>
-            <div className="truncate text-lg font-bold text-amber-700">{fmt(footerTotals.amountDue)}</div>
-          </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[420px] border-collapse text-sm">
+            <thead>
+              <tr className="text-xs text-muted-foreground">
+                <th className="px-3 py-2 text-left font-medium">Summary</th>
+                <th className="px-3 py-2 text-right font-medium">Total</th>
+                <th className="px-3 py-2 text-right font-medium">Paid</th>
+                <th className="px-3 py-2 text-right font-medium">Due</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-t">
+                <td className="px-3 py-2 font-medium text-indigo-600">Course Fee</td>
+                <td className="px-3 py-2 text-right font-semibold">{fmt(footerTotals.totalAmount)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmt(footerTotals.amountPaid)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-amber-700">{fmt(footerTotals.amountDue)}</td>
+              </tr>
+              <tr className="border-t">
+                <td className="px-3 py-2 font-medium text-violet-600">Document Charges</td>
+                <td className="px-3 py-2 text-right font-semibold">{fmt(footerTotals.docTotalAmount)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-emerald-700">{fmt(footerTotals.docAmountPaid)}</td>
+                <td className="px-3 py-2 text-right font-semibold text-amber-700">{fmt(footerTotals.docAmountDue)}</td>
+              </tr>
+              <tr className="border-t bg-slate-50">
+                <td className="px-3 py-2 font-bold text-slate-800">Grand Total</td>
+                <td className="px-3 py-2 text-right font-bold text-slate-900">{fmt(footerTotals.grandTotalAmount)}</td>
+                <td className="px-3 py-2 text-right font-bold text-emerald-800">{fmt(footerTotals.grandAmountPaid)}</td>
+                <td className="px-3 py-2 text-right font-bold text-amber-800">{fmt(footerTotals.grandAmountDue)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

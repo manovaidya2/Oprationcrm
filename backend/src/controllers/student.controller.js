@@ -30,6 +30,39 @@ function normalizeSubmissionDocs(docs = []) {
   return [{ ...first, name: SUBMISSION_DOC_NAME }];
 }
 
+function parseJsonBodyField(value, fallback = {}) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function cleanString(value) {
+  return String(value || '').trim();
+}
+
+function toAmount(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.max(0, n) : 0;
+}
+
+function actionDate(value) {
+  const d = value ? new Date(value) : new Date();
+  return Number.isNaN(d.getTime()) ? new Date() : d;
+}
+
+function buildBackfillHistory(finalStatus, user, note) {
+  const now = new Date();
+  const order = ['Draft', 'Submitted', 'Counselor_Approved', 'Sent_To_University', 'Enrolled'];
+  const targetIndex = Math.max(order.indexOf(finalStatus), order.indexOf('Submitted'));
+  return order.slice(0, targetIndex + 1).map(status => ({
+    status,
+    note: status === finalStatus ? (note || 'Existing admission added by Admin') : 'Backfilled by Admin',
+    changedBy: user._id,
+    role: user.role,
+    at: now,
+  }));
+}
+
 // ── Push a status history entry ──────────────────────────────
 async function pushHistory(studentId, status, user, note = '') {
   await Student.findByIdAndUpdate(studentId, {
@@ -291,6 +324,189 @@ exports.create = asyncHandler(async (req, res) => {
   res.status(201).json(populated);
 });
 
+// POST /api/students/existing-admission - Admin backfills an already-admitted student
+exports.createExistingAdmission = asyncHandler(async (req, res) => {
+  const data = parseJsonBodyField(req.body.details, req.body);
+  const studentData = data.student || {};
+  const feeData = data.fee || {};
+  const txData = data.transaction || {};
+  const docsData = Array.isArray(data.documents) ? data.documents : [];
+
+  const name = cleanString(studentData.name);
+  const centerId = cleanString(studentData.center);
+  if (!name || !centerId) {
+    const e = new Error('Student name and center are required'); e.status = 400; throw e;
+  }
+
+  const center = await Center.findById(centerId).populate('assignedCounselor', 'name');
+  if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+
+  let counselorId = cleanString(studentData.counselor) || cleanString(center.assignedCounselor?._id || center.assignedCounselor);
+  if (!counselorId) {
+    const linked = await Counselor.findOne({ centers: center._id, isActive: true }).select('_id').lean();
+    counselorId = cleanString(linked?._id);
+  }
+  if (!counselorId) {
+    const e = new Error('Counselor is required. Assign a counselor to this center first.'); e.status = 400; throw e;
+  }
+  const counselor = await Counselor.findById(counselorId);
+  if (!counselor) { const e = new Error('Counselor not found'); e.status = 404; throw e; }
+
+  let universityId = cleanString(studentData.university || studentData.universityId);
+  let university = null;
+  if (universityId) {
+    university = await University.findById(universityId);
+    if (!university) { const e = new Error('University not found'); e.status = 404; throw e; }
+  }
+
+  const allowedFinalStatuses = ['Submitted', 'Counselor_Approved', 'Sent_To_University', 'Enrolled'];
+  const finalStatus = allowedFinalStatuses.includes(studentData.applicationStatus)
+    ? studentData.applicationStatus
+    : (cleanString(studentData.enrollmentNumber) ? 'Enrolled' : 'Sent_To_University');
+  const enrollmentNumber = cleanString(studentData.enrollmentNumber);
+  if (finalStatus === 'Enrolled' && !enrollmentNumber) {
+    const e = new Error('Enrollment number is required when final status is Enrolled'); e.status = 400; throw e;
+  }
+
+  const student = await Student.create({
+    name,
+    fatherName: cleanString(studentData.fatherName),
+    motherName: cleanString(studentData.motherName),
+    dob: studentData.dob ? actionDate(studentData.dob) : undefined,
+    gender: ['Male', 'Female', 'Other'].includes(studentData.gender) ? studentData.gender : undefined,
+    phone: cleanString(studentData.phone),
+    email: cleanString(studentData.email),
+    address: cleanString(studentData.address),
+    aadharNumber: cleanString(studentData.aadharNumber),
+    enrollmentNumber,
+    enrollmentNumberChecked: Boolean(studentData.enrollmentNumberChecked),
+    enrollmentNumberCheckedAt: studentData.enrollmentNumberChecked ? new Date() : undefined,
+    enrollmentNumberCheckedBy: studentData.enrollmentNumberChecked ? req.user._id : undefined,
+    coreLocked: Boolean(enrollmentNumber),
+    courseName: cleanString(studentData.courseName),
+    courseYear: cleanString(studentData.courseYear),
+    university: university?._id,
+    universityName: university?.name || cleanString(studentData.universityName),
+    tenth_percent: cleanString(studentData.tenth_percent),
+    tenth_year: cleanString(studentData.tenth_year),
+    tenth_board: cleanString(studentData.tenth_board),
+    twelfth_percent: cleanString(studentData.twelfth_percent),
+    twelfth_year: cleanString(studentData.twelfth_year),
+    twelfth_board: cleanString(studentData.twelfth_board),
+    age: cleanString(studentData.age),
+    center: center._id,
+    counselor: counselor._id,
+    applicationStatus: finalStatus,
+    createdBy: req.user._id,
+    lastUpdatedBy: req.user._id,
+    lastUpdatedAt: new Date(),
+    statusHistory: buildBackfillHistory(finalStatus, req.user, cleanString(studentData.note)),
+  });
+
+    const totalFee = toAmount(feeData.totalFee);
+    const discount = toAmount(feeData.discount);
+    const paidAmount = toAmount(txData.amount);
+    const paymentPayload = {
+      student: student._id,
+      center: center._id,
+      totalFee,
+      discount,
+      notes: cleanString(feeData.notes),
+      lastUpdatedBy: req.user._id,
+      lastUpdatedAt: new Date(),
+      transactions: [],
+    };
+    if (paidAmount > 0) {
+      const mode = txData.mode === 'Bank Transfer' ? 'Bank Transfer' : 'UPI';
+      paymentPayload.transactions.push({
+        amount: paidAmount,
+        mode,
+        upiId: cleanString(txData.upiId),
+        utrRef: cleanString(txData.utrRef),
+        bankName: cleanString(txData.bankName),
+        accountHolder: cleanString(txData.accountHolder),
+        accountNumber: cleanString(txData.accountNumber),
+        ifscCode: cleanString(txData.ifscCode),
+        note: cleanString(txData.note) || 'Existing admission payment added by Admin',
+        paidAt: actionDate(txData.paidAt),
+        recordedBy: req.user._id,
+        verifiedBy: req.user._id,
+        verifiedAt: actionDate(txData.verifiedAt),
+        type: 'Fee',
+        verificationStatus: 'verified',
+        verificationNote: 'Backfilled and verified by Admin',
+        paidToAccount: cleanString(txData.paidToAccount) || undefined,
+        paidToAccountLabel: cleanString(txData.paidToAccountLabel),
+      });
+    }
+  await Payment.create(paymentPayload);
+
+    const filesByIndex = new Map();
+    (req.files || []).forEach(file => {
+      const match = String(file.fieldname || '').match(/^documentFile_([0-9]+)$/);
+      if (match) filesByIndex.set(Number(match[1]), file);
+    });
+
+    const docsToCreate = docsData
+      .map((doc, index) => ({ doc, index, name: cleanString(doc.name) }))
+      .filter(row => row.name)
+      .map(({ doc, index, name }) => {
+        const file = filesByIndex.get(index);
+        const requestedAt = actionDate(doc.requestedAt);
+        const status = ['Requested', 'Fee_Approved', 'Sent_To_University', 'Dispatch_Received', 'Scanned', 'Payment_Verified', 'Dispatched', 'Delivered'].includes(doc.status)
+          ? doc.status
+          : 'Requested';
+        const history = [{ status, changedBy: req.user._id, at: requestedAt, note: 'Existing document added by Admin' }];
+        return {
+          student: student._id,
+          center: center._id,
+          counselor: counselor._id,
+          university: university?._id,
+          name,
+          type: cleanString(doc.type),
+          note: cleanString(doc.note),
+          origin: doc.origin === 'Inventory' ? 'Inventory' : 'Request',
+          requestType: doc.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy',
+          fileUrl: file ? `/uploads/${file.filename}` : cleanString(doc.fileUrl),
+          sizeKb: file ? Math.round(file.size / 1024) : 0,
+          chargeFee: toAmount(doc.chargeFee),
+          uploadedBy: req.user._id,
+          verifiedBy: req.user._id,
+          status,
+          statusHistory: history,
+        };
+      });
+  if (docsToCreate.length > 0) await StudentDoc.create(docsToCreate);
+
+  await Counselor.updateOne({ _id: counselor._id }, { $addToSet: { centers: center._id } });
+  if (!center.assignedCounselor) {
+    await Center.updateOne({ _id: center._id }, { $set: { assignedCounselor: counselor._id } });
+  }
+
+  const populated = await Student.findById(student._id)
+    .populate('center', 'name city')
+    .populate('counselor', 'name avatarColor')
+    .populate('university', 'name shortName avatarColor')
+    .populate('createdBy', 'name role')
+    .populate('lastUpdatedBy', 'name role');
+
+  await audit('existing_admission_created', 'Student', populated._id, req.user, {
+    status: populated.applicationStatus,
+    center: populated.center?._id || populated.center,
+  }, `Existing admission added for ${populated.name}`);
+
+  const centerUser = await User.findOne({ centerId: populated.center?._id || populated.center, role: 'Center', isActive: true });
+  if (centerUser) {
+    await notify(centerUser._id, {
+      message: `Existing admission added by Admin: ${populated.name}${populated.enrollmentNumber ? ` (${populated.enrollmentNumber})` : ''}`,
+      type: 'general',
+      role: 'Center',
+      studentId: populated._id,
+    });
+  }
+  res.status(201).json(populated);
+});
+
 // PUT /api/students/:id
 exports.update = asyncHandler(async (req, res) => {
   const student = await Student.findById(req.params.id);
@@ -308,8 +524,10 @@ exports.update = asyncHandler(async (req, res) => {
     ['name','fatherName','motherName','dob','aadharNumber'].forEach(f => delete req.body[f]);
   }
   if (centerOriginated) { delete req.body.counselor; delete req.body.center; }
-  delete req.body.applicationStatus;
-  delete req.body.coreLocked;
+  if (req.user.role !== 'Admin') {
+    delete req.body.applicationStatus;
+    delete req.body.coreLocked;
+  }
   // Only Admin can directly update enrollmentNumber (to correct mistakes)
   if (req.user.role !== 'Admin') delete req.body.enrollmentNumber;
   if (req.body.gender === '') delete req.body.gender;
@@ -319,8 +537,23 @@ exports.update = asyncHandler(async (req, res) => {
     if (uni) { req.body.university = uni._id; req.body.universityName = uni.name; }
     delete req.body.universityId;
   }
+  if (req.user.role === 'Admin' && req.body.university === '') {
+    req.body.university = undefined;
+    req.body.universityName = '';
+  }
 
   const updateData = { ...req.body };
+  if (req.user.role === 'Admin' && updateData.university) {
+    const uni = await University.findById(updateData.university);
+    if (uni) updateData.universityName = uni.name;
+  }
+  if (req.user.role === 'Admin') {
+    updateData.lastUpdatedBy = req.user._id;
+    updateData.lastUpdatedAt = new Date();
+    if (updateData.applicationStatus === 'Enrolled' && updateData.enrollmentNumber) {
+      updateData.coreLocked = true;
+    }
+  }
   if (req.user.role === 'ViewerCounselor' && centerOriginated) {
     updateData.lastUpdatedBy = req.user._id;
     updateData.lastUpdatedAt = new Date();
@@ -351,9 +584,15 @@ exports.update = asyncHandler(async (req, res) => {
     updateData.enrollmentNumber !== undefined &&
     String(updateData.enrollmentNumber || '').trim() !== String(student.enrollmentNumber || '').trim()
   ) {
-    updateData.enrollmentNumberChecked = false;
-    updateData.enrollmentNumberCheckedAt = undefined;
-    updateData.enrollmentNumberCheckedBy = undefined;
+    const checkedByAdmin = req.user.role === 'Admin' && (req.body.enrollmentNumberChecked === true || req.body.enrollmentNumberChecked === 'true');
+    updateData.enrollmentNumberChecked = checkedByAdmin;
+    updateData.enrollmentNumberCheckedAt = checkedByAdmin ? new Date() : undefined;
+    updateData.enrollmentNumberCheckedBy = checkedByAdmin ? req.user._id : undefined;
+  } else if (req.user.role === 'Admin' && updateData.enrollmentNumberChecked !== undefined) {
+    const checked = updateData.enrollmentNumberChecked === true || updateData.enrollmentNumberChecked === 'true';
+    updateData.enrollmentNumberChecked = checked;
+    updateData.enrollmentNumberCheckedAt = checked ? (student.enrollmentNumberCheckedAt || new Date()) : undefined;
+    updateData.enrollmentNumberCheckedBy = checked ? (student.enrollmentNumberCheckedBy || req.user._id) : undefined;
   }
 
   const updated = await Student.findByIdAndUpdate(req.params.id, updateData, { new: true })
@@ -361,6 +600,22 @@ exports.update = asyncHandler(async (req, res) => {
     .populate('createdBy', 'name role')
     .populate('lastUpdatedBy', 'name role')
     .populate('statusHistory.changedBy', 'name role');
+  if (req.user.role === 'Admin') {
+    const relatedSet = {};
+    if (updateData.center) relatedSet.center = updateData.center;
+    if (updateData.counselor) relatedSet.counselor = updateData.counselor;
+    if (updateData.university !== undefined) relatedSet.university = updateData.university || undefined;
+    if (Object.keys(relatedSet).length > 0) {
+      if (relatedSet.center) await Payment.updateOne({ student: student._id }, { $set: { center: relatedSet.center } });
+      await StudentDoc.updateMany({ student: student._id }, { $set: relatedSet });
+      if (relatedSet.counselor && relatedSet.center) {
+        await Counselor.updateOne({ _id: relatedSet.counselor }, { $addToSet: { centers: relatedSet.center } });
+      }
+    }
+    if (updateData.applicationStatus && updateData.applicationStatus !== student.applicationStatus) {
+      await pushHistory(student._id, updateData.applicationStatus, req.user, 'Status updated by Admin');
+    }
+  }
   await audit('student_updated', 'Student', student._id, req.user, {}, `Student ${student.name} updated`);
   res.json(updated);
 });

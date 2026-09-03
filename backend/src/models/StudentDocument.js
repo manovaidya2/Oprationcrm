@@ -22,7 +22,7 @@ const docPaymentSchema = new mongoose.Schema({
   paidToAccount:      { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel: { type: String, trim: true },
   paymentScreenshot:  { type: String, trim: true },
-}, { _id: true });
+}, { _id: true, timestamps: true });
 
 const historyEntrySchema = new mongoose.Schema({
   status:    { type: String, required: true },

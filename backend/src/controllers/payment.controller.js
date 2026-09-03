@@ -651,7 +651,9 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   if (!payment) { const e = new Error('Set up fee structure first'); e.status = 400; throw e; }
 
   const needsVerification = centerOriginated && (type || 'Fee') === 'Fee';
-  const verificationStatus = needsVerification ? 'pending_counselor' : 'not_required';
+  const verificationStatus = req.user.role === 'Admin' && (type || 'Fee') === 'Fee'
+    ? 'verified'
+    : needsVerification ? 'pending_counselor' : 'not_required';
 
   payment.transactions.push({
     amount: Number(amount),
@@ -665,6 +667,8 @@ exports.addTransaction = asyncHandler(async (req, res) => {
     note: note || '',
     paidAt: paidAt ? new Date(paidAt) : new Date(),
     recordedBy: req.user._id,
+    verifiedBy: verificationStatus === 'verified' ? req.user._id : undefined,
+    verifiedAt: verificationStatus === 'verified' ? new Date() : undefined,
     lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
     lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
     type: type || 'Fee',
@@ -716,7 +720,7 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
     const e = new Error('Cannot edit a verified payment'); e.status = 403; throw e;
   }
 
-  const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt','paidToAccount'];
+  const fields = ['amount','mode','upiId','utrRef','bankName','accountHolder','accountNumber','ifscCode','note','paidAt','paidToAccount','paidToAccountLabel'];
   fields.forEach(f => {
     if (req.body[f] !== undefined) {
       tx[f] = f === 'amount' ? Number(req.body[f]) : f === 'paidAt' ? new Date(req.body[f]) : req.body[f];
@@ -726,6 +730,18 @@ exports.updateTransaction = asyncHandler(async (req, res) => {
   // Admin can also change verification status directly
   if (req.user.role === 'Admin' && req.body.verificationStatus !== undefined) {
     tx.verificationStatus = req.body.verificationStatus;
+    if (tx.verificationStatus === 'verified') {
+      tx.verifiedBy = req.user._id;
+      tx.verifiedAt = req.body.verifiedAt ? new Date(req.body.verifiedAt) : (tx.verifiedAt || new Date());
+      tx.verificationNote = req.body.verificationNote || tx.verificationNote || 'Verified by Admin';
+    } else if (tx.verificationStatus === 'rejected') {
+      tx.verifiedBy = req.user._id;
+      tx.verifiedAt = req.body.verifiedAt ? new Date(req.body.verifiedAt) : (tx.verifiedAt || new Date());
+      tx.verificationNote = req.body.verificationNote || tx.verificationNote || 'Rejected by Admin';
+    }
+  }
+  if (req.user.role === 'Admin' && req.body.verifiedAt !== undefined && tx.verificationStatus === 'verified') {
+    tx.verifiedAt = new Date(req.body.verifiedAt);
   }
 
   if (req.file) tx.paymentScreenshot = `/uploads/${req.file.filename}`;
