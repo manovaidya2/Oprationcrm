@@ -24,10 +24,14 @@ import { useState, useEffect, useCallback, useRef } from 'react';
  * @param {object} opts
  * @param {number}  [opts.limit=20]
  * @param {boolean} [opts.enabled=true]
+ * @param {boolean} [opts.prefetch=true] — when false, only the visited page is fetched
+ *                                          (no background sweep of every page). Use for
+ *                                          very large lists where preloading all pages
+ *                                          would flood the server.
  * @param {any[]}   [opts.deps=[]]  — changing these clears the cache, cancels any in-flight
  *                                    background prefetch, and restarts from page 1.
  */
-export function usePagedFetch(fetchFn, { limit = 20, enabled = true, deps = [] } = {}) {
+export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = true, deps = [] } = {}) {
   const [page, setPage]         = useState(1);
   const [items, setItems]       = useState([]);
   const [total, setTotal]       = useState(0);
@@ -108,7 +112,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, deps = [] }
     (async () => {
       await loadPage(page);
       // Only kick off the background sweep once, right after page 1's own load
-      if (page === 1) {
+      if (prefetch && page === 1) {
         const cached = cacheRef.current.get(1);
         if (cached) prefetchRest(cached.pages, myGen);
       }

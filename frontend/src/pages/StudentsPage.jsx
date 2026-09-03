@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLazyList } from '@/lib/useLazyList';
+import { usePagedFetch } from '@/lib/usePagedFetch';
+import { PagerBar } from '@/components/PagerBar';
 import { useNavigate } from 'react-router-dom';
 import { Search, Plus, Loader2, GraduationCap, ChevronRight, Download, X, CheckSquare, Square, Trash2, ArrowRightLeft, CheckCircle2, Upload, FileText } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -89,6 +90,7 @@ export default function StudentsPage() {
   const [existingOpen, setExistingOpen] = useState(false);
   const [existingSaving, setExistingSaving] = useState(false);
   const [existingForm, setExistingForm] = useState(() => emptyExistingForm());
+  const [existingCenterSearch, setExistingCenterSearch] = useState('');
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteStudent, setDeleteStudent] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -153,8 +155,9 @@ export default function StudentsPage() {
     return studentsApi.getAll(params);
   }, [search, statusF, centerF]);
 
-  const { items: students, setItems: setStudents, loading, bgLoading, reload: load } =
-    useLazyList(fetchStudentsPage, { limit: 30, deps: [search, statusF, centerF] });
+  const PAGE_SIZE = 40;
+  const { items: students, total: studentsTotal, page, setPage, pages, loading, reload: load } =
+    usePagedFetch(fetchStudentsPage, { limit: PAGE_SIZE, prefetch: false, deps: [search, statusF, centerF] });
 
   useEffect(() => {
     Promise.all([
@@ -192,11 +195,23 @@ export default function StudentsPage() {
 
   // ── CSV Export ─────────────────────────────────────────────
   async function doExportCSV() {
-    const toExport = students.filter(s => selected.size === 0 || selected.has(s._id));
-    if (toExport.length === 0) { toast.error('No students to export'); return; }
-
     setCsvLoading(true);
     try {
+      // Selected rows come from the current page; "export all" pulls the full
+      // filtered list from the server (the on-screen list is paginated).
+      let toExport;
+      if (selected.size > 0) {
+        toExport = students.filter(s => selected.has(s._id));
+      } else {
+        const params = {};
+        if (statusF && statusF !== 'all') params.status   = statusF;
+        if (centerF && centerF !== 'all') params.centerId = centerF;
+        if (search)                        params.search   = search;
+        const all = await studentsApi.getAll(params);
+        toExport = Array.isArray(all) ? all : (all?.students || []);
+      }
+      if (toExport.length === 0) { toast.error('No students to export'); setCsvLoading(false); return; }
+
       const enriched = await Promise.all(toExport.map(async s => {
         let pay = null, docs = [];
         try { pay  = await paymentsApi.get(s._id); }  catch {}
@@ -386,6 +401,7 @@ export default function StudentsPage() {
 
   function openExistingAdmission() {
     setExistingForm(emptyExistingForm());
+    setExistingCenterSearch('');
     setExistingOpen(true);
   }
 
@@ -426,10 +442,10 @@ export default function StudentsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold flex items-center gap-2">
-          Students ({students.length})
-          {bgLoading && (
+          Students ({studentsTotal})
+          {loading && (
             <span className="flex items-center gap-1.5 text-xs font-normal text-slate-400">
-              <Loader2 className="h-3 w-3 animate-spin"/>Loading more…
+              <Loader2 className="h-3 w-3 animate-spin"/>Loading…
             </span>
           )}
           {someSelected && <span className="ml-2 text-sm font-normal text-indigo-600">{selected.size} selected</span>}
@@ -481,12 +497,12 @@ export default function StudentsPage() {
             {allSelected
               ? <CheckSquare className="h-4 w-4 text-indigo-600"/>
               : <Square className="h-4 w-4"/>}
-            {allSelected ? 'Deselect All' : 'Select All'}
+            {allSelected ? 'Deselect page' : 'Select page'}
           </button>
           {someSelected && (
             <>
               <span className="text-xs text-slate-400">|</span>
-              <span className="text-xs text-slate-500">{selected.size} of {students.length} selected for CSV</span>
+              <span className="text-xs text-slate-500">{selected.size} of {students.length} on this page selected for CSV</span>
               <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-slate-400 hover:text-red-500 flex items-center gap-1">
                 <X className="h-3 w-3"/>Clear
               </button>
@@ -567,6 +583,8 @@ export default function StudentsPage() {
         </div>
       )}
 
+      <PagerBar page={page} pages={pages} total={studentsTotal} loading={loading} onPage={setPage} />
+
       {/* ── CSV Export Dialog ────────────────────────────────── */}
       <Dialog open={csvOpen} onOpenChange={v => { setCsvOpen(v); if (!v) { setDateFrom(''); setDateTo(''); } }}>
         <DialogContent className="max-w-md">
@@ -581,7 +599,7 @@ export default function StudentsPage() {
               <div className="text-slate-500">
                 {selected.size > 0
                   ? <span className="text-indigo-600 font-semibold">{selected.size} selected student{selected.size > 1 ? 's' : ''}</span>
-                  : <span>All <b>{students.length}</b> students (current filters)</span>}
+                  : <span>All <b>{studentsTotal}</b> students (current filters)</span>}
               </div>
               {centerF !== 'all' && <div className="text-xs text-slate-400">Center: {centers.find(c=>c._id===centerF)?.name}</div>}
               {statusF !== 'all' && <div className="text-xs text-slate-400">Status: {STATUS_LABELS[statusF]}</div>}
@@ -746,13 +764,36 @@ export default function StudentsPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
               <div>
                 <Label>Center *</Label>
+                <div className="relative mt-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    className="h-9 pl-8"
+                    placeholder="Search center, city, counselor..."
+                    value={existingCenterSearch}
+                    onChange={e => setExistingCenterSearch(e.target.value)}
+                  />
+                </div>
                 <Select value={existingForm.student.center} onValueChange={v => {
                   const c = centers.find(row => row._id === v);
                   updateExisting('student', 'center', v);
                   updateExisting('student', 'counselor', c?.assignedCounselor?._id || c?.assignedCounselor || '');
                 }}>
-                  <SelectTrigger><SelectValue placeholder="Select center" /></SelectTrigger>
-                  <SelectContent>{centers.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
+                  <SelectTrigger className="mt-2"><SelectValue placeholder="Select center" /></SelectTrigger>
+                  <SelectContent>
+                    {(() => {
+                      const q = existingCenterSearch.trim().toLowerCase();
+                      const matched = centers.filter(c => !q || [c.name, c.organisationName, c.city, c.state, c.assignedCounselor?.name]
+                        .some(v => String(v || '').toLowerCase().includes(q)));
+                      if (matched.length === 0) {
+                        return <div className="px-2 py-3 text-center text-xs text-muted-foreground">No centers found</div>;
+                      }
+                      return matched.map(c => (
+                        <SelectItem key={c._id} value={c._id}>
+                          {c.name}{c.city ? ` · ${c.city}` : ''}
+                        </SelectItem>
+                      ));
+                    })()}
+                  </SelectContent>
                 </Select>
               </div>
               <div>
