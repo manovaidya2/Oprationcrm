@@ -58,7 +58,7 @@ exports.listCenters = asyncHandler(async (req, res) => {
 
   const centers = await Center.find(filter)
     .populate('assignedCounselor', 'name')
-    .populate('allowedUniversities', 'name shortName avatarColor')
+    .populate('allowedUniversities', 'name shortName avatarColor isActive')
     .sort('-createdAt').lean();
 
   // BUG FIX: Some centers may have assignedCounselor as null (old data).
@@ -105,7 +105,7 @@ exports.listCenters = asyncHandler(async (req, res) => {
 exports.getCenter = asyncHandler(async (req, res) => {
   const c = await Center.findById(req.params.id)
     .populate('assignedCounselor', 'name avatarColor')
-    .populate('allowedUniversities', 'name shortName avatarColor')
+    .populate('allowedUniversities', 'name shortName avatarColor isActive')
     .lean();
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
   if (req.user.role === 'Center' && String(c._id) !== String(req.user.centerId)) {
@@ -125,7 +125,7 @@ exports.getCenter = asyncHandler(async (req, res) => {
 exports.getCenterUniversities = asyncHandler(async (req, res) => {
   await assertCenterAccess(req, req.params.id);
   const c = await Center.findById(req.params.id)
-    .populate('allowedUniversities', 'name shortName avatarColor city').lean();
+    .populate('allowedUniversities', 'name shortName avatarColor city isActive').lean();
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
   res.json(c.allowedUniversities || []);
 });
@@ -139,7 +139,7 @@ exports.setCenterUniversities = asyncHandler(async (req, res) => {
     req.params.id,
     { allowedUniversities: universityIds },
     { new: true }
-  ).populate('allowedUniversities', 'name shortName avatarColor city');
+  ).populate('allowedUniversities', 'name shortName avatarColor city isActive');
   if (!c) { const e = new Error('Center not found'); e.status = 404; throw e; }
   res.json(c.allowedUniversities);
 });

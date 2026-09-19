@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi, authApi } from '@/lib/api';
+import { activeUniversities } from '@/lib/universities';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
@@ -612,12 +613,12 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId, actingAsCe
       centersApi.getOne(centerId)
         .then(center => {
           const allowed = center?.allowedUniversities || [];
-          if (allowed.length > 0) setUniversities(allowed);
-          else universitiesApi.getAll().then(setUniversities).catch(() => {});
+          if (allowed.length > 0) setUniversities(activeUniversities(allowed));
+          else universitiesApi.getAll().then(list => setUniversities(activeUniversities(list))).catch(() => {});
         })
-        .catch(() => { universitiesApi.getAll().then(setUniversities).catch(() => {}); });
+        .catch(() => { universitiesApi.getAll().then(list => setUniversities(activeUniversities(list))).catch(() => {}); });
     } else {
-      universitiesApi.getAll().then(setUniversities).catch(() => {});
+      universitiesApi.getAll().then(list => setUniversities(activeUniversities(list))).catch(() => {});
     }
   }, [centerId]);
 
@@ -1993,12 +1994,13 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
       centersApi.getOne(centerId)
         .then(center => {
           const allowed = center?.allowedUniversities || [];
-          if (allowed.length > 0) setUniversities(allowed);
-          else universitiesApi.getAll().then(setUniversities).catch(()=>{});
+          const keepId = student?.university?._id || student?.university;
+          if (allowed.length > 0) setUniversities(activeUniversities(allowed, keepId));
+          else universitiesApi.getAll().then(list => setUniversities(activeUniversities(list, keepId))).catch(()=>{});
         })
-        .catch(() => { universitiesApi.getAll().then(setUniversities).catch(()=>{}); });
+        .catch(() => { universitiesApi.getAll().then(list => setUniversities(activeUniversities(list, student?.university?._id || student?.university))).catch(()=>{}); });
     } else {
-      universitiesApi.getAll().then(setUniversities).catch(()=>{});
+      universitiesApi.getAll().then(list => setUniversities(activeUniversities(list, student?.university?._id || student?.university))).catch(()=>{});
     }
   }, [student?.center]);
 

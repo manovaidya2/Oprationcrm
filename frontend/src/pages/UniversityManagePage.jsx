@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Plus, Pencil, Trash2, Loader2, Building2, CheckCircle2,
-  Users, GraduationCap, Search, X, Eye, EyeOff, KeyRound,
+  Users, GraduationCap, Search, X, Eye, EyeOff, KeyRound, Power, PowerOff,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -106,6 +106,24 @@ export default function UniversityManagePage() {
     }
   };
 
+  const toggleUni = async (uni) => {
+    const goingInactive = uni.isActive !== false;
+    const msg = goingInactive
+      ? `Deactivate "${uni.name}"?
+
+- It will no longer appear in university options when adding/updating students.
+- All its login accounts will be blocked until it is activated again.`
+      : `Activate "${uni.name}"? It will appear in university options again and its logins will work.`;
+    if (!confirm(msg)) return;
+    try {
+      await universitiesApi.update(uni._id, { isActive: !goingInactive });
+      toast.success(goingInactive ? 'University deactivated' : 'University activated');
+      load();
+    } catch (e) {
+      toast.error(e.message || 'Failed to update university');
+    }
+  };
+
   const openCreateUser = (uni) => {
     setSelUni(uni);
     setUserForm({ name: uni.name + ' Portal', email: '', password: '' });
@@ -204,7 +222,7 @@ export default function UniversityManagePage() {
             const stats = statsMap[uni._id] || {};
             const uniUsers = uniUsersMap[String(uni._id)] || [];
             return (
-              <Card key={uni._id} className="border-l-4" style={{ borderLeftColor: uni.avatarColor || '#6366f1' }}>
+              <Card key={uni._id} className={`border-l-4 ${uni.isActive === false ? 'opacity-70 bg-muted/30' : ''}`} style={{ borderLeftColor: uni.isActive === false ? '#94a3b8' : (uni.avatarColor || '#6366f1') }}>
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-3">
@@ -213,11 +231,15 @@ export default function UniversityManagePage() {
                         {uni.shortName || uni.name.slice(0,2).toUpperCase()}
                       </div>
                       <div>
-                        <CardTitle className="text-base">{uni.name}</CardTitle>
+                        <CardTitle className="text-base flex items-center gap-2">{uni.name}{uni.isActive === false && <Badge variant="secondary" className="text-xs h-5 bg-red-100 text-red-600 border-red-200">Inactive</Badge>}</CardTitle>
                         <p className="text-xs text-muted-foreground">{[uni.city, uni.state].filter(Boolean).join(', ')}</p>
                       </div>
                     </div>
                     <div className="flex gap-1 shrink-0">
+                      <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => toggleUni(uni)}
+                        title={uni.isActive === false ? 'Activate university' : 'Deactivate university (hide from options & block logins)'}>
+                        {uni.isActive === false ? <Power className="h-3.5 w-3.5 text-emerald-600"/> : <PowerOff className="h-3.5 w-3.5 text-amber-600"/>}
+                      </Button>
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(uni)} title="Edit">
                         <Pencil className="h-3.5 w-3.5"/>
                       </Button>

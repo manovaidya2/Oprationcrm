@@ -22,6 +22,13 @@ exports.login = asyncHandler(async (req, res) => {
   if (!user || !(await user.comparePassword(password))) {
     const e = new Error('Invalid credentials'); e.status = 401; throw e;
   }
+  // University logins are blocked while their university is inactive
+  if (user.role === 'University' && user.universityId) {
+    const uni = await University.findById(user.universityId).select('isActive').lean();
+    if (uni && uni.isActive === false) {
+      const e = new Error('This university is inactive. Contact admin.'); e.status = 401; throw e;
+    }
+  }
   res.json({ token: signToken(user), user: sanitize(user) });
 });
 

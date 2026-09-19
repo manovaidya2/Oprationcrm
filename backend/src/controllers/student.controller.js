@@ -300,6 +300,7 @@ exports.create = asyncHandler(async (req, res) => {
   if (body.universityId) {
     const uni = await University.findById(body.universityId);
     if (!uni) { const e = new Error('University not found'); e.status = 404; throw e; }
+    if (uni.isActive === false) { const e = new Error('This university is inactive and cannot be selected'); e.status = 400; throw e; }
     body.university    = uni._id;
     body.universityName = uni.name;
     delete body.universityId;
@@ -357,6 +358,7 @@ exports.createExistingAdmission = asyncHandler(async (req, res) => {
   if (universityId) {
     university = await University.findById(universityId);
     if (!university) { const e = new Error('University not found'); e.status = 404; throw e; }
+    if (university.isActive === false) { const e = new Error('This university is inactive and cannot be selected'); e.status = 400; throw e; }
   }
 
   const allowedFinalStatuses = ['Submitted', 'Counselor_Approved', 'Sent_To_University', 'Enrolled'];
@@ -534,6 +536,9 @@ exports.update = asyncHandler(async (req, res) => {
 
   if (req.body.universityId && ['Admin','Counselor','ViewerCounselor'].includes(req.user.role)) {
     const uni = await University.findById(req.body.universityId);
+    if (uni && uni.isActive === false && String(student.university || '') !== String(uni._id)) {
+      const e = new Error('This university is inactive and cannot be selected'); e.status = 400; throw e;
+    }
     if (uni) { req.body.university = uni._id; req.body.universityName = uni.name; }
     delete req.body.universityId;
   }
@@ -545,6 +550,9 @@ exports.update = asyncHandler(async (req, res) => {
   const updateData = { ...req.body };
   if (req.user.role === 'Admin' && updateData.university) {
     const uni = await University.findById(updateData.university);
+    if (uni && uni.isActive === false && String(student.university || '') !== String(uni._id)) {
+      const e = new Error('This university is inactive and cannot be selected'); e.status = 400; throw e;
+    }
     if (uni) updateData.universityName = uni.name;
   }
   if (req.user.role === 'Admin') {
@@ -736,6 +744,7 @@ exports.submit = asyncHandler(async (req, res) => {
 
   if (!s.university && req.body.universityId) {
     const uni = await University.findById(req.body.universityId);
+    if (uni && uni.isActive === false) { const e = new Error('This university is inactive and cannot be selected'); e.status = 400; throw e; }
     if (uni) {
       await Student.findByIdAndUpdate(req.params.id, { university: uni._id, universityName: uni.name });
       s.university = uni;

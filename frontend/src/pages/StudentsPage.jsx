@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { toast } from 'sonner';
 import { studentsApi, centersApi, counselorsApi, paymentsApi, docsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { activeUniversities } from '@/lib/universities';
 
 const STATUS_COLORS = {
   Draft: 'bg-gray-100 text-gray-700', Submitted: 'bg-blue-100 text-blue-700',
@@ -169,7 +170,7 @@ export default function StudentsPage() {
       .then(([c, co, u, accounts]) => {
         setCenters(c);
         setCounselors(co);
-        setUniversities(u);
+        setUniversities(activeUniversities(u));
         setPaymentAccounts(accounts);
       })
       .catch(() => toast.error('Failed to load setup data'));

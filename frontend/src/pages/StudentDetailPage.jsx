@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi, counselorsApi, universitiesApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import { activeUniversities } from '@/lib/universities';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
 const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
@@ -334,7 +335,7 @@ export default function StudentDetailPage() {
         counselorsApi.getAll().catch(()=>[]),
         universitiesApi.getAll().catch(()=>[]),
       ]);
-      setStudent(s); setPayment(p); setDocs(d); setCenters(c); setCounselors(co); setUniversities(u);
+      setStudent(s); setPayment(p); setDocs(d); setCenters(c); setCounselors(co); setUniversities(activeUniversities(u, s?.university?._id || s?.university));
     } catch(e) { toast.error(e.message); } finally { setLoading(false); }
   }, [id]);
 
