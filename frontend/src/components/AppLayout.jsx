@@ -1,5 +1,5 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import { notifApi } from '@/lib/api';
 import { toast } from 'sonner';
+import { clearStudentListFilters } from '@/lib/studentListState';
 
 // Role-based nav config
 const NAV_CONFIG = {
@@ -96,6 +97,14 @@ export function AppLayout() {
   const [open, setOpen] = useState(false);
   const [notifs, setNotifs] = useState([]);
   const [showNotifs, setShowNotifs] = useState(false);
+  const previousPathRef = useRef(location.pathname);
+
+  useEffect(() => {
+    const wasInStudents = previousPathRef.current.startsWith('/students');
+    const isInStudents = location.pathname.startsWith('/students');
+    if (wasInStudents && !isInStudents) clearStudentListFilters();
+    previousPathRef.current = location.pathname;
+  }, [location.pathname]);
 
   const baseNavItems = NAV_CONFIG[user?.role] || [];
   const navItems = user?.role && user.role !== 'Center' && !baseNavItems.some(item => item.to === '/chat')

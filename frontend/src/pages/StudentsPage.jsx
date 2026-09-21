@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { studentsApi, centersApi, counselorsApi, paymentsApi, docsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { activeUniversities } from '@/lib/universities';
+import { getStudentListFilters, setStudentListFilters } from '@/lib/studentListState';
 
 const STATUS_COLORS = {
   Draft: 'bg-gray-100 text-gray-700', Submitted: 'bg-blue-100 text-blue-700',
@@ -64,6 +65,7 @@ export default function StudentsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
+  const initialFilters = getStudentListFilters();
 
   const [centers,    setCenters]    = useState([]);
   const [counselors, setCounselors] = useState([]);
@@ -71,9 +73,13 @@ export default function StudentsPage() {
   const [paymentAccounts, setPaymentAccounts] = useState([]);
 
   // Filters
-  const [search,    setSearch]    = useState('');
-  const [statusF,   setStatusF]   = useState('all');
-  const [centerF,   setCenterF]   = useState('all');
+  const [search,    setSearch]    = useState(initialFilters.search);
+  const [statusF,   setStatusF]   = useState(initialFilters.status);
+  const [centerF,   setCenterF]   = useState(initialFilters.center);
+
+  useEffect(() => {
+    setStudentListFilters({ search, status: statusF, center: centerF });
+  }, [search, statusF, centerF]);
 
   // Selection
   const [selected, setSelected] = useState(new Set());
@@ -470,8 +476,18 @@ export default function StudentsPage() {
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input className="pl-9" placeholder="Search name, phone, email, enrollment…" value={search}
+          <Input className="pl-9 pr-9" placeholder="Search name, phone, email, enrollment, university..." value={search}
             onChange={e => setSearch(e.target.value)} />
+          {search && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
         <Select value={statusF} onValueChange={setStatusF}>
           <SelectTrigger className="w-44"><SelectValue placeholder="All Statuses" /></SelectTrigger>

@@ -189,6 +189,13 @@ exports.list = asyncHandler(async (req, res) => {
     const q = req.query.search;
     const matchingCenters = await Center.find({ name: { $regex: q, $options: 'i' } }).select('_id').lean();
     const centerIds = matchingCenters.map(c => c._id);
+    const matchingUniversities = await University.find({
+      $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { shortName: { $regex: q, $options: 'i' } },
+      ],
+    }).select('_id').lean();
+    const universityIds = matchingUniversities.map(u => u._id);
     const searchOr = [
       { name:             { $regex: q, $options: 'i' } },
       { phone:            { $regex: q, $options: 'i' } },
@@ -196,8 +203,10 @@ exports.list = asyncHandler(async (req, res) => {
       { enrollmentNumber: { $regex: q, $options: 'i' } },
       { fatherName:       { $regex: q, $options: 'i' } },
       { courseName:       { $regex: q, $options: 'i' } },
+      { universityName:   { $regex: q, $options: 'i' } },
     ];
     if (centerIds.length > 0) searchOr.push({ center: { $in: centerIds } });
+    if (universityIds.length > 0) searchOr.push({ university: { $in: universityIds } });
     andConditions.push({ $or: searchOr });
   }
 
