@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { Loader2, Trash2, Search, X, AlertTriangle, IndianRupee, Download } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,7 +10,6 @@ import { paymentsApi } from '@/lib/api';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 
 export default function RejectedPaymentsPage() {
   const [records,  setRecords]  = useState([]);

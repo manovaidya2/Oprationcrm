@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLazyList } from '@/lib/useLazyList';
 import { usePagedFetch } from '@/lib/usePagedFetch';
@@ -19,7 +20,6 @@ import { studentsApi, docsApi, paymentsApi, paymentAccountsApi } from '@/lib/api
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 const fmtD  = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
@@ -1096,7 +1096,7 @@ export default function AccountantPage() {
   )}
 </div>
                     {d.scannedUrl&&(
-                      <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${d.scannedUrl}`}
+                      <a href={`${MEDIA}${d.scannedUrl}`}
                         target="_blank" rel="noreferrer"
                         className="text-xs text-blue-600 underline flex items-center gap-1 mt-1 w-fit">
                         <Eye className="h-3 w-3"/>View Scanned Copy
@@ -1192,7 +1192,7 @@ export default function AccountantPage() {
                     {tx.note && <div className="text-xs text-muted-foreground italic">Note: "{tx.note}"</div>}
                     {tx.paymentScreenshot && (
   <div className="mt-1.5">
-    <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+    <a href={`${MEDIA}${tx.paymentScreenshot}`}
       target="_blank" rel="noreferrer"
       className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
       <Download className="h-3 w-3"/>View Payment Screenshot
@@ -1332,7 +1332,7 @@ export default function AccountantPage() {
                           {/* Screenshot */}
                           {tx.paymentScreenshot && (
                             <a
-                              href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+                              href={`${MEDIA}${tx.paymentScreenshot}`}
                               target="_blank" rel="noreferrer"
                               className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
                             >
@@ -1421,7 +1421,7 @@ export default function AccountantPage() {
                     <div key={p._id} className="mt-1 space-y-1">
                       <PaymentInfo tx={p}/>
                       {p.paymentScreenshot && (
-                        <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                        <a href={`${MEDIA}${p.paymentScreenshot}`}
                           target="_blank" rel="noreferrer"
                           className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
                           <Download className="h-3 w-3"/>View Payment Screenshot
@@ -1493,7 +1493,7 @@ export default function AccountantPage() {
                       <PaymentInfo tx={p}/>
                       {p.paymentScreenshot && (
                         <div className="mt-1.5">
-                          <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                          <a href={`${MEDIA}${p.paymentScreenshot}`}
                             target="_blank" rel="noreferrer"
                             className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
                             <Download className="h-3 w-3"/>View Payment Screenshot
@@ -1632,7 +1632,7 @@ export default function AccountantPage() {
                               {/* Screenshot */}
                               {p.paymentScreenshot && (
                                 <a
-                                  href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${p.paymentScreenshot}`}
+                                  href={`${MEDIA}${p.paymentScreenshot}`}
                                   target="_blank" rel="noreferrer"
                                   className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
                                 >

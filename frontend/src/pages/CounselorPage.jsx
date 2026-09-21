@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -18,7 +19,6 @@ import { pageCache } from '@/lib/pageCache';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
@@ -1315,7 +1315,7 @@ export default function CounselorPage() {
                       {tx.note && <div className="text-xs text-slate-400 italic">Note: "{tx.note}"</div>}
                       {tx.paymentScreenshot && (
   <div className="mt-1.5">
-    <a href={`${(import.meta.env.VITE_API_URL||'http://localhost:5000/api').replace('/api','')}${tx.paymentScreenshot}`}
+    <a href={`${MEDIA}${tx.paymentScreenshot}`}
       target="_blank" rel="noreferrer"
       className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
       <Download className="h-3 w-3"/>View Payment Screenshot

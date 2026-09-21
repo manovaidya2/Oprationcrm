@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -20,7 +21,6 @@ import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universit
 import { activeUniversities } from '@/lib/universities';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const MODES = ['UPI', 'Bank Transfer'];

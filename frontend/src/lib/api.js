@@ -1,4 +1,5 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+export const MEDIA = BASE.replace(/\/api\/?$/, '');
 
 function token() { return localStorage.getItem('crm_token'); }
 

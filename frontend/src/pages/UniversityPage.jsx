@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, BadgeCheck, Truck, Paperclip, Search, X, Eye,
@@ -14,7 +15,6 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { toast } from 'sonner';
 import { studentsApi, docsApi } from '@/lib/api';
 
-const MEDIA  = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmtDt  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const fmtFull= d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
 

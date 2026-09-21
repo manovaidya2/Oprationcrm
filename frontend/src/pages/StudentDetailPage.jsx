@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -19,7 +20,6 @@ import { useAuth } from '@/context/AuthContext';
 import { activeUniversities } from '@/lib/universities';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const toDateInput = d => d ? new Date(d).toISOString().split('T')[0] : '';

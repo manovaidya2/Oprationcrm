@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -17,7 +18,7 @@ import { centersApi, counselorsApi, authApi, studentsApi, universitiesApi, payme
 import { useAuth } from '@/context/AuthContext';
 
 // ── Options matching WhatsApp Flow ──────────────────────────
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+
 const ORG_TYPES     = ['Education Consultant','Admission Centre','Coaching Institute','School/Institute','Freelance Consultant','Other'];
 const EXPERIENCE    = ['0 to 1 year','1 to 3 years','3 to 7 years','7+ years'];
 const TEAM_SIZES    = ['Solo','2 to 5','6 to 15','15+'];

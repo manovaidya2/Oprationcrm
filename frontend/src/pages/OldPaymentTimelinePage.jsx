@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarClock, CheckCircle2, ChevronDown, Clock3, Download, Loader2, Phone, Search, Send, Trash2, TriangleAlert } from 'lucide-react';
@@ -17,7 +18,7 @@ const fmt = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const today = () => new Date().toISOString().split('T')[0];
 const todayFrom = d => d ? new Date(d).toISOString().split('T')[0] : '';
-const MEDIA = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+
 const blankRow = (n = 1) => ({ installmentNumber: n, paymentDate: '', amount: '', reasonOrRequirement: '' });
 const EMPTY_PAY = { amount: '', mode: 'UPI', utrRef: '', upiId: '', bankName: '', accountHolder: '', paidAt: today(), note: '', paymentScreenshot: null };
 

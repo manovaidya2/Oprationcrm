@@ -1,3 +1,4 @@
+import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Loader2, Package, Scan, Truck, CheckCircle2, Download,
@@ -15,10 +16,8 @@ import { docsApi, documentInventoryApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 
-const MEDIA  = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
-
 function ScannedFilesList({ doc, className = '' }) {
-  const MBASE = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace('/api', '');
+  const MBASE = MEDIA;
   const files = doc?.scannedFiles?.length > 0
     ? doc.scannedFiles
     : doc?.scannedUrl
