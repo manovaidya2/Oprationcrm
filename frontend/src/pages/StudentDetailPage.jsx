@@ -500,6 +500,11 @@ export default function StudentDetailPage() {
             <h1 className="text-xl font-semibold">{student.name}</h1>
             {student.coreLocked && <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full"><Lock className="h-3 w-3"/>Core Locked</span>}
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st}`}>{student.applicationStatus?.replace(/_/g,' ')}</span>
+            {student.applicationStatus === 'University_Rejected' && student.rejectionReason?.trim() && (
+              <span className="text-xs text-orange-800 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full break-words">
+                <b>Reason:</b> {student.rejectionReason}
+              </span>
+            )}
             {student.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded">{student.enrollmentNumber}</span>}
             {student.enrollmentNumberChecked && (
               <span className="inline-flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
