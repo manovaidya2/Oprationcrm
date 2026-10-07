@@ -11,7 +11,6 @@ import { useAuth } from '@/context/AuthContext';
 
 const fmt = value => `Rs ${(Number(value) || 0).toLocaleString('en-IN')}`;
 const fmtDate = value => value ? new Date(value).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
-const escapeCsv = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 const inputClass = 'h-10 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring';
 
 function dateValue(row, basis) {
@@ -266,7 +265,8 @@ function CenterBilling() {
     setDateFilters({ month: '', fromMonth: '', toMonth: '', fromDate: '', toDate: '' });
   }
 
-  function downloadCsv() {
+  async function downloadExcel() {
+    const { default: ExcelJS } = await import('exceljs');
     const txHeaders = [];
     for (let index = 0; index < maxTransactions; index += 1) {
       const no = index + 1;
@@ -286,7 +286,7 @@ function CenterBilling() {
       'Grand Total', 'Grand Paid', 'Grand Due',
       ...txHeaders, ...docHeaders,
     ];
-    const csvRows = filteredRows.map(row => {
+    const exportRows = filteredRows.map(row => {
       const txValues = [];
       for (let index = 0; index < maxTransactions; index += 1) {
         const tx = row.transactions?.[index];
@@ -316,12 +316,83 @@ function CenterBilling() {
       ];
     });
 
-    const csv = [headers, ...csvRows].map(row => row.map(escapeCsv).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Operation CRM';
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet('Centre Billing', {
+      views: [{ state: 'frozen', ySplit: 4 }],
+      properties: { defaultRowHeight: 18 },
+    });
+
+    sheet.mergeCells(1, 1, 1, headers.length);
+    const titleCell = sheet.getCell(1, 1);
+    titleCell.value = `${data?.center?.name || 'Center'} - Centre Billing`;
+    titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+    sheet.getRow(1).height = 28;
+
+    sheet.mergeCells(2, 1, 2, headers.length);
+    const filterCell = sheet.getCell(2, 1);
+    filterCell.value = `${activeRangeLabel}${search.trim() ? ` | Search: ${search.trim()}` : ''}`;
+    filterCell.font = { italic: true, color: { argb: 'FF475569' } };
+    filterCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
+
+    const headerRow = sheet.getRow(4);
+    headerRow.values = headers;
+    headerRow.height = 34;
+    headerRow.eachCell(cell => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FF1D4ED8' } },
+        left: { style: 'thin', color: { argb: 'FF1D4ED8' } },
+        bottom: { style: 'thin', color: { argb: 'FF1D4ED8' } },
+        right: { style: 'thin', color: { argb: 'FF1D4ED8' } },
+      };
+    });
+
+    exportRows.forEach((values, rowIndex) => {
+      const excelRow = sheet.addRow(values);
+      excelRow.alignment = { vertical: 'top', wrapText: true };
+      excelRow.eachCell(cell => {
+        cell.border = {
+          top: { style: 'hair', color: { argb: 'FFCBD5E1' } },
+          left: { style: 'hair', color: { argb: 'FFCBD5E1' } },
+          bottom: { style: 'hair', color: { argb: 'FFCBD5E1' } },
+          right: { style: 'hair', color: { argb: 'FFCBD5E1' } },
+        };
+        if (rowIndex % 2 === 1) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        }
+      });
+    });
+
+    const amountColumns = new Set();
+    headers.forEach((header, index) => {
+      if (/Amount|Total|Paid|Due/.test(header) && !/Paid Date|Paid To/.test(header)) amountColumns.add(index + 1);
+    });
+    amountColumns.forEach(columnNumber => {
+      sheet.getColumn(columnNumber).numFmt = '₹#,##0.00';
+    });
+
+    sheet.columns.forEach((column, index) => {
+      const headerLength = String(headers[index] || '').length;
+      let maxLength = Math.min(headerLength, 24);
+      column.eachCell({ includeEmpty: false }, cell => {
+        maxLength = Math.max(maxLength, Math.min(String(cell.value ?? '').length, 35));
+      });
+      column.width = Math.max(12, Math.min(maxLength + 2, 35));
+    });
+    sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: headers.length } };
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `centre-billing-${data?.center?.name || 'center'}.csv`;
+    link.download = `centre-billing-${data?.center?.name || 'center'}.xlsx`;
     link.click();
     URL.revokeObjectURL(url);
   }
@@ -349,9 +420,9 @@ function CenterBilling() {
             </div>
           </div>
         </div>
-        <Button size="sm" variant="outline" onClick={downloadCsv} disabled={filteredRows.length === 0}>
+        <Button size="sm" variant="outline" onClick={downloadExcel} disabled={filteredRows.length === 0}>
           <Download className="mr-1 h-4 w-4" />
-          CSV
+          Excel
         </Button>
       </div>
       {refreshing && (
