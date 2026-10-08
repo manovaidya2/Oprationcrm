@@ -34,6 +34,9 @@ const transactionSchema = new mongoose.Schema({
   // Which company account was payment made to
   paidToAccount:     { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel:{ type: String, trim: true }, // denormalized label for quick display
+  source:            { type: String, enum: ['Manual', 'Center Monthly Settlement'], default: 'Manual' },
+  centerSettlement:  { type: mongoose.Schema.Types.ObjectId, ref: 'CenterSettlement' },
+  settlementMonth:   { type: String, trim: true },
 }, { timestamps: true });
 
 const installmentSchema = new mongoose.Schema({

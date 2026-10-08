@@ -105,6 +105,8 @@ function PaymentInfo({ tx, className = '' }) {
       {isBank && tx.accountNumber && <div className="text-xs text-slate-500">Account No: <span className="font-mono font-semibold text-slate-700">{tx.accountNumber}</span></div>}
       {isBank && tx.ifscCode      && <div className="text-xs text-slate-500">IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
       {tx.note && <div className="text-xs text-slate-400 italic">"{tx.note}"</div>}
+      {tx.source === 'Center Monthly Settlement' && <div className="text-xs font-semibold text-indigo-700">Monthly Centre Settlement: {tx.settlementMonth}</div>}
+      {tx.verifiedBy?.name && <div className="text-xs text-slate-500">Settled/verified by: <b>{tx.verifiedBy.name}</b> ({tx.verifiedBy.role})</div>}
       <UtrDuplicateWarning tx={tx}/>
       <ViewerAttribution label="Added" actor={tx.recordedBy} at={tx.createdAt || tx.paidAt}/>
       {!isViewerActor(tx.recordedBy) && <ViewerAttribution label="Updated" actor={tx.lastUpdatedBy} at={tx.lastUpdatedAt}/>}

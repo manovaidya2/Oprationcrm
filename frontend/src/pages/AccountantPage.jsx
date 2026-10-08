@@ -109,6 +109,9 @@ function PaymentInfo({ tx, className = '' }) {
       {isBank && tx.accountNumber  && <div className="text-xs text-muted-foreground">Account No: <b>{tx.accountNumber}</b></div>}
       {isBank && tx.ifscCode       && <div className="text-xs text-muted-foreground">IFSC: <b>{tx.ifscCode}</b></div>}
       {tx.note && <div className="text-xs text-muted-foreground">Note: {tx.note}</div>}
+      {tx.source === 'Center Monthly Settlement' && <div className="text-xs font-semibold text-indigo-700">Monthly Centre Settlement: {tx.settlementMonth}</div>}
+      {tx.recordedBy?.name && <div className="text-xs text-muted-foreground">Recorded by: <b>{tx.recordedBy.name}</b> ({tx.recordedBy.role})</div>}
+      {tx.verifiedBy?.name && <div className="text-xs text-muted-foreground">Settled/verified by: <b>{tx.verifiedBy.name}</b> ({tx.verifiedBy.role})</div>}
       <UtrDuplicateWarning tx={tx}/>
       {tx.paidToAccountLabel && (
         <div className="mt-1 bg-indigo-50 border border-indigo-200 rounded px-2.5 py-1.5">

@@ -178,10 +178,8 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   if (totalFee !== undefined) payment.totalFee = Number(totalFee) || 0;
   if (discount !== undefined) payment.discount  = Number(discount) || 0;
   if (notes    !== undefined) payment.notes     = notes;
-  if (req.user.role === 'ViewerCounselor' && userActingAsCenter) {
-    payment.lastUpdatedBy = req.user._id;
-    payment.lastUpdatedAt = new Date();
-  }
+  payment.lastUpdatedBy = req.user._id;
+  payment.lastUpdatedAt = new Date();
   const installments = normalizeInstallments(req.body.installments);
   if (installments !== undefined) {
     const netFee = Math.max(0, (payment.totalFee || 0) - (payment.discount || 0));

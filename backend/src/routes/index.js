@@ -121,7 +121,7 @@ router.get   ('/document-payment-followups',                    protect, require
 router.post  ('/documents/:id/payment-followup',                protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentFollowup);
 router.get   ('/payments/:studentId',                          protect, payC.get);
 router.post  ('/payments-bulk',                                protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), payC.bulkGet);
-router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), payC.upsertFee);
+router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Center','PaymentCoordinator'), payC.upsertFee);
 router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.addTransaction);
 router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.updateTransaction);
 router.patch ('/payments/:studentId/transactions/:txId/counsel-verify',  protect, requireRole('Admin','Counselor'), payC.counselorForwardFeePayment);
@@ -182,6 +182,10 @@ router.get('/dashboard/stats', protect, misc.dashboardStats);
 router.get('/account-ledger',                   protect, requireRole('Admin','Accountant'), accountLedgerC.students);
 router.get('/account-ledger/centers',           protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), accountLedgerC.centers);
 router.get('/account-ledger/centers/:centerId', protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), accountLedgerC.centerStudents);
+router.get('/account-ledger/centers/:centerId/settlements', protect, requireRole('Admin','Accountant'), accountLedgerC.centerSettlements);
+router.post('/account-ledger/centers/:centerId/settlements', protect, requireRole('Admin','Accountant'), accountLedgerC.createCenterSettlement);
+router.patch('/account-ledger/centers/:centerId/settlements/:settlementId', protect, requireRole('Admin','Accountant'), accountLedgerC.updateCenterSettlement);
+router.post('/account-ledger/centers/:centerId/settlements/:settlementId/reverse', protect, requireRole('Admin','Accountant'), accountLedgerC.reverseCenterSettlement);
 
 // ── AUDIT LOG ─────────────────────────────────────────────────
 router.get('/audit', protect, requireRole('Admin'), misc.listAudit);

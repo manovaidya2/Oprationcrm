@@ -328,6 +328,9 @@ function PaymentDetail({ tx, accMap }) {
       {isBank && tx.accountNumber  && <div>Account No: <span className="font-mono font-semibold text-slate-700">{tx.accountNumber}</span></div>}
       {isBank && tx.ifscCode       && <div>IFSC: <span className="font-mono font-semibold text-slate-700">{tx.ifscCode}</span></div>}
       {tx.note && <div className="italic text-slate-400">"{tx.note}"</div>}
+      {tx.source === 'Center Monthly Settlement' && <div className="font-semibold text-indigo-700">Monthly Centre Settlement: {tx.settlementMonth}</div>}
+      {tx.recordedBy?.name && <div>Recorded by: <b>{tx.recordedBy.name}</b> ({tx.recordedBy.role})</div>}
+      {tx.verifiedBy?.name && <div>Settled/verified by: <b>{tx.verifiedBy.name}</b> ({tx.verifiedBy.role})</div>}
       <UtrDuplicateWarning tx={tx}/>
       {tx.paymentScreenshot && (
   <div className="mt-1.5">

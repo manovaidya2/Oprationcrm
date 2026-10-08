@@ -724,6 +724,7 @@ export default function StudentDetailPage() {
                         <span className="font-semibold text-emerald-700">{fmt(tx.amount)}</span>
                         {tx.mode && <span className="bg-muted px-1.5 py-0.5 rounded text-xs font-medium">{tx.mode}</span>}
                         {tx.recordedBy?.name && <span className="text-xs text-muted-foreground">by {tx.recordedBy.name}</span>}
+                        {tx.source === 'Center Monthly Settlement' && <span className="text-xs px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Monthly Centre Settlement {tx.settlementMonth}</span>}
                         {tx.verificationStatus==='verified'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">✓ Verified</span>}
                         {tx.verificationStatus==='rejected'&&<span className="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">✗ Rejected</span>}
                       </div>
@@ -751,6 +752,7 @@ export default function StudentDetailPage() {
                       {tx.mode==='Bank Transfer' && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
                       {tx.mode==='Bank Transfer' && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
                       {tx.note && <div>Note: {tx.note}</div>}
+                      {tx.verifiedBy?.name && <div>Settled/verified by: <b>{tx.verifiedBy.name}</b> ({tx.verifiedBy.role})</div>}
                       {tx.paymentScreenshot && (
                         <div className="mt-1.5">
                           <a href={`${MEDIA}${tx.paymentScreenshot}`} target="_blank" rel="noreferrer"

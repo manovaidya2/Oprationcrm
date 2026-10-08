@@ -4,6 +4,8 @@ const Student = require('../models/Student');
 const Payment = require('../models/Payment');
 const Counselor = require('../models/Counselor');
 const StudentDocument = require('../models/StudentDocument');
+const CenterSettlement = require('../models/CenterSettlement');
+const { audit } = require('../utils/helpers');
 
 async function assignedCenterFilter(req) {
   if (!['Counselor', 'ViewerCounselor'].includes(req.user?.role)) return {};
@@ -138,6 +140,7 @@ async function buildRows(students) {
     Payment.find({ student: { $in: studentIds } })
       .populate('transactions.recordedBy', 'name role')
       .populate('transactions.verifiedBy', 'name role')
+      .populate('transactions.centerSettlement', 'billingMonth')
       .populate('transactions.paidToAccount', 'label mode upiId upiName bankName accountHolder accountNumber ifscCode branch')
       .lean(),
     StudentDocument.find({ student: { $in: studentIds }, origin: { $ne: 'Inventory' } })
@@ -173,6 +176,10 @@ async function buildRows(students) {
       verificationStatus: tx.verificationStatus || 'not_required',
       paidToAccountLabel: tx.paidToAccountLabel || tx.paidToAccount?.label || '',
       paidToAccount: tx.paidToAccount || null,
+      recordedBy: tx.recordedBy || null,
+      verifiedBy: tx.verifiedBy || null,
+      source: tx.source || 'Manual',
+      settlementMonth: tx.settlementMonth || tx.centerSettlement?.billingMonth || '',
     }));
 
     const docSummary = summarizeDocuments(documentsByStudent.get(String(student._id)) || []);
@@ -191,6 +198,8 @@ async function buildRows(students) {
         submittedAt: submittedAt(student),
       },
       // Course fee ledger
+      grossTotalFee: summary.totalFee,
+      discount: summary.discount,
       totalAmount: summary.netFee,
       amountPaid: summary.paidAmount,
       amountDue: summary.dueAmount,
@@ -333,6 +342,238 @@ exports.centerStudents = asyncHandler(async (req, res) => {
     totalStudents: limit ? totalStudents : rows.length,
     partial: Boolean(limit),
   });
+});
+
+exports.centerSettlements = asyncHandler(async (req, res) => {
+  const center = await Center.findById(req.params.centerId).select('_id').lean();
+  if (!center) {
+    const e = new Error('Center not found'); e.status = 404; throw e;
+  }
+  const filter = { center: center._id };
+  if (req.query.month) filter.billingMonth = req.query.month;
+  const settlements = await CenterSettlement.find(filter)
+    .populate('recordedBy', 'name role')
+    .populate('lastEditedBy', 'name role')
+    .populate('reversedBy', 'name role')
+    .populate('paidToAccount', 'label')
+    .populate('allocations.student', 'name enrollmentNumber courseName')
+    .sort('-createdAt')
+    .lean();
+  res.json(settlements);
+});
+
+exports.createCenterSettlement = asyncHandler(async (req, res) => {
+  const center = await Center.findById(req.params.centerId).lean();
+  if (!center) {
+    const e = new Error('Center not found'); e.status = 404; throw e;
+  }
+
+  const billingMonth = String(req.body.billingMonth || '');
+  const dateBasis = req.body.dateBasis === 'submittedAt' ? 'submittedAt' : 'createdAt';
+  const requestedAllocations = Array.isArray(req.body.allocations) ? req.body.allocations : [];
+  const studentIds = [...new Set((requestedAllocations.length ? requestedAllocations.map(row => row.studentId) : (req.body.studentIds || [])).map(String))];
+  if (!/^\d{4}-\d{2}$/.test(billingMonth)) {
+    const e = new Error('Valid billing month is required'); e.status = 400; throw e;
+  }
+  if (!studentIds.length) {
+    const e = new Error('Select at least one student to settle'); e.status = 400; throw e;
+  }
+
+  const [year, month] = billingMonth.split('-').map(Number);
+  const from = new Date(year, month - 1, 1);
+  const to = new Date(year, month, 1);
+  const students = await Student.find({ _id: { $in: studentIds }, center: center._id }).lean();
+  const eligible = students.filter(student => {
+    const value = dateBasis === 'submittedAt' ? submittedAt(student) : student.createdAt;
+    const date = value ? new Date(value) : null;
+    return date && date >= from && date < to;
+  });
+  if (eligible.length !== studentIds.length) {
+    const e = new Error('One or more selected students do not belong to this center/month'); e.status = 400; throw e;
+  }
+
+  const payments = await Payment.find({ student: { $in: studentIds } });
+  const paymentByStudent = new Map(payments.map(payment => [String(payment.student), payment]));
+  const allocations = [];
+  for (const student of eligible) {
+    const payment = paymentByStudent.get(String(student._id));
+    if (!payment || Number(payment.totalFee || 0) <= 0) {
+      const e = new Error(`Set course fee for ${student.name} before settlement`); e.status = 400; throw e;
+    }
+    const due = Math.max(0, Number(payment.totalFee || 0) - Number(payment.discount || 0) - Number(payment.paidAmount || 0));
+    const requested = requestedAllocations.find(row => String(row.studentId) === String(student._id));
+    const amount = requested ? Number(requested.amount || 0) : due;
+    if (!Number.isFinite(amount) || amount < 0 || amount > due) {
+      const e = new Error(`Allocation for ${student.name} must be between 0 and ${due}`); e.status = 400; throw e;
+    }
+    if (amount > 0) allocations.push({ student, payment, amount });
+  }
+  if (!allocations.length) {
+    const e = new Error('Selected students have no pending course fee'); e.status = 400; throw e;
+  }
+
+  const mode = req.body.mode === 'Bank Transfer' ? 'Bank Transfer' : 'UPI';
+  const paidAt = req.body.paidAt ? new Date(req.body.paidAt) : new Date();
+  if (Number.isNaN(paidAt.getTime())) {
+    const e = new Error('Valid payment date is required'); e.status = 400; throw e;
+  }
+  const totalAmount = allocations.reduce((sum, row) => sum + row.amount, 0);
+  const settlement = new CenterSettlement({
+    center: center._id,
+    billingMonth,
+    dateBasis,
+    amount: totalAmount,
+    studentCount: allocations.length,
+    mode,
+    utrRef: req.body.utrRef || '',
+    upiId: req.body.upiId || '',
+    bankName: req.body.bankName || '',
+    accountHolder: req.body.accountHolder || '',
+    accountNumber: req.body.accountNumber || '',
+    ifscCode: req.body.ifscCode || '',
+    paidAt,
+    note: req.body.note || '',
+    paidToAccount: req.body.paidToAccount || undefined,
+    paidToAccountLabel: req.body.paidToAccountLabel || '',
+    recordedBy: req.user._id,
+  });
+
+  const session = await Payment.startSession();
+  try {
+    await session.withTransaction(async () => {
+      for (const row of allocations) {
+        row.payment.transactions.push({
+          amount: row.amount,
+          mode,
+          utrRef: req.body.utrRef || '',
+          upiId: req.body.upiId || '',
+          bankName: req.body.bankName || '',
+          accountHolder: req.body.accountHolder || '',
+          accountNumber: req.body.accountNumber || '',
+          ifscCode: req.body.ifscCode || '',
+          note: `Course fee settled via center monthly payment${req.body.note ? ` - ${req.body.note}` : ''}`,
+          paidAt,
+          recordedBy: req.user._id,
+          verifiedBy: req.user._id,
+          verifiedAt: new Date(),
+          verificationStatus: 'verified',
+          paidToAccount: req.body.paidToAccount || undefined,
+          paidToAccountLabel: req.body.paidToAccountLabel || '',
+          source: 'Center Monthly Settlement',
+          centerSettlement: settlement._id,
+          settlementMonth: billingMonth,
+        });
+        await row.payment.save({ session });
+        const transaction = row.payment.transactions[row.payment.transactions.length - 1];
+        settlement.allocations.push({
+          student: row.student._id,
+          payment: row.payment._id,
+          transactionId: transaction._id,
+          totalFee: row.payment.netFee,
+          amount: row.amount,
+        });
+      }
+      await settlement.save({ session });
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  await audit('center_monthly_fee_settled', 'CenterSettlement', settlement._id, req.user, {
+    centerId: center._id,
+    billingMonth,
+    amount: totalAmount,
+    studentCount: allocations.length,
+  }, `${center.name || center.organisationName} ${billingMonth} course fee settled`);
+
+  const result = await CenterSettlement.findById(settlement._id)
+    .populate('recordedBy', 'name role')
+    .populate('allocations.student', 'name enrollmentNumber courseName');
+  res.status(201).json(result);
+});
+
+exports.updateCenterSettlement = asyncHandler(async (req, res) => {
+  const settlement = await CenterSettlement.findOne({ _id: req.params.settlementId, center: req.params.centerId });
+  if (!settlement) { const e = new Error('Settlement not found'); e.status = 404; throw e; }
+  if (settlement.status === 'Reversed') { const e = new Error('Reversed settlement cannot be edited'); e.status = 400; throw e; }
+
+  const mode = req.body.mode === 'Bank Transfer' ? 'Bank Transfer' : 'UPI';
+  const paidAt = req.body.paidAt ? new Date(req.body.paidAt) : settlement.paidAt;
+  if (Number.isNaN(paidAt.getTime())) { const e = new Error('Valid payment date is required'); e.status = 400; throw e; }
+  const editReason = String(req.body.editReason || '').trim();
+  if (!editReason) { const e = new Error('Edit reason is required'); e.status = 400; throw e; }
+
+  const fields = ['utrRef', 'upiId', 'bankName', 'accountHolder', 'accountNumber', 'ifscCode', 'note', 'paidToAccountLabel'];
+  settlement.mode = mode;
+  settlement.paidAt = paidAt;
+  fields.forEach(field => { if (req.body[field] !== undefined) settlement[field] = req.body[field] || ''; });
+  if (req.body.paidToAccount !== undefined) settlement.paidToAccount = req.body.paidToAccount || undefined;
+  settlement.lastEditedBy = req.user._id;
+  settlement.lastEditedAt = new Date();
+  settlement.editReason = editReason;
+
+  const session = await Payment.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const payments = await Payment.find({ _id: { $in: settlement.allocations.map(row => row.payment) } }).session(session);
+      for (const payment of payments) {
+        const tx = payment.transactions.find(row => String(row.centerSettlement) === String(settlement._id));
+        if (!tx) continue;
+        tx.mode = mode;
+        tx.paidAt = paidAt;
+        fields.filter(field => field !== 'paidToAccountLabel').forEach(field => {
+          if (req.body[field] !== undefined && field in tx) tx[field] = req.body[field] || '';
+        });
+        if (req.body.paidToAccount !== undefined) tx.paidToAccount = req.body.paidToAccount || undefined;
+        if (req.body.paidToAccountLabel !== undefined) tx.paidToAccountLabel = req.body.paidToAccountLabel || '';
+        tx.lastUpdatedBy = req.user._id;
+        tx.lastUpdatedAt = new Date();
+        await payment.save({ session });
+      }
+      await settlement.save({ session });
+    });
+  } finally { await session.endSession(); }
+
+  await audit('center_monthly_settlement_edited', 'CenterSettlement', settlement._id, req.user, { editReason }, `Settlement ${settlement.billingMonth} edited`);
+  const result = await CenterSettlement.findById(settlement._id)
+    .populate('recordedBy lastEditedBy', 'name role')
+    .populate('allocations.student', 'name enrollmentNumber courseName');
+  res.json(result);
+});
+
+exports.reverseCenterSettlement = asyncHandler(async (req, res) => {
+  const settlement = await CenterSettlement.findOne({ _id: req.params.settlementId, center: req.params.centerId });
+  if (!settlement) { const e = new Error('Settlement not found'); e.status = 404; throw e; }
+  if (settlement.status === 'Reversed') { const e = new Error('Settlement is already reversed'); e.status = 400; throw e; }
+  const reason = String(req.body.reason || '').trim();
+  if (!reason) { const e = new Error('Reversal reason is required'); e.status = 400; throw e; }
+
+  const session = await Payment.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const payments = await Payment.find({ _id: { $in: settlement.allocations.map(row => row.payment) } }).session(session);
+      for (const payment of payments) {
+        payment.transactions = payment.transactions.filter(row => String(row.centerSettlement) !== String(settlement._id));
+        await payment.save({ session });
+      }
+      settlement.status = 'Reversed';
+      settlement.reversedBy = req.user._id;
+      settlement.reversedAt = new Date();
+      settlement.reversalReason = reason;
+      await settlement.save({ session });
+    });
+  } finally { await session.endSession(); }
+
+  await audit('center_monthly_settlement_reversed', 'CenterSettlement', settlement._id, req.user, {
+    centerId: settlement.center,
+    billingMonth: settlement.billingMonth,
+    amount: settlement.amount,
+    reason,
+  }, `Settlement ${settlement.billingMonth} reversed`);
+  const result = await CenterSettlement.findById(settlement._id)
+    .populate('recordedBy reversedBy', 'name role')
+    .populate('allocations.student', 'name enrollmentNumber courseName');
+  res.json(result);
 });
 
 exports.students = asyncHandler(async (req, res) => {

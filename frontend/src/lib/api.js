@@ -217,6 +217,10 @@ export const accountLedgerApi = {
     const query = new URLSearchParams(params);
     return request(`/account-ledger/centers/${id}${query.toString() ? `?${query}` : ''}`);
   },
+  centerSettlements: (id, params = {}) => request(`/account-ledger/centers/${id}/settlements?${new URLSearchParams(params)}`),
+  createCenterSettlement: (id, data) => request(`/account-ledger/centers/${id}/settlements`, { method: 'POST', body: JSON.stringify(data) }),
+  updateCenterSettlement: (id, settlementId, data) => request(`/account-ledger/centers/${id}/settlements/${settlementId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  reverseCenterSettlement: (id, settlementId, reason) => request(`/account-ledger/centers/${id}/settlements/${settlementId}/reverse`, { method: 'POST', body: JSON.stringify({ reason }) }),
 };
 
 // ── AUDIT LOG ────────────────────────────────────────────────
