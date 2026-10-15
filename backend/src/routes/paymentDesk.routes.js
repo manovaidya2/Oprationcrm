@@ -2,6 +2,8 @@ const router = require('express').Router();
 const { protect, requireRole } = require('../middleware/auth');
 const book  = require('../controllers/accountsBook.controller');
 const money = require('../controllers/accountsMoney.controller');
+const settle = require('../controllers/accountsSettlement.controller');
+const upload = require('../middleware/upload');   // optional payment screenshot (image / PDF, max 10 MB)
 
 // Payment desk — Admin, Payment and Accountant only
 router.use(protect);
@@ -14,9 +16,17 @@ router.get  ('/day-book',                         desk, book.dayBook);
 router.get  ('/students/search',                  desk, book.searchStudents);
 router.get  ('/students/:id/summary',             desk, book.studentSummary);
 router.patch('/students/:id',                     desk, book.editStudent);
-router.post ('/payments',                         desk, book.addPayment);
-router.patch('/payments/fee/:parentId/:txId',     desk, book.editFeePayment);
-router.patch('/payments/doc/:parentId/:txId',     desk, book.editDocPayment);
+router.post ('/payments',                         desk, upload.single('paymentScreenshot'), book.addPayment);
+router.post ('/payments/review',                  desk, book.reviewPayments);
+
+// Payment adjustment = settlement (one UTR / screenshot spread over many students)
+router.get  ('/settlement/students',              desk, settle.students);
+router.post ('/settlements',                      desk, upload.single('paymentScreenshot'), settle.create);
+router.get  ('/settlements/:id',                  desk, settle.get);
+router.patch('/settlements/:id',                  desk, upload.single('paymentScreenshot'), settle.update);
+router.post ('/settlements/:id/reverse',          desk, settle.reverse);
+router.patch('/payments/fee/:parentId/:txId',     desk, upload.single('paymentScreenshot'), book.editFeePayment);
+router.patch('/payments/doc/:parentId/:txId',     desk, upload.single('paymentScreenshot'), book.editDocPayment);
 
 // Ledger + document status
 router.get('/ledger',        desk, book.ledger);

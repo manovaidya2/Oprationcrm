@@ -260,7 +260,7 @@ async function downloadFile(path, params = {}) {
   URL.revokeObjectURL(url);
 }
 
-const send = (method, path, data) => request(path, { method, body: JSON.stringify(data || {}) });
+const send = (method, path, data) => request(path, { method, body: data instanceof FormData ? data : JSON.stringify(data || {}) });
 
 export const deskApi = {
   meta:            ()             => request('/payment-desk/meta'),
@@ -268,6 +268,12 @@ export const deskApi = {
   searchStudents:  (q, centerId)  => request(`/payment-desk/students/search${qs({ q, centerId })}`),
   studentSummary:  (id)           => request(`/payment-desk/students/${id}/summary`),
   addPayment:      (d)            => send('POST', '/payment-desk/payments', d),
+  reviewPayments:  (d)            => send('POST', '/payment-desk/payments/review', d),
+  settlementStudents: (p)         => request(`/payment-desk/settlement/students${qs(p)}`),
+  createSettlement:(fd)           => send('POST', '/payment-desk/settlements', fd),
+  settlement:      (id)           => request(`/payment-desk/settlements/${id}`),
+  updateSettlement:(id, d)        => send('PATCH', `/payment-desk/settlements/${id}`, d),
+  reverseSettlement:(id, reason)  => send('POST', `/payment-desk/settlements/${id}/reverse`, { reason }),
   editFeePayment:  (parentId, txId, d) => send('PATCH', `/payment-desk/payments/fee/${parentId}/${txId}`, d),
   editDocPayment:  (parentId, txId, d) => send('PATCH', `/payment-desk/payments/doc/${parentId}/${txId}`, d),
   editStudent:     (id, d)        => send('PATCH', `/payment-desk/students/${id}`, d),

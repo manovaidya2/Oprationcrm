@@ -14,9 +14,10 @@ const Payment         = require('../models/Payment');
 const StudentDocument = require('../models/StudentDocument');
 const PaymentAccount  = require('../models/PaymentAccount');
 const University      = require('../models/University');
+const CenterSettlement = require('../models/CenterSettlement');
 const Counselor       = require('../models/Counselor');
 const User            = require('../models/User');
-const { audit } = require('../utils/helpers');
+const { audit, notify, notifyRole } = require('../utils/helpers');
 const { findDuplicateUtrMatches, normalizeUtr } = require('../utils/utrDuplicate');
 const {
   EPS, COUNTED, PENDING, fail, r2, num, isId, esc, parseRange, ist, sendCsv, stamp,
@@ -46,7 +47,11 @@ async function viewerCounselorsByCenter(centerIds) {
   return out;
 }
 
-// ── Fee timeline: "payment adjustment" = what the student had paid BEFORE each payment ──
+// ── Fee timeline ──────────────────────────────────────────────
+// "Payment adjustment" = a settlement: one centre payment (one UTR) spread over many students, made in Centre Billing
+// or on the Payment Desk. Only verified amounts exist here; ordinary payments leave it empty.
+const ADJUSTMENT_SOURCES = ['Center Monthly Settlement'];
+const isAdjustmentTx = tx => ADJUSTMENT_SOURCES.includes(tx.source);
 const keyOf = (tx, i) => [new Date(tx.paidAt || tx.createdAt || 0).getTime(), new Date(tx.createdAt || tx.paidAt || 0).getTime(), i];
 const cmpKey = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 const netFeeOf = p => Math.max(0, r2((p?.totalFee || 0) - (p?.discount || 0)));
@@ -62,7 +67,7 @@ function feeTimeline(payment) {
   for (const { tx } of items) {
     const counted = COUNTED.includes(tx.verificationStatus || 'not_required');
     out.set(String(tx._id), {
-      net, adjustment: cum, prev,
+      net, prev,
       balance: Math.max(0, r2(net - cum - (tx.amount || 0))),
     });
     if (counted) {
@@ -81,10 +86,31 @@ function docTimeline(doc) {
   const out = new Map();
   let cum = 0, prev = null;
   for (const { p } of items) {
-    out.set(String(p._id), { net: fee, adjustment: cum, prev, balance: Math.max(0, r2(fee - cum - (p.amount || 0))) });
+    out.set(String(p._id), { net: fee, prev, balance: Math.max(0, r2(fee - cum - (p.amount || 0))) });
     if (p.verified) { cum = r2(cum + (p.amount || 0)); prev = { tx: p, balance: Math.max(0, r2(fee - cum)) }; }
   }
   return out;
+}
+
+// Everything the student has paid, from every source (own payments, settlements, desk entries), plus what is still unverified.
+function feePaymentList(payment) {
+  const items = (payment.transactions || []).map((tx, i) => ({ tx, key: keyOf(tx, i) }))
+    .filter(x => (x.tx.type || 'Fee') === 'Fee').sort((a, b) => cmpKey(a.key, b.key));
+  const view = tx => ({ txId: tx._id, amount: tx.amount || 0, paidAt: tx.paidAt, utrRef: tx.utrRef || '', accountName: tx.paidToAccountLabel || '', mode: tx.mode || '', isAdjustment: isAdjustmentTx(tx), status: tx.verificationStatus || 'not_required' });
+  const verified = items.filter(x => COUNTED.includes(x.tx.verificationStatus || 'not_required')).map(x => view(x.tx));
+  const unverified = items.filter(x => PENDING.includes(x.tx.verificationStatus)).map(x => view(x.tx));
+  return {
+    payments: verified, unverified,
+    verifiedTotal: r2(verified.reduce((a, v) => a + v.amount, 0)),
+    unverifiedAmount: r2(unverified.reduce((a, v) => a + v.amount, 0)),
+  };
+}
+function docPaymentList(doc) {
+  const items = (doc.payments || []).map((p, i) => ({ p, key: keyOf(p, i) })).sort((a, b) => cmpKey(a.key, b.key));
+  const view = p => ({ txId: p._id, amount: p.amount || 0, paidAt: p.paidAt, utrRef: p.utrRef || '', accountName: p.paidToAccountLabel || '', mode: p.mode || '', isAdjustment: false, status: p.verified ? 'verified' : 'pending' });
+  const verified = items.filter(x => x.p.verified).map(x => view(x.p));
+  const unverified = items.filter(x => !x.p.verified).map(x => view(x.p));
+  return { payments: verified, unverified, verifiedTotal: r2(verified.reduce((a, v) => a + v.amount, 0)), unverifiedAmount: r2(unverified.reduce((a, v) => a + v.amount, 0)) };
 }
 
 const isOldAdmission = s => (s.statusHistory || []).some(h => h.note === 'Backfilled by Admin');
@@ -103,7 +129,7 @@ function reasonText(s) {
 }
 
 const prevView = (prev, accLabel) => prev ? {
-  entryDate: prev.tx.createdAt || prev.tx.paidAt, utrDate: prev.tx.paidAt, utrRef: prev.tx.utrRef || '',
+  isAdjustment: isAdjustmentTx(prev.tx), entryDate: prev.tx.createdAt || prev.tx.paidAt, utrDate: prev.tx.paidAt, utrRef: prev.tx.utrRef || '',
   accountName: prev.tx.paidToAccountLabel || accLabel || '', balance: prev.balance, amount: prev.tx.amount || 0,
 } : null;
 
@@ -116,6 +142,7 @@ async function buildDayBook(q, { all = false } = {}) {
   const accountF = q.accountId || '';
   const search = String(q.search || '').trim().toLowerCase();
   const rows = [];
+  const unverified = { count: 0, amount: 0 };
   const inRange = d => d && d >= from && d < toExcl;
   const accountOk = id => !accountF || (accountF === 'none' ? !id : String(id || '') === accountF);
 
@@ -130,18 +157,21 @@ async function buildDayBook(q, { all = false } = {}) {
       const old = isOldAdmission(p.student);
       if ((typeF === 'new' && old) || (typeF === 'old' && !old)) continue;
       const tl = feeTimeline(p);
+      const all = feePaymentList(p);
       for (const tx of p.transactions) {
         if ((tx.type || 'Fee') !== 'Fee' || !inRange(tx[basis])) continue;
         const v = verificationOf(tx);
-        if (ver !== 'all' && v !== ver) continue;
         if (!accountOk(tx.paidToAccount)) continue;
+        if (v === 'pending') { unverified.count += 1; unverified.amount = r2(unverified.amount + (tx.amount || 0)); }
+        if (ver !== 'all' && v !== ver) continue;
         const t = tl.out.get(String(tx._id));
         rows.push({
           key: `fee:${p._id}:${tx._id}`, kind: 'fee', parentId: p._id, txId: tx._id,
           studentId: p.student._id, type: old ? 'OLD ADMISSION' : 'NEW ADMISSION',
           entryDate: tx.createdAt || tx.paidAt, utrDate: tx.paidAt, sortDate: tx[basis],
           student: p.student.name, enrollmentNumber: p.student.enrollmentNumber || '', course: `${p.student.courseName || ''} ${p.student.courseYear || ''}`.trim(),
-          totalFee: t.net, paid: tx.amount || 0, adjustment: t.adjustment, balance: t.balance,
+          totalFee: t.net, paid: isAdjustmentTx(tx) ? 0 : (tx.amount || 0), adjustment: isAdjustmentTx(tx) ? (tx.amount || 0) : 0,
+          isAdjustment: isAdjustmentTx(tx), source: tx.source || 'Manual', settlementId: tx.centerSettlement || null, balance: t.balance, ...all,
           utrRef: tx.utrRef || '', mode: tx.mode || '', accountId: tx.paidToAccount || null, accountName: tx.paidToAccountLabel || '',
           reason: reasonText(p.student), applicationStatus: p.student.applicationStatus,
           prev: prevView(t.prev), counselor: p.student.counselor?.name || '', center: centerName(p.center), centerId: p.center?._id,
@@ -159,18 +189,20 @@ async function buildDayBook(q, { all = false } = {}) {
       .populate('counselor', 'name').populate('center', 'name organisationName').lean();
     for (const d of docs) {
       const tl = docTimeline(d);
+      const all = docPaymentList(d);
       for (const p of d.payments || []) {
         if (!inRange(p[basis])) continue;
         const v = p.verified ? 'verified' : 'pending';
-        if (ver !== 'all' && v !== ver) continue;
         if (!accountOk(p.paidToAccount)) continue;
+        if (v === 'pending') { unverified.count += 1; unverified.amount = r2(unverified.amount + (p.amount || 0)); }
+        if (ver !== 'all' && v !== ver) continue;
         const t = tl.get(String(p._id));
         rows.push({
           key: `doc:${d._id}:${p._id}`, kind: 'doc', parentId: d._id, txId: p._id,
           studentId: d.student?._id, type: 'OTHER DOCUMENT',
           entryDate: p.createdAt || p.paidAt, utrDate: p.paidAt, sortDate: p[basis],
           student: d.student?.name || '', enrollmentNumber: d.student?.enrollmentNumber || '', course: d.name,
-          totalFee: t.net, paid: p.amount || 0, adjustment: t.adjustment, balance: t.balance,
+          totalFee: t.net, paid: p.amount || 0, adjustment: 0, isAdjustment: false, source: 'Manual', balance: t.balance, ...all,
           utrRef: p.utrRef || '', mode: p.mode || '', accountId: p.paidToAccount || null, accountName: p.paidToAccountLabel || '',
           reason: d.student ? reasonText(d.student) : '', applicationStatus: d.student?.applicationStatus || '',
           prev: prevView(t.prev), counselor: d.counselor?.name || '', center: centerName(d.center), centerId: d.center?._id,
@@ -180,6 +212,12 @@ async function buildDayBook(q, { all = false } = {}) {
     }
   }
 
+  const settlementIds = [...new Set(rows.map(r => r.settlementId).filter(Boolean).map(String))];
+  if (settlementIds.length) {
+    const found = await CenterSettlement.find({ _id: { $in: settlementIds } }).select('studentCount amount via utrRef').lean();
+    const byId = new Map(found.map(x => [String(x._id), x]));
+    rows.forEach(r => { const s = byId.get(String(r.settlementId)); if (s) r.settlement = { studentCount: s.studentCount, amount: s.amount, via: s.via || 'Centre Billing' }; });
+  }
   const viewers = await viewerCounselorsByCenter(rows.map(r => r.centerId));
   rows.forEach(r => { r.viewerCounselor = viewers.get(String(r.centerId)) || ''; });
 
@@ -189,9 +227,11 @@ async function buildDayBook(q, { all = false } = {}) {
   filtered.sort((a, b) => new Date(a.sortDate) - new Date(b.sortDate) || new Date(a.entryDate) - new Date(b.entryDate));
 
   const totals = {
+    unverified,
     count: filtered.length,
-    paid: r2(filtered.reduce((s, r) => s + r.paid, 0)),
-    byType: filtered.reduce((acc, r) => { acc[r.type] = r2((acc[r.type] || 0) + r.paid); return acc; }, {}),
+    paid: r2(filtered.filter(r => r.verification === 'verified').reduce((s, r) => s + r.paid, 0)),
+    adjusted: r2(filtered.filter(r => r.verification === 'verified').reduce((s, r) => s + r.adjustment, 0)),
+    byType: filtered.filter(r => r.verification === 'verified').reduce((acc, r) => { acc[r.type] = r2((acc[r.type] || 0) + r.paid); return acc; }, {}),
   };
   if (all) return { rows: filtered.slice(0, MAX_EXPORT_ROWS), totals };
   const page = Math.max(1, parseInt(q.page, 10) || 1);
@@ -206,11 +246,11 @@ exports.exportDayBook = asyncHandler(async (req, res) => {
   const header = ['STATUS OF TRANSACTION', 'DATE OF TRANSACTION', 'STUDENT NAME', 'COURSE NAME / OTHER DOCUMENTS', 'TOTAL FEE', 'PAID',
     'PAYMENT ADJUSTMENT', 'DATE OF UTR', 'UTR REF', 'ACCOUNT NAME', 'BALANCE', 'ENROLLMENT / REJECTION / HOLD REASON',
     'DATE OF PREVIOUS PAYMENT', 'PREVIOUS DATE OF UTR', 'PREVIOUS UTR REF', 'PREVIOUS ACCOUNT NAME', 'PREVIOUS BALANCE',
-    'COUNSELLOR', 'VIEWER COUNSELLOR', 'CENTRE NAME', 'STATUS OF DOCUMENT', 'VERIFICATION'];
+    'COUNSELLOR', 'VIEWER COUNSELLOR', 'CENTRE NAME', 'STATUS OF DOCUMENT', 'VERIFICATION', 'TOTAL VERIFIED PAID (ALL PAYMENTS)', 'UNVERIFIED AMOUNT'];
   sendCsv(res, `day-book-${stamp()}.csv`, [header, ...rows.map(r => [
-    r.type, ist(r.entryDate), r.student, r.course, r.totalFee, r.paid, r.adjustment, ist(r.utrDate), r.utrRef, r.accountName, r.balance,
+    r.isAdjustment ? `${r.type} - ADJUSTMENT` : r.type, ist(r.entryDate), r.student, r.course, r.totalFee, r.isAdjustment ? '' : r.paid, r.isAdjustment ? r.adjustment : '', ist(r.utrDate), r.utrRef, r.accountName, r.balance,
     r.reason, r.prev ? ist(r.prev.entryDate) : '', r.prev ? ist(r.prev.utrDate) : '', r.prev?.utrRef || '', r.prev?.accountName || '',
-    r.prev ? r.prev.balance : '', r.counselor, r.viewerCounselor, r.center, r.docStatus.replace(/_/g, ' '), r.verification,
+    r.prev ? r.prev.balance : '', r.counselor, r.viewerCounselor, r.center, r.docStatus.replace(/_/g, ' '), r.verification, r.verifiedTotal, r.unverifiedAmount || '',
   ])]);
 });
 
@@ -237,10 +277,13 @@ function summaryOf(student, payment) {
     counselor: student.counselor?.name || '', applicationStatus: student.applicationStatus,
     totalFee: r2(payment?.totalFee), discount: r2(payment?.discount), netFee, paid: tl.paid,
     due: Math.max(0, r2(netFee - tl.paid)),
+    installmentCount: (payment?.installments || []).length,
+    installmentTotal: r2((payment?.installments || []).reduce((s, i) => s + (i.amount || 0), 0)),
     pendingCount: (payment?.transactions || []).filter(t => (t.type || 'Fee') === 'Fee' && PENDING.includes(t.verificationStatus)).length,
     lastPayment: tl.last ? {
       entryDate: tl.last.tx.createdAt || tl.last.tx.paidAt, utrDate: tl.last.tx.paidAt, utrRef: tl.last.tx.utrRef || '',
-      accountName: tl.last.tx.paidToAccountLabel || '', amount: tl.last.tx.amount || 0, balance: tl.last.balance,
+      accountName: tl.last.tx.paidToAccountLabel || '', accountId: tl.last.tx.paidToAccount || null, mode: tl.last.tx.mode || '',
+      amount: tl.last.tx.amount || 0, balance: tl.last.balance,
     } : null,
   };
 }
@@ -313,6 +356,7 @@ exports.addPayment = asyncHandler(async (req, res) => {
     upiId: acc?.upiId || '', bankName: acc?.bankName || '', accountHolder: acc?.accountHolder || '',
     accountNumber: acc?.accountNumber || '', ifscCode: acc?.ifscCode || '',
     paidToAccount: acc?._id, paidToAccountLabel: acc?.label || '',
+    paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
     type: 'Fee', verificationStatus: 'verified', verificationNote: 'Added by Payment desk',
     recordedBy: req.user._id, verifiedBy: req.user._id, verifiedAt: new Date(),
   });
@@ -321,7 +365,110 @@ exports.addPayment = asyncHandler(async (req, res) => {
   await payment.save();
   await audit('payment_desk_payment_added', 'Payment', payment._id, req.user, { amount, utrRef, accountId: acc?._id, paidAt },
     `Payment desk added ₹${amount} (${utrRef}) for ${student.name}`);
+  await tellCentre(student.center, `A fee payment of ₹${amount} for ${student.name} has been recorded and verified.`, student._id);
   res.status(201).json(await summaryFor(student._id));
+});
+
+// ── Verify / reject unverified payments straight from the Day Book ──
+// Uses the same status fields the Counselor and Accountant screens read, so a payment verified here
+// disappears from their pending queues and counts as paid everywhere.
+async function tellCentre(centerId, message, studentId) {
+  if (!centerId) return;
+  const users = await User.find({ role: 'Center', centerId, isActive: true }).select('_id').lean();
+  await notify(users.map(u => u._id), { message, type: 'payment_verified', role: 'Center', studentId });
+}
+async function tellCounselor(counselorId, message, extra = {}) {
+  if (!counselorId) return;
+  const u = await User.findOne({ counselorId, role: 'Counselor', isActive: true }).select('_id').lean();
+  if (u) await notify(u._id, { message, type: 'payment_verified', role: 'Counselor', ...extra });
+}
+
+exports.reviewPayments = asyncHandler(async (req, res) => {
+  const action = ['verify', 'reject'].includes(req.body.action) ? req.body.action : null;
+  if (!action) throw fail('Choose verify or reject');
+  const note = String(req.body.note || '').trim();
+  if (action === 'reject' && !note) throw fail('A reason is required to reject');
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+  if (!items.length) throw fail('Select at least one payment');
+  if (items.length > 500) throw fail('Select 500 payments or fewer at a time');
+
+  const feeBy = new Map(), docBy = new Map();
+  for (const it of items) {
+    if (!isId(it.parentId) || !isId(it.txId)) throw fail('Invalid payment selected');
+    const m = it.kind === 'doc' ? docBy : feeBy;
+    if (!m.has(String(it.parentId))) m.set(String(it.parentId), new Set());
+    m.get(String(it.parentId)).add(String(it.txId));
+  }
+  if (action === 'reject' && docBy.size) throw fail('Document payments can only be verified here, not rejected');
+
+  let done = 0;
+  const skipped = [];
+  const verb = action === 'verify' ? 'verified' : 'rejected';
+
+  for (const [paymentId, txIds] of feeBy) {
+    const payment = await Payment.findById(paymentId).populate('student', 'name center counselor');
+    if (!payment) { txIds.forEach(txId => skipped.push({ txId, reason: 'Payment record not found' })); continue; }
+    const changed = [];
+    for (const txId of txIds) {
+      const tx = payment.transactions.id(txId);
+      if (!tx || (tx.type || 'Fee') !== 'Fee') { skipped.push({ txId, reason: 'Payment not found' }); continue; }
+      if (!PENDING.includes(tx.verificationStatus)) { skipped.push({ txId, reason: tx.verificationStatus === 'rejected' ? 'Already rejected' : 'Already verified' }); continue; }
+      const prev = tx.verificationStatus;
+      tx.verificationStatus = action === 'verify' ? 'verified' : 'rejected';
+      tx.verificationNote = note || (prev === 'pending_counselor' ? 'Verified by Payment desk (counselor step skipped)' : 'Verified by Payment desk');
+      tx.verifiedBy = req.user._id;
+      tx.verifiedAt = new Date();
+      changed.push({ tx, prev });
+    }
+    if (!changed.length) continue;
+    payment.lastUpdatedBy = req.user._id;
+    payment.lastUpdatedAt = new Date();
+    await payment.save();          // recalculates paid / due and installment status
+    const name = payment.student?.name || 'student';
+    for (const { tx, prev } of changed) {
+      await audit(`payment_desk_${verb}`, 'Payment', payment._id, req.user, { txId: tx._id, amount: tx.amount, utrRef: tx.utrRef, prevStatus: prev, note },
+        `Payment desk ${verb} ₹${tx.amount} (${tx.utrRef || 'no UTR'}) for ${name}${note ? `: ${note}` : ''}`);
+      const msg = action === 'verify'
+        ? `Fee payment of ₹${tx.amount} for ${name} has been verified ✓`
+        : `Fee payment of ₹${tx.amount} for ${name} was rejected: ${note}. Please correct and resubmit.`;
+      await tellCentre(payment.student?.center, msg, payment.student?._id);
+      await tellCounselor(payment.student?.counselor, msg, { studentId: payment.student?._id });
+      done += 1;
+    }
+  }
+
+  for (const [docId, payIds] of docBy) {
+    const doc = await StudentDocument.findById(docId).populate('student', 'name');
+    if (!doc) { payIds.forEach(txId => skipped.push({ txId, reason: 'Document not found' })); continue; }
+    let changed = 0, amount = 0;
+    for (const pid of payIds) {
+      const p = doc.payments.id(pid);
+      if (!p) { skipped.push({ txId: pid, reason: 'Payment not found' }); continue; }
+      if (p.verified) { skipped.push({ txId: pid, reason: 'Already verified' }); continue; }
+      p.verified = true; p.verifiedBy = req.user._id; p.verifiedAt = new Date();
+      changed += 1; amount = r2(amount + (p.amount || 0));
+    }
+    if (!changed) continue;
+    // A document waiting on payment verification moves on once all its payments are verified
+    let advanced = false;
+    if (doc.status === 'Payment_Submitted' && doc.payments.every(p => p.verified)) {
+      doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: note || 'Payment verified by Payment desk' });
+      doc.status = 'Payment_Verified';
+      advanced = true;
+    }
+    doc.lastUpdatedBy = req.user._id;
+    doc.lastUpdatedAt = new Date();
+    await doc.save();
+    await audit('payment_desk_verified', 'StudentDocument', doc._id, req.user, { amount, count: changed, advanced },
+      `Payment desk verified ₹${amount} for document "${doc.name}" (${doc.student?.name || 'student'})${advanced ? ' — sent on to dispatch' : ''}`);
+    if (advanced) {
+      await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
+      await tellCounselor(doc.counselor, `Doc payment verified for "${doc.name}" - Dispatch will courier to center`, { documentId: doc._id });
+    }
+    await tellCentre(doc.center, `Your payment of ₹${amount} for document "${doc.name}" has been verified ✓`, doc.student?._id);
+    done += changed;
+  }
+  res.json({ done, skipped });
 });
 
 // ── Edit a payment (write-back to the real transaction) ──────
@@ -354,8 +501,7 @@ function txPatch(body, current) {
 }
 
 async function applyEdit(req, target, parentLabel, exclude, saveFn, auditEntity, auditId) {
-  const reason = String(req.body.reason || '').trim();
-  if (!reason) throw fail('Reason is required to change a payment');
+  const reason = String(req.body.reason || '').trim() || 'Edited from Payment Desk';
   const { patch, diff } = txPatch(req.body, target);
   let accountChange = null;
   if (req.body.accountId !== undefined) {
@@ -366,6 +512,7 @@ async function applyEdit(req, target, parentLabel, exclude, saveFn, auditEntity,
       diff.push({ field: 'account', before, after: acc?.label || '' });
     }
   }
+  if (req.file) diff.push({ field: 'screenshot', before: target.paymentScreenshot ? 'uploaded' : 'none', after: 'uploaded' });
   if (!diff.length) throw fail('Nothing was changed');
   if (patch.utrRef && normalizeUtr(patch.utrRef) !== normalizeUtr(target.utrRef)) {
     const matches = await findDuplicateUtrMatches(patch.utrRef, exclude);
@@ -374,6 +521,7 @@ async function applyEdit(req, target, parentLabel, exclude, saveFn, auditEntity,
     }
   }
   Object.assign(target, patch);
+  if (req.file) target.paymentScreenshot = `/uploads/${req.file.filename}`;
   if (accountChange) {
     target.paidToAccount = accountChange.acc?._id;
     target.paidToAccountLabel = accountChange.acc?.label || '';
@@ -393,6 +541,7 @@ exports.editFeePayment = asyncHandler(async (req, res) => {
   const payment = await Payment.findById(req.params.parentId).populate('student', 'name');
   const tx = payment?.transactions.id(req.params.txId);
   if (!tx || (tx.type || 'Fee') !== 'Fee') throw fail('Payment not found', 404);
+  if (tx.source === 'Center Monthly Settlement') throw fail('This is a settlement (payment adjustment). Edit or reverse the whole settlement from its row.');
   await applyEdit(req, tx, payment.student?.name || 'student', { paymentId: payment._id, txId: tx._id }, () => payment.save(), 'Payment', payment._id);
   res.json(await summaryFor(payment.student._id));
 });
@@ -408,8 +557,7 @@ exports.editDocPayment = asyncHandler(async (req, res) => {
 // ── Edit student details + fee (write-back to Student / Payment) ──
 exports.editStudent = asyncHandler(async (req, res) => {
   const b = req.body;
-  const reason = String(b.reason || '').trim();
-  if (!reason) throw fail('Reason is required to change student details');
+  const reason = String(b.reason || '').trim() || 'Edited from Payment Desk';
   const student = await Student.findById(req.params.id).select('name courseName courseYear enrollmentNumber applicationStatus center').lean();
   if (!student) throw fail('Student not found', 404);
 

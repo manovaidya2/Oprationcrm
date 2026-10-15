@@ -1,7 +1,8 @@
 import { Field, Pill, Stat, RangeBar, DownloadBtn, Spinner } from './shared';
 import {
   useMemo, useState } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Scale } from 'lucide-react';
+import SettlementDialog from './SettlementDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { deskApi } from '@/lib/api';
@@ -16,7 +17,8 @@ export default function LedgerTab() {
   const meta = useMeta();
   const [f, setF] = useState({ from: monthStartYmd(), to: todayYmd(), centerId: '', view: 'center' });
   const params = useMemo(() => f, [f]);
-  const { data, loading } = useDeskData(() => deskApi.ledger(params), [params]);
+  const { data, loading, reload } = useDeskData(() => deskApi.ledger(params), [params]);
+  const [adjusting, setAdjusting] = useState(null);
   const set = patch => setF(p => ({ ...p, ...patch }));
   const openCenter = id => set({ centerId: String(id), view: 'student' });
 
@@ -82,10 +84,10 @@ export default function LedgerTab() {
         ) : (
           <table className="w-full min-w-[1200px] text-sm">
             <thead className="bg-slate-50"><tr>
-              {['Centre', 'Student', 'Enrollment', 'Course', 'Status', 'Total amount', 'Paid', 'Balance', 'Status of document'].map((h, i) => <th key={h} className={cn(TH, i >= 5 && i <= 7 && 'text-right')}>{h}</th>)}
+              {['Centre', 'Student', 'Enrollment', 'Course', 'Status', 'Total amount', 'Paid', 'Balance', 'Status of document', 'Adjust'].map((h, i) => <th key={h} className={cn(TH, i >= 5 && i <= 7 && 'text-right')}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {data?.rows.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
+              {data?.rows.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
               {data?.rows.map(r => (
                 <tr key={r.studentId} className={ROW}>
                   <td className={TD}>{r.center}</td><td className={cn(TD, 'font-medium')}>{r.name}</td><td className={TD}>{r.enrollmentNumber}</td><td className={TD}>{r.course}</td>
@@ -94,12 +96,14 @@ export default function LedgerTab() {
                   <td className={cn(TD, 'text-right tabular-nums text-emerald-700')}>{fmt(r.paid)}</td>
                   <td className={cn(TD, 'text-right font-semibold tabular-nums', r.balance > 0 && 'text-red-600')}>{fmt(r.balance)}</td>
                   <td className={TD}>{docText(r)}</td>
+                  <td className={cn(TD, 'text-center')}>{r.balance > 0 && <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => setAdjusting({ centerId: String(r.centerId || ''), studentId: String(r.studentId) })}><Scale className="mr-1 h-3.5 w-3.5" />Adjust</Button>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+      {adjusting && <SettlementDialog initialCenterId={adjusting.centerId} initialStudentId={adjusting.studentId} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); reload(); }} />}
     </div>
   );
 }

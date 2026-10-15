@@ -23,6 +23,8 @@ const centerSettlementSchema = new mongoose.Schema({
   ifscCode: { type: String, trim: true },
   paidAt: { type: Date, required: true },
   note: { type: String, trim: true },
+  via: { type: String, default: 'Centre Billing' },            // 'Centre Billing' or 'Payment Desk'
+  paymentScreenshot: { type: String, trim: true },
   paidToAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel: { type: String, trim: true },
   recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

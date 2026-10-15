@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Download, Loader2 } from 'lucide-react';
+import { Download, Loader2, Paperclip, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { deskApi } from '@/lib/api';
+import { deskApi, MEDIA } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { todayYmd, toYmd } from './helpers';
 
@@ -78,6 +78,35 @@ export function RangeBar({ from, to, onChange }) {
           <Button key={k} type="button" size="sm" variant="ghost" className="h-8 px-2 text-xs text-indigo-600" onClick={() => preset(k)}>{l}</Button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Optional screenshot picker (image or PDF, max 10 MB). Never required. ──
+const MAX_SHOT_BYTES = 10 * 1024 * 1024;
+export function ScreenshotField({ file, onFile, current }) {
+  const pick = (f) => {
+    if (!f) return;
+    if (f.size > MAX_SHOT_BYTES) return toast.error('The screenshot must be 10 MB or smaller');
+    if (!/\.(png|jpe?g|webp|pdf)$/i.test(f.name)) return toast.error('Choose an image (PNG, JPG, WEBP) or a PDF');
+    onFile(f);
+  };
+  return (
+    <div className="space-y-1.5">
+      <span className="text-xs font-medium text-slate-600">Payment screenshot <span className="font-normal text-slate-400">(optional)</span></span>
+      {file ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm">
+          <span className="flex min-w-0 items-center gap-2 text-emerald-900"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{file.name}</span><span className="shrink-0 text-xs text-emerald-700">{(file.size / 1024).toFixed(0)} KB</span></span>
+          <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-red-600" onClick={() => onFile(null)}>Remove</Button>
+        </div>
+      ) : (
+        <label className="flex cursor-pointer items-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600 hover:border-indigo-400 hover:bg-indigo-50/40">
+          <Upload className="h-4 w-4 text-slate-500" />
+          <span>Click to upload a screenshot or PDF{current && <span className="ml-2 text-xs text-slate-500">(replaces the one already attached)</span>}</span>
+          <input type="file" className="hidden" accept="image/png,image/jpeg,image/webp,application/pdf,.png,.jpg,.jpeg,.webp,.pdf" onChange={e => { pick(e.target.files?.[0]); e.target.value = ''; }} />
+        </label>
+      )}
+      {current && !file && <a href={`${MEDIA}${current}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline"><Paperclip className="h-3 w-3" />View the screenshot already attached</a>}
     </div>
   );
 }
