@@ -113,6 +113,27 @@ function docPaymentList(doc) {
   return { payments: verified, unverified, verifiedTotal: r2(verified.reduce((a, v) => a + v.amount, 0)), unverifiedAmount: r2(unverified.reduce((a, v) => a + v.amount, 0)) };
 }
 
+// One line per payment (verified, unverified and rejected), oldest first, each with the balance left after it.
+function feeLines(payment, tl) {
+  return (payment.transactions || []).map((tx, i) => ({ tx, key: keyOf(tx, i) }))
+    .filter(x => (x.tx.type || 'Fee') === 'Fee').sort((a, b) => cmpKey(a.key, b.key))
+    .map(({ tx }) => ({
+      txId: tx._id, status: verificationOf(tx), amount: tx.amount || 0, paidAt: tx.paidAt, entryDate: tx.createdAt || tx.paidAt,
+      utrRef: tx.utrRef || '', accountName: tx.paidToAccountLabel || '', accountId: tx.paidToAccount || null, mode: tx.mode || '',
+      isAdjustment: isAdjustmentTx(tx), source: tx.source || 'Manual', settlementId: tx.centerSettlement || null,
+      screenshot: tx.paymentScreenshot || '', note: tx.note || '', balance: tl.out.get(String(tx._id))?.balance ?? 0,
+    }));
+}
+function docLines(doc, tl) {
+  return (doc.payments || []).map((pay, i) => ({ pay, key: keyOf(pay, i) })).sort((a, b) => cmpKey(a.key, b.key))
+    .map(({ pay }) => ({
+      txId: pay._id, status: pay.verified ? 'verified' : 'pending', amount: pay.amount || 0, paidAt: pay.paidAt, entryDate: pay.createdAt || pay.paidAt,
+      utrRef: pay.utrRef || '', accountName: pay.paidToAccountLabel || '', accountId: pay.paidToAccount || null, mode: pay.mode || '',
+      isAdjustment: false, source: 'Manual', settlementId: null, screenshot: pay.paymentScreenshot || '', note: pay.note || '',
+      balance: tl.get(String(pay._id))?.balance ?? 0,
+    }));
+}
+
 const isOldAdmission = s => (s.statusHistory || []).some(h => h.note === 'Backfilled by Admin');
 const verificationOf = tx => {
   const st = tx.verificationStatus || 'not_required';
@@ -158,6 +179,7 @@ async function buildDayBook(q, { all = false } = {}) {
       if ((typeF === 'new' && old) || (typeF === 'old' && !old)) continue;
       const tl = feeTimeline(p);
       const all = feePaymentList(p);
+      const lines = feeLines(p, tl);
       for (const tx of p.transactions) {
         if ((tx.type || 'Fee') !== 'Fee' || !inRange(tx[basis])) continue;
         const v = verificationOf(tx);
@@ -166,7 +188,7 @@ async function buildDayBook(q, { all = false } = {}) {
         if (ver !== 'all' && v !== ver) continue;
         const t = tl.out.get(String(tx._id));
         rows.push({
-          key: `fee:${p._id}:${tx._id}`, kind: 'fee', parentId: p._id, txId: tx._id,
+          key: `fee:${p._id}:${tx._id}`, groupKey: `fee:${p._id}`, _lines: lines, kind: 'fee', parentId: p._id, txId: tx._id,
           studentId: p.student._id, type: old ? 'OLD ADMISSION' : 'NEW ADMISSION',
           entryDate: tx.createdAt || tx.paidAt, utrDate: tx.paidAt, sortDate: tx[basis],
           student: p.student.name, enrollmentNumber: p.student.enrollmentNumber || '', course: `${p.student.courseName || ''} ${p.student.courseYear || ''}`.trim(),
@@ -190,6 +212,7 @@ async function buildDayBook(q, { all = false } = {}) {
     for (const d of docs) {
       const tl = docTimeline(d);
       const all = docPaymentList(d);
+      const lines = docLines(d, tl);
       for (const p of d.payments || []) {
         if (!inRange(p[basis])) continue;
         const v = p.verified ? 'verified' : 'pending';
@@ -198,7 +221,7 @@ async function buildDayBook(q, { all = false } = {}) {
         if (ver !== 'all' && v !== ver) continue;
         const t = tl.get(String(p._id));
         rows.push({
-          key: `doc:${d._id}:${p._id}`, kind: 'doc', parentId: d._id, txId: p._id,
+          key: `doc:${d._id}:${p._id}`, groupKey: `doc:${d._id}`, _lines: lines, kind: 'doc', parentId: d._id, txId: p._id,
           studentId: d.student?._id, type: 'OTHER DOCUMENT',
           entryDate: p.createdAt || p.paidAt, utrDate: p.paidAt, sortDate: p[basis],
           student: d.student?.name || '', enrollmentNumber: d.student?.enrollmentNumber || '', course: d.name,
@@ -228,15 +251,46 @@ async function buildDayBook(q, { all = false } = {}) {
 
   const totals = {
     unverified,
-    count: filtered.length,
-    paid: r2(filtered.filter(r => r.verification === 'verified').reduce((s, r) => s + r.paid, 0)),
-    adjusted: r2(filtered.filter(r => r.verification === 'verified').reduce((s, r) => s + r.adjustment, 0)),
+    count: filtered.length,                       // payments
+    students: new Set(filtered.map(r => r.groupKey)).size,
+    paid: r2(filtered.filter(r => r.verification === 'verified').reduce((x, r) => x + r.paid, 0)),
+    adjusted: r2(filtered.filter(r => r.verification === 'verified').reduce((x, r) => x + r.adjustment, 0)),
     byType: filtered.filter(r => r.verification === 'verified').reduce((acc, r) => { acc[r.type] = r2((acc[r.type] || 0) + r.paid); return acc; }, {}),
   };
-  if (all) return { rows: filtered.slice(0, MAX_EXPORT_ROWS), totals };
+  if (all) return { rows: filtered.slice(0, MAX_EXPORT_ROWS).map(({ _lines, ...rest }) => rest), totals };
+
+  // One entry per student (or document): every payment of theirs in one place
+  const byGroup = new Map();
+  for (const r of filtered) {
+    let g = byGroup.get(r.groupKey);
+    if (!g) {
+      g = { key: r.groupKey, kind: r.kind, parentId: r.parentId, studentId: r.studentId, type: r.type, student: r.student, enrollmentNumber: r.enrollmentNumber,
+        course: r.course, totalFee: r.totalFee, reason: r.reason, applicationStatus: r.applicationStatus, counselor: r.counselor, viewerCounselor: r.viewerCounselor,
+        center: r.center, centerId: r.centerId, docStatus: r.docStatus, lines: r._lines, shownTx: new Set() };
+      byGroup.set(r.groupKey, g);
+    }
+    g.shownTx.add(String(r.txId));
+  }
   const page = Math.max(1, parseInt(q.page, 10) || 1);
   const limit = Math.min(200, Math.max(1, parseInt(q.limit, 10) || 50));
-  return { rows: filtered.slice((page - 1) * limit, page * limit), totals, page, pages: Math.ceil(filtered.length / limit) || 1 };
+  const allGroups = [...byGroup.values()];
+  const pageGroups = allGroups.slice((page - 1) * limit, page * limit);
+
+  const lineSettlementIds = [...new Set(pageGroups.flatMap(g => g.lines.map(l => l.settlementId)).filter(Boolean).map(String))];
+  const settlements = new Map();
+  if (lineSettlementIds.length) (await CenterSettlement.find({ _id: { $in: lineSettlementIds } }).select('studentCount amount via').lean()).forEach(x => settlements.set(String(x._id), x));
+  for (const g of pageGroups) {
+    g.lines = g.lines.map(l => ({ ...l, shown: g.shownTx.has(String(l.txId)), settlement: l.settlementId && settlements.get(String(l.settlementId)) ? { studentCount: settlements.get(String(l.settlementId)).studentCount, amount: settlements.get(String(l.settlementId)).amount } : null }));
+    const verified = g.lines.filter(l => l.status === 'verified');
+    g.verifiedTotal = r2(verified.reduce((x, l) => x + l.amount, 0));
+    g.adjustmentTotal = r2(verified.filter(l => l.isAdjustment).reduce((x, l) => x + l.amount, 0));
+    g.paidTotal = r2(g.verifiedTotal - g.adjustmentTotal);
+    g.unverifiedAmount = r2(g.lines.filter(l => l.status === 'pending').reduce((x, l) => x + l.amount, 0));
+    g.balance = Math.max(0, r2(g.totalFee - g.verifiedTotal));
+    delete g.shownTx;
+  }
+  const pageKeys = new Set(pageGroups.map(g => g.key));
+  return { groups: pageGroups, rows: filtered.filter(r => pageKeys.has(r.groupKey)).map(({ _lines, ...rest }) => rest), totals, page, pages: Math.ceil(allGroups.length / limit) || 1 };
 }
 
 exports.dayBook = asyncHandler(async (req, res) => res.json(await buildDayBook(req.query)));

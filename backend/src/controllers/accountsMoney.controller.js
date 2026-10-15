@@ -78,12 +78,20 @@ async function buildBankBook(q) {
     if (only && only !== a.key) continue;
     const opening = openings.find(o => (a.key === 'cash' ? (o.mode === 'Cash' || !o.account) : String(o.account) === a.key) && o.date <= from);
     let openingBalance = 0, openingAsOn = null;
+    const forThis = o => (a.key === 'cash' ? (o.mode === 'Cash' || !o.account) : String(o.account) === a.key);
+    const anchor = opening ? null : openings.filter(o => forThis(o) && o.date > from && o.date < toExcl).sort((x, y) => x.date - y.date)[0];
     if (opening) {
       openingBalance = opening.amount; openingAsOn = opening.date;
       if (opening.date < from) {
         const [c0, o0] = await Promise.all([collections(opening.date, from), outflows(opening.date, from)]);
         openingBalance = r2(openingBalance + sumBy(c0, x => x.acc === a.key) - sumBy(o0, x => x.acc === a.key));
       }
+    } else if (anchor) {
+      // The opening balance falls INSIDE the range (e.g. an "All time" view): it is the true balance on its date,
+      // so work back to the start of the range. This keeps Left + Collected - Withdrawn - Expenses = Balance.
+      const [c0, o0] = await Promise.all([collections(from, anchor.date), outflows(from, anchor.date)]);
+      openingBalance = r2(anchor.amount - (sumBy(c0, x => x.acc === a.key) - sumBy(o0, x => x.acc === a.key)));
+      openingAsOn = anchor.date;
     } else {
       // no opening entered: show what happened before the range so the balance still adds up
       const epoch = new Date(2000, 0, 1);
@@ -94,7 +102,7 @@ async function buildBankBook(q) {
     const withdrawn = sumBy(outs, x => x.acc === a.key && x.kind === 'Withdrawal');
     const expenses = sumBy(outs, x => x.acc === a.key && x.kind === 'Expense');
     rows.push({
-      key: a.key, label: a.label, mode: a.mode, isActive: a.isActive, hasOpening: !!opening, openingAsOn,
+      key: a.key, label: a.label, mode: a.mode, isActive: a.isActive, hasOpening: !!(opening || anchor), openingAsOn,
       opening: openingBalance, collection, withdrawn, expenses, balance: r2(openingBalance + collection - withdrawn - expenses),
     });
   }

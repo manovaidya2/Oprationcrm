@@ -319,7 +319,36 @@ function EditDialog({ row, onClose, onSaved, accounts }) {
 }
 
 // ── Day Book tab ─────────────────────────────────────────────
-const HEADS = [['Status'], ['Date of transaction'], ['Student'], ['Course / document'], ['Total fee', true], ['Paid', true], ['Payment adjustment', true, 'A settlement: one centre payment (one UTR, one screenshot) spread over many students, made here or in Centre Billing. Empty for ordinary payments.'], ['Date of UTR'], ['UTR ref'], ['Account name'], ['Balance', true, 'Fee still to pay after this row (payments and adjustments both count).'], ['Unverified amount', true, 'This student\'s payments that are still waiting to be verified. They are NOT counted as paid yet.'], ['Enrollment / reason'], ['Counsellor'], ['Viewer counsellor'], ['Centre'], ['Doc status']];
+// Student-level columns are single cells; the payment columns (date .. actions) list that student's payments one under another.
+const HEADS = [
+  ['Status'], ['Student'], ['Course / document'], ['Total fee', true],
+  ['Date of transaction'], ['Paid', true],
+  ['Payment adjustment', true, 'A settlement: one centre payment (one UTR, one screenshot) spread over many students, made here or in Centre Billing. Empty for ordinary payments.'],
+  ['Unverified amount', true, 'Payments still waiting to be verified. They are NOT counted as paid yet.'],
+  ['Date of UTR'], ['UTR ref'], ['Account name'], ['Payment actions'],
+  ['Total verified', true, 'Every verified payment of this student, from every source.'],
+  ['Balance', true, 'Total fee minus the total verified (right now).'],
+  ['Enrollment / reason'], ['Counsellor'], ['Viewer counsellor'], ['Centre'], ['Doc status'],
+];
+
+// what the edit / verify dialogs need to know about one payment line of a student
+const lineAsRow = (g, l) => ({
+  key: `${g.key}:${l.txId}`, kind: g.kind, parentId: g.parentId, txId: l.txId, studentId: g.studentId, student: g.student, course: g.course, type: g.type,
+  totalFee: g.totalFee, paid: l.amount, mode: l.mode, utrRef: l.utrRef, utrDate: l.paidAt, accountId: l.accountId, accountName: l.accountName, note: l.note,
+  screenshot: l.screenshot, balance: l.balance, isAdjustment: l.isAdjustment, source: l.source, settlementId: l.settlementId,
+});
+const lineTone = l => (l.status === 'pending' ? 'bg-amber-50' : l.status === 'rejected' ? 'bg-red-50/60 text-slate-400 line-through' : !l.shown ? 'text-slate-400' : '');
+// One cell that stacks a student's payments; every line has the same height so the payment columns stay aligned.
+function Lines({ g, right = false, render }) {
+  return (
+    <div>
+      {g.lines.map(l => (
+        <div key={String(l.txId)} className={cn('flex h-11 items-center border-t border-slate-100 px-4 first:border-t-0', right && 'justify-end', lineTone(l))}>{render(l)}</div>
+      ))}
+    </div>
+  );
+}
+const TDS = 'border-r border-slate-200 p-0 align-top last:border-r-0';
 
 export default function DayBookTab() {
   const meta = useMeta();
@@ -338,13 +367,14 @@ export default function DayBookTab() {
   const params = useMemo(() => ({ ...f, search }), [f, search]);
   const { data, loading, reload } = useDeskData(() => deskApi.dayBook({ ...params, page, limit: 50 }), [params, page]);
   const accounts = meta?.accounts || [];
-  const rows = data?.rows;
-  const pendingRows = useMemo(() => (rows || []).filter(r => r.verification === 'pending'), [rows]);
-  const selectable = pendingRows.length > 0;
-  const colCount = HEADS.length + 1 + (selectable ? 1 : 0);
-  const pickedRows = pendingRows.filter(r => selected.has(r.key));
-  const pickedAmount = pickedRows.reduce((s, r) => s + r.paid, 0);
-  const allPicked = selectable && pickedRows.length === pendingRows.length;
+  const groups = data?.groups;
+  const pendingGroups = useMemo(() => (groups || []).filter(g => g.unverifiedAmount > 0), [groups]);
+  const selectable = pendingGroups.length > 0;
+  const colCount = HEADS.length + (selectable ? 1 : 0);
+  const pickedGroups = pendingGroups.filter(g => selected.has(g.key));
+  const pickedRows = pickedGroups.flatMap(g => g.lines.filter(l => l.status === 'pending').map(l => lineAsRow(g, l)));   // unverified payments of the ticked students
+  const pickedAmount = pickedRows.reduce((sum, r) => sum + r.paid, 0);
+  const allPicked = selectable && pickedGroups.length === pendingGroups.length;
   const toggle = (key) => setSelected(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const toItems = list => list.map(r => ({ kind: r.kind, parentId: r.parentId, txId: r.txId }));
 
@@ -418,7 +448,8 @@ export default function DayBookTab() {
         </div>
         {data && (
           <div className={SUMMARY}>
-            <Stat label="Entries" value={data.totals.count} />
+            <Stat label="Students" value={data.totals.students} />
+            <Stat label="Payments" value={data.totals.count} />
             <Stat label="Total paid" value={fmt(data.totals.paid)} tone="text-emerald-700" />
             {data.totals.adjusted > 0 && <Stat label="Payment adjustment" value={fmt(data.totals.adjusted)} tone="text-amber-700" />}
             {Object.entries(data.totals.byType).map(([k, v]) => <Stat key={k} label={k.toLowerCase()} value={fmt(v)} />)}
@@ -438,7 +469,7 @@ export default function DayBookTab() {
       )}
       {pickedRows.length > 0 && (
         <div className="sticky top-16 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-indigo-300 bg-indigo-50 px-4 py-3 shadow-sm">
-          <span className="text-sm font-medium text-indigo-900">{pickedRows.length} selected · {fmt(pickedAmount)}</span>
+          <span className="text-sm font-medium text-indigo-900">{pickedGroups.length} student{pickedGroups.length === 1 ? '' : 's'} · {pickedRows.length} unverified payment{pickedRows.length === 1 ? '' : 's'} · {fmt(pickedAmount)}</span>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())} disabled={reviewBusy}>Clear</Button>
             <Button size="sm" variant="outline" className="border-red-300 bg-white text-red-700 hover:bg-red-50" onClick={() => startReject(pickedRows)} disabled={reviewBusy}><XCircle className="mr-1.5 h-4 w-4" />Reject selected</Button>
@@ -449,100 +480,77 @@ export default function DayBookTab() {
         </div>
       )}
       <div className="text-xs text-slate-500">
-        Scroll the table sideways to see every column (counsellors, centre, document status…). Use the pencil at the start of a row to edit it.
+        Each student appears once. Their payments are listed one under another in the payment columns. Scroll sideways to see every column, and use the pencil on a payment to edit it.
       </div>
       <div className={TABLE_WRAP}>
-        <table className="w-full min-w-[1800px] border-collapse text-[13px]">
+        <table className="w-full min-w-[2300px] border-collapse text-[13px]">
           <thead>
             <tr>
               {selectable && (
                 <th className={cn(TH, 'w-10 text-center')}>
-                  <input type="checkbox" title="Tick all unverified payments on this page" checked={allPicked}
-                    onChange={e => setSelected(e.target.checked ? new Set(pendingRows.map(r => r.key)) : new Set())} />
+                  <input type="checkbox" title="Tick every student who has unverified payments on this page" checked={allPicked}
+                    onChange={e => setSelected(e.target.checked ? new Set(pendingGroups.map(g => g.key)) : new Set())} />
                 </th>
               )}
-              <th className={cn(TH, 'w-28 text-center')}>Actions</th>
               {HEADS.map(([h, right, hint]) => <th key={h} title={hint} className={cn(TH, right && 'text-right', hint && 'cursor-help')}>{h}{hint && <span className="ml-1 text-slate-400">ⓘ</span>}</th>)}
             </tr>
           </thead>
           <tbody>
             {loading && !data && <tr><td colSpan={colCount}><Spinner /></td></tr>}
-            {data?.rows.length === 0 && <tr><td colSpan={colCount} className="p-12 text-center text-slate-400">No payments in this period</td></tr>}
-            {data?.rows.map(r => (
-              <Fragment key={r.key}>
-                <tr className={cn('border-t-2 border-slate-300 bg-white hover:bg-indigo-50/40', loading && 'opacity-60')}>
-                  {selectable && (
-                    <td className={cn(TD, 'text-center')}>
-                      {r.verification === 'pending' && <input type="checkbox" checked={selected.has(r.key)} onChange={() => toggle(r.key)} />}
-                    </td>
-                  )}
-                  <td className={cn(TD, 'text-center')}>
-                    <div className="flex items-center justify-center gap-1">
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => (r.isAdjustment && r.settlementId ? setEditingSettlement(r.settlementId) : setEditing(r))} title={r.isAdjustment ? 'Edit or reverse this settlement' : 'Edit this payment / student'}><Pencil className="h-4 w-4" /></Button>
-                      {r.studentId && <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => setAdjusting({ centerId: String(r.centerId || ''), studentId: String(r.studentId) })} title="Payment adjustment (settlement) for this student"><Scale className="mr-1 h-3.5 w-3.5" />Adjust</Button>}
-                    </div>
-                  </td>
-                  <td className={cn(TD, 'min-w-[150px]')}>
-                    <Pill tone={TYPE_TONE[r.type]}>{r.type}</Pill>
-                    {r.isAdjustment && <div className="mt-1.5"><Pill tone="bg-amber-50 text-amber-800 border-amber-300">ADJUSTMENT{r.settlement ? ` · ${r.settlement.studentCount} student${r.settlement.studentCount === 1 ? '' : 's'}` : ''}</Pill></div>}
-                    {r.verification !== 'verified' && <div className="mt-1.5"><Pill tone={VERIFY_TONE[r.verification]}>{r.verification}</Pill></div>}
-                    {r.verification === 'pending' && (
-                      <div className="mt-2 flex gap-1.5">
-                        <Button size="sm" className="h-7 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700" disabled={reviewBusy} onClick={() => startVerify([r])}><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Verify</Button>
-                        {r.kind === 'fee' && <Button size="sm" variant="outline" className="h-7 border-red-300 px-2.5 text-xs text-red-700 hover:bg-red-50" disabled={reviewBusy} onClick={() => startReject([r])}>Reject</Button>}
-                      </div>
-                    )}
-                  </td>
-                  <td className={cn(TD, 'whitespace-nowrap')}>{fmtDate(r.entryDate)}</td>
-                  <td className={cn(TD, 'min-w-[200px] font-medium text-slate-900')}>{r.student}</td>
-                  <td className={cn(TD, 'min-w-[130px]')}>{r.course}</td>
-                  <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums')}>{fmt(r.totalFee)}</td>
-                  <td className={cn(TD, 'whitespace-nowrap text-right font-semibold tabular-nums text-emerald-700')}>{r.isAdjustment ? '' : fmt(r.paid)}</td>
-                  <td className={cn(TD, 'whitespace-nowrap text-right font-semibold tabular-nums text-amber-700')}>{r.isAdjustment ? fmt(r.adjustment) : ''}</td>
-                  <td className={cn(TD, 'whitespace-nowrap')}>{fmtDate(r.utrDate)}</td>
-                  <td className={cn(TD, 'min-w-[110px] font-mono text-xs')}>{r.utrRef}{r.screenshot && <a href={`${MEDIA}${r.screenshot}`} target="_blank" rel="noreferrer" title="View payment screenshot" className="ml-1.5 inline-flex align-middle text-indigo-600 hover:text-indigo-800"><Paperclip className="h-3.5 w-3.5" /></a>}</td>
-                  <td className={cn(TD, 'min-w-[110px]')}>{r.accountName || <span className="text-slate-400">—</span>}</td>
-                  <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums', r.balance > EPS ? 'font-semibold text-red-600' : 'text-slate-500')}>{fmt(r.balance)}</td>
-                  <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums', r.unverifiedAmount > 0 && 'font-semibold text-amber-700')}>{r.unverifiedAmount > 0 ? fmt(r.unverifiedAmount) : ''}</td>
-                  <td className={cn(TD, 'min-w-[150px] text-xs')}>{r.reason || <span className="text-slate-400">—</span>}</td>
-                  <td className={cn(TD, 'min-w-[110px]')}>{r.counselor || <span className="text-slate-400">—</span>}</td>
-                  <td className={cn(TD, 'min-w-[130px]')}>{r.viewerCounselor || <span className="text-slate-400">—</span>}</td>
-                  <td className={cn(TD, 'min-w-[140px]')}>{r.center}</td>
-                  <td className={cn(TD, 'min-w-[110px] text-xs')}>{statusText(r.docStatus) || <span className="text-slate-400">—</span>}</td>
-                </tr>
-                {(r.payments?.length > 0 || r.unverified?.length > 0) && (
-                  <tr className="border-t border-dashed border-slate-300 bg-slate-50 text-xs text-slate-600">
-                    <td colSpan={colCount} className="px-4 py-2.5">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                        <span className="font-medium text-slate-700">All verified payments of this {r.kind === 'doc' ? 'document' : 'student'}:</span>
-                        {r.payments.length === 0 && <span className="text-slate-400">none yet</span>}
-                        {r.payments.map(x => (
-                          <span key={x.txId} className={cn('inline-flex flex-wrap items-center gap-x-1.5 rounded-md border px-2 py-1',
-                            String(x.txId) === String(r.txId) ? 'border-indigo-400 bg-indigo-50 text-indigo-900' : x.isAdjustment ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-300 bg-white')}>
-                            <b className="tabular-nums">{fmt(x.amount)}</b><span>{fmtDate(x.paidAt)}</span>
-                            {x.utrRef && <span className="font-mono">{x.utrRef}</span>}
-                            {x.accountName && <span>· {x.accountName}</span>}
-                            {x.isAdjustment && <span className="font-medium">· adjustment</span>}
-                          </span>
-                        ))}
-                        <span className="ml-1 font-semibold text-slate-800">= {fmt(r.verifiedTotal)} verified</span>
-                        <span className="text-slate-300">|</span>
-                        <span>Balance now <b className={Math.max(0, r2(r.totalFee - r.verifiedTotal)) > EPS ? 'text-red-600' : 'text-emerald-700'}>{fmt(Math.max(0, r2(r.totalFee - r.verifiedTotal)))}</b></span>
-                      </div>
-                      {r.unverified.length > 0 && (
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                          <span className="font-medium text-amber-800">Unverified ({fmt(r.unverifiedAmount)}), not counted yet:</span>
-                          {r.unverified.map(x => (
-                            <span key={x.txId} className="inline-flex flex-wrap items-center gap-x-1.5 rounded-md border border-dashed border-amber-400 bg-amber-50 px-2 py-1 text-amber-900">
-                              <b className="tabular-nums">{fmt(x.amount)}</b><span>{fmtDate(x.paidAt)}</span>{x.utrRef && <span className="font-mono">{x.utrRef}</span>}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
+            {groups?.length === 0 && <tr><td colSpan={colCount} className="p-12 text-center text-slate-400">No payments in this period</td></tr>}
+            {groups?.map(g => (
+              <tr key={g.key} className={cn('border-t-2 border-slate-300 bg-white hover:bg-indigo-50/30', loading && 'opacity-60')}>
+                {selectable && (
+                  <td className={cn(TD, 'text-center')}>{g.unverifiedAmount > 0 && <input type="checkbox" title="Select this student's unverified payments" checked={selected.has(g.key)} onChange={() => toggle(g.key)} />}</td>
                 )}
-              </Fragment>
+                <td className={cn(TD, 'min-w-[150px]')}><Pill tone={TYPE_TONE[g.type]}>{g.type}</Pill></td>
+                <td className={cn(TD, 'min-w-[220px]')}>
+                  <div className="font-medium text-slate-900">{g.student}</div>
+                  {g.enrollmentNumber && <div className="text-xs text-slate-500">{g.enrollmentNumber}</div>}
+                  {g.studentId && (
+                    <Button size="sm" variant="outline" className="mt-2 h-7 px-2 text-xs" title="Payment adjustment (settlement) for this student"
+                      onClick={() => setAdjusting({ centerId: String(g.centerId || ''), studentId: String(g.studentId) })}><Scale className="mr-1 h-3.5 w-3.5" />Adjust</Button>
+                  )}
+                </td>
+                <td className={cn(TD, 'min-w-[140px]')}>{g.course}</td>
+                <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums')}>{fmt(g.totalFee)}</td>
+
+                <td className={cn(TDS, 'min-w-[130px]')}><Lines g={g} render={l => <span className="whitespace-nowrap">{fmtDate(l.entryDate)}</span>} /></td>
+                <td className={cn(TDS, 'min-w-[120px]')}><Lines g={g} right render={l => (l.status !== 'pending' && !l.isAdjustment ? <b className={cn('tabular-nums', l.status === 'verified' && 'text-emerald-700')}>{fmt(l.amount)}</b> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'verified' && l.isAdjustment ? <b className="tabular-nums text-amber-700" title={l.settlement ? `Settlement of ${fmt(l.settlement.amount)} over ${l.settlement.studentCount} students` : 'Settlement'}>{fmt(l.amount)}</b> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'pending' ? <b className="tabular-nums text-amber-800">{fmt(l.amount)}</b> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[120px]')}><Lines g={g} render={l => <span className="whitespace-nowrap">{fmtDate(l.paidAt)}</span>} /></td>
+                <td className={cn(TDS, 'min-w-[170px]')}>
+                  <Lines g={g} render={l => (
+                    <span className="inline-flex items-center gap-1.5 font-mono text-xs">{l.utrRef || <span className="text-slate-400">—</span>}
+                      {l.screenshot && <a href={`${MEDIA}${l.screenshot}`} target="_blank" rel="noreferrer" title="View payment screenshot" className="text-indigo-600 hover:text-indigo-800"><Paperclip className="h-3.5 w-3.5" /></a>}
+                    </span>
+                  )} />
+                </td>
+                <td className={cn(TDS, 'min-w-[150px]')}><Lines g={g} render={l => (l.accountName || <span className="text-slate-400">—</span>)} /></td>
+                <td className={cn(TDS, 'min-w-[250px]')}>
+                  <Lines g={g} render={l => (
+                    <span className="flex items-center gap-1.5">
+                      <Button size="sm" variant="ghost" className="h-8 w-8 shrink-0 p-0" title={l.isAdjustment ? 'Edit or reverse this settlement' : 'Edit this payment / student'}
+                        onClick={() => (l.isAdjustment && l.settlementId ? setEditingSettlement(l.settlementId) : setEditing(lineAsRow(g, l)))}><Pencil className="h-4 w-4" /></Button>
+                      {l.status === 'pending' && (<>
+                        <Button size="sm" className="h-7 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700" disabled={reviewBusy} onClick={() => startVerify([lineAsRow(g, l)])}><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Verify</Button>
+                        {g.kind === 'fee' && <Button size="sm" variant="outline" className="h-7 border-red-300 px-2.5 text-xs text-red-700 hover:bg-red-50" disabled={reviewBusy} onClick={() => startReject([lineAsRow(g, l)])}>Reject</Button>}
+                      </>)}
+                      {l.status === 'rejected' && <Pill tone={VERIFY_TONE.rejected}>rejected</Pill>}
+                      {l.isAdjustment && l.settlement && <span className="text-[11px] text-amber-700">settlement · {l.settlement.studentCount} student{l.settlement.studentCount === 1 ? '' : 's'}</span>}
+                    </span>
+                  )} />
+                </td>
+
+                <td className={cn(TD, 'whitespace-nowrap text-right font-semibold tabular-nums text-emerald-700')}>{fmt(g.verifiedTotal)}</td>
+                <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums', g.balance > EPS ? 'font-semibold text-red-600' : 'text-slate-500')}>{fmt(g.balance)}</td>
+                <td className={cn(TD, 'min-w-[150px] text-xs')}>{g.reason || <span className="text-slate-400">—</span>}</td>
+                <td className={cn(TD, 'min-w-[110px]')}>{g.counselor || <span className="text-slate-400">—</span>}</td>
+                <td className={cn(TD, 'min-w-[130px]')}>{g.viewerCounselor || <span className="text-slate-400">—</span>}</td>
+                <td className={cn(TD, 'min-w-[140px]')}>{g.center}</td>
+                <td className={cn(TD, 'min-w-[110px] text-xs')}>{statusText(g.docStatus) || <span className="text-slate-400">—</span>}</td>
+              </tr>
             ))}
           </tbody>
         </table>

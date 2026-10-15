@@ -3,7 +3,8 @@ import { Loader2, GraduationCap, Building2, UserCog, IndianRupee, TrendingUp, Cl
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/context/AuthContext';
-import { dashApi, studentsApi } from '@/lib/api';
+import { dashApi, deskApi, studentsApi } from '@/lib/api';
+import { toYmd, todayYmd, useDeskData } from './paymentdesk/helpers';
 import { toast } from 'sonner';
 
 const fmt   = n => `₹${(Number(n) || 0).toLocaleString('en-IN')}`;
@@ -435,82 +436,217 @@ function CenterFeesTable({ centers }) {
 }
 
 // ── Bank / Account Wise Breakdown ────────────────────────────
-function BankWiseSection({ data, allPayments }) {
-  const [modal,    setModal]    = useState(null);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo,   setDateTo]   = useState('');
-  if (!data?.length) return null;
+// Collections come from verified payments. Opening balance, withdrawals and expenses come from the Payment Desk's
+// Bank Book, so these numbers update by themselves when they are entered there.
+const ALL_FROM = '2000-01-01';
+const monthRange = (m) => {
+  const [y, mo] = m.split('-').map(Number);
+  return { from: toYmd(new Date(y, mo - 1, 1)), to: toYmd(new Date(y, mo, 0)) };
+};
+const fmtD = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
-  const fmtD = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+function Tile({ label, value, tone = 'text-slate-800', hint }) {
+  return (
+    <div className="min-w-[96px]" title={hint}>
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`text-sm font-bold tabular-nums ${tone}`}>{value}</div>
+    </div>
+  );
+}
 
-  function getTxns(accId) {
-    const rows = [];
-    (allPayments || []).forEach(p => {
-      (p.transactions || []).forEach(tx => {
-        if (tx.verificationStatus !== 'verified') return;
-        if (!tx.paidToAccount || String(tx.paidToAccount) !== accId) return;
-        if (dateFrom && new Date(tx.verifiedAt) < new Date(dateFrom)) return;
-        if (dateTo   && new Date(tx.verifiedAt) > new Date(dateTo + 'T23:59:59')) return;
-        rows.push({ ...tx, studentName: p.studentName || '' });
-      });
-    });
-    return rows.sort((a,b) => new Date(b.verifiedAt) - new Date(a.verifiedAt));
-  }
+function AccountModal({ acc, allPayments, initialFrom, initialTo, onClose }) {
+  const [dateFrom, setDateFrom] = useState(initialFrom);
+  const [dateTo, setDateTo] = useState(initialTo);
+  const range = { from: dateFrom || ALL_FROM, to: dateTo || todayYmd() };
+  const { data: book } = useDeskData(() => deskApi.bankBook({ ...range, accountId: acc.id }), [acc.id, range.from, range.to]);
+  const { data: out } = useDeskData(() => deskApi.entries({ ...range, accountId: acc.id }), [acc.id, range.from, range.to]);
+  const line = book?.rows?.[0];
+  const isUPI = acc.mode === 'UPI';
+  const isBank = acc.mode === 'Bank Transfer';
 
-  function downloadCSV(acc, txns) {
+  // Payments received in this account, by the date they were PAID (the same basis as the Bank Book)
+  const txns = [];
+  (allPayments || []).forEach(p => (p.transactions || []).forEach(tx => {
+    if (tx.verificationStatus !== 'verified' || !tx.paidToAccount || String(tx.paidToAccount) !== acc.id) return;
+    const paid = tx.paidAt || tx.verifiedAt;
+    if (dateFrom && new Date(paid) < new Date(dateFrom)) return;
+    if (dateTo && new Date(paid) > new Date(`${dateTo}T23:59:59`)) return;
+    txns.push({ ...tx, studentName: p.studentName || '' });
+  }));
+  txns.sort((a, b) => new Date(b.paidAt || b.verifiedAt) - new Date(a.paidAt || a.verifiedAt));
+  const total = txns.reduce((s, t) => s + Number(t.amount || 0), 0);
+
+  function downloadCSV() {
     if (!txns.length) { alert('No transactions found'); return; }
-    const total     = txns.reduce((s,t) => s + Number(t.amount||0), 0);
-    const dateLabel = dateFrom||dateTo ? `${dateFrom||'start'} to ${dateTo||'today'}` : 'All time';
+    const dateLabel = dateFrom || dateTo ? `${dateFrom || 'start'} to ${dateTo || 'today'}` : 'All time';
     const summary = [
       ['Account', acc.label], ['Mode', acc.mode],
-      acc.upiId         ? ['UPI ID',        acc.upiId]         : null,
-      acc.upiName       ? ['UPI Name',       acc.upiName]       : null,
-      acc.bankName      ? ['Bank',           acc.bankName]      : null,
-      acc.accountHolder ? ['Account Holder', acc.accountHolder] : null,
-      acc.accountNumber ? ['Account No',     acc.accountNumber] : null,
-      acc.ifscCode      ? ['IFSC',           acc.ifscCode]      : null,
-      acc.branch        ? ['Branch',         acc.branch]        : null,
+      acc.upiId ? ['UPI ID', acc.upiId] : null, acc.upiName ? ['UPI Name', acc.upiName] : null,
+      acc.bankName ? ['Bank', acc.bankName] : null, acc.accountHolder ? ['Account Holder', acc.accountHolder] : null,
+      acc.accountNumber ? ['Account No', acc.accountNumber] : null, acc.ifscCode ? ['IFSC', acc.ifscCode] : null, acc.branch ? ['Branch', acc.branch] : null,
       ['Period', dateLabel],
-      ['Total Transactions', txns.length],
-      ['Total Amount', total], [],
-      ['Sr.No','Student Name','Amount','Mode','UTR','UPI ID','Bank','Account Holder','Account No','Paid Date','Verified Date','Verified By'],
+      line ? ['Left amount (opening balance)', line.opening] : null, line ? ['Collected', line.collection] : null,
+      line ? ['Withdrawn', line.withdrawn] : null, line ? ['Expenses paid', line.expenses] : null, line ? ['Balance', line.balance] : null,
+      ['Total Transactions', txns.length], ['Total Amount', total], [],
+      ['Sr.No', 'Student Name', 'Amount', 'Mode', 'UTR', 'UPI ID', 'Bank', 'Account Holder', 'Account No', 'Paid Date', 'Verified Date', 'Verified By'],
     ].filter(Boolean);
-    const rows = txns.map((t,i) => [
-      i+1, t.studentName, t.amount||0, t.mode||'',
-      t.utrRef||'', t.upiId||'', t.bankName||'', t.accountHolder||'', t.accountNumber||'',
-      fmtD(t.paidAt), fmtD(t.verifiedAt), t.verifiedBy?.name||'',
-    ]);
-    const esc  = v => `"${String(v).replace(/"/g,'""')}"`;
-    const csv  = [...summary,...rows].map(r => r.map(esc).join(',')).join('\n');
-    const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
+    const rows = txns.map((t, i) => [i + 1, t.studentName, t.amount || 0, t.mode || '', t.utrRef || '', t.upiId || '', t.bankName || '', t.accountHolder || '', t.accountNumber || '', fmtD(t.paidAt), fmtD(t.verifiedAt), t.verifiedBy?.name || '']);
+    const esc = v => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [...summary, ...rows].map(r => r.map(esc).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
     a.href = url;
-    const ds = dateFrom||dateTo ? `_${dateFrom||''}to${dateTo||''}` : '';
-    a.download = `${acc.label.replace(/[^a-z0-9]/gi,'_')}_history${ds}.csv`;
+    a.download = `${acc.label.replace(/[^a-z0-9]/gi, '_')}_history${dateFrom || dateTo ? `_${dateFrom || ''}to${dateTo || ''}` : ''}.csv`;
     a.click(); URL.revokeObjectURL(url);
   }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-100 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isUPI ? 'bg-blue-100' : 'bg-emerald-100'}`}>
+                <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="font-bold text-slate-800">{acc.label}</h2>
+                  <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isUPI ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{acc.mode}</span>
+                </div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {isUPI && acc.upiId && <span>UPI: <b className="font-mono">{acc.upiId}</b>{acc.upiName ? ` — ${acc.upiName}` : ''}</span>}
+                  {isBank && <span>{acc.bankName}{acc.accountHolder ? ` · ${acc.accountHolder}` : ''}{acc.accountNumber ? ` · A/C: ${acc.accountNumber}` : ''}{acc.ifscCode ? ` · ${acc.ifscCode}` : ''}</span>}
+                </div>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none mt-0.5">✕</button>
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div>
+              <div className="text-xs text-slate-500 mb-1">From</div>
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400" />
+            </div>
+            <div>
+              <div className="text-xs text-slate-500 mb-1">To</div>
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400" />
+            </div>
+            {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-xs text-red-400 hover:text-red-600 h-8 px-1">✕ All time</button>}
+            <button onClick={downloadCSV} className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 h-8 transition-colors">↓ Download CSV</button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-5">
+            <Tile label="Left (opening)" value={line ? fmt(line.opening) : '…'} hint="Balance in this account at the start of the period" />
+            <Tile label="Collected" value={line ? fmt(line.collection) : '…'} tone="text-emerald-700" hint="Verified payments received in this account in the period" />
+            <Tile label="Withdrawn" value={line ? fmt(line.withdrawn) : '…'} tone="text-amber-700" hint="Withdrawals entered in the Payment Desk Bank Book" />
+            <Tile label="Expenses" value={line ? fmt(line.expenses) : '…'} tone="text-amber-700" hint="Expenses paid from this account (Payment Desk)" />
+            <Tile label="Balance" value={line ? fmt(line.balance) : '…'} tone={line && line.balance < 0 ? 'text-red-600' : 'text-indigo-700'} hint="Left + Collected − Withdrawn − Expenses" />
+          </div>
+          {line && !line.hasOpening && <div className="mt-1.5 text-[11px] text-amber-700">No opening balance was entered for this account, so “Left” only reflects what the CRM knows. Set it in Payment Desk → Bank / Cash Book.</div>}
+        </div>
+
+        <div className="overflow-y-auto flex-1 px-5 py-3 space-y-3">
+          {(out?.entries?.length > 0) && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+              <div className="mb-1.5 text-xs font-semibold text-amber-900">Withdrawn / paid out from this account in the period</div>
+              {out.entries.map(e => (
+                <div key={e._id} className="flex items-center justify-between gap-3 border-t border-amber-100 py-1 text-xs first:border-t-0">
+                  <span className="text-slate-600">{fmtD(e.date)} · <b className="text-slate-800">{e.head || 'Withdrawal'}</b>{e.note ? ` · ${e.note}` : ''}</span>
+                  <b className="tabular-nums text-amber-800">{fmt(e.amount)}</b>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
+              <div className="text-xs text-indigo-500">Total collected (list below)</div>
+              <div className="font-bold text-indigo-700">{fmt(total)}</div>
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+              <div className="text-xs text-muted-foreground">Transactions</div>
+              <div className="font-bold text-slate-700">{txns.length}</div>
+            </div>
+          </div>
+          {txns.length === 0 ? (
+            <div className="text-center text-muted-foreground py-12">
+              <IndianRupee className="h-8 w-8 mx-auto mb-2 opacity-20" />
+              <p className="text-sm">No verified transactions{(dateFrom || dateTo) ? ' in the selected dates' : ''}</p>
+            </div>
+          ) : txns.map((tx, ti) => (
+            <div key={tx._id || ti} className="border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-colors">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-400 font-mono w-5">#{ti + 1}</span>
+                <span className="font-semibold text-slate-800 text-sm">{tx.studentName}</span>
+                <span className="font-bold text-emerald-700">{fmt(tx.amount)}</span>
+                {tx.mode && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{tx.mode}</span>}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-0.5 pl-7">
+                {tx.utrRef && <span>UTR: <b className="font-mono text-foreground">{tx.utrRef}</b></span>}
+                {tx.upiId && <span>UPI: {tx.upiId}</span>}
+                {tx.accountHolder && <span>A/C Holder: <b>{tx.accountHolder}</b></span>}
+                <span>Paid: {fmtD(tx.paidAt)}</span>
+                {tx.verifiedAt && <span className="text-emerald-600">✓ Verified: {fmtD(tx.verifiedAt)}</span>}
+                {tx.verifiedBy?.name && <span>by {tx.verifiedBy.name}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BankWiseSection({ data, allPayments }) {
+  const [modal, setModal] = useState(null);
+  const [month, setMonth] = useState(() => todayYmd().slice(0, 7));          // '' = all time
+  const range = month ? monthRange(month) : { from: ALL_FROM, to: todayYmd() };
+  const { data: book, loading } = useDeskData(() => deskApi.bankBook(range), [range.from, range.to]);
+  if (!data?.length) return null;
+
+  const byId = new Map((book?.rows || []).map(r => [r.key, r]));
+  const noOpening = (book?.rows || []).filter(r => r.key !== 'cash' && !r.hasOpening && data.some(a => a.id === r.key)).length;
+  const t = book?.totals;
+  const periodLabel = month ? new Date(`${month}-01`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }) : 'All time';
 
   return (
     <>
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <IndianRupee className="h-4 w-4 text-indigo-600"/>Payment Accounts — Collection Summary
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-0.5">Click on any account to view its transaction history</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2"><IndianRupee className="h-4 w-4 text-indigo-600" />Payment Accounts — Collection Summary</CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">{periodLabel}: what was left, what came in, what was withdrawn, and what remains. Click an account for its transactions.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="h-8 rounded-lg border border-slate-200 px-2 text-xs focus:outline-none focus:border-indigo-400" />
+              <button onClick={() => setMonth(todayYmd().slice(0, 7))} className={`h-8 rounded-lg border px-3 text-xs font-medium ${month === todayYmd().slice(0, 7) ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>This month</button>
+              <button onClick={() => setMonth('')} className={`h-8 rounded-lg border px-3 text-xs font-medium ${!month ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>All time</button>
+            </div>
+          </div>
+          {t && (
+            <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-2.5">
+              <Tile label="Left (opening)" value={fmt(t.opening)} />
+              <Tile label="Collected" value={fmt(t.collection)} tone="text-emerald-700" />
+              <Tile label="Withdrawn" value={fmt(t.withdrawn)} tone="text-amber-700" />
+              <Tile label="Expenses" value={fmt(t.expenses)} tone="text-amber-700" />
+              <Tile label="Balance" value={fmt(t.balance)} tone="text-indigo-700" />
+              <span className="self-end text-[11px] text-slate-500">all accounts incl. cash</span>
+            </div>
+          )}
+          {noOpening > 0 && <p className="mt-1.5 text-[11px] text-amber-700">{noOpening} account{noOpening === 1 ? ' has' : 's have'} no opening balance entered. Set it in Payment Desk → Bank / Cash Book so “Left” is exact.</p>}
         </CardHeader>
-        <CardContent className="space-y-2 pt-1">
+        <CardContent className={`space-y-2 pt-1 ${loading && !book ? 'opacity-60' : ''}`}>
           {data.map(acc => {
-            const isUPI  = acc.mode === 'UPI';
+            const isUPI = acc.mode === 'UPI';
             const isBank = acc.mode === 'Bank Transfer';
+            const b = byId.get(acc.id);
             return (
-              <div key={acc.id}
-                className="flex items-center justify-between rounded-lg border px-4 py-3 bg-background hover:bg-slate-50 cursor-pointer transition-colors group"
-                onClick={() => setModal(acc)}>
+              <div key={acc.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-4 py-3 bg-background hover:bg-slate-50 cursor-pointer transition-colors group" onClick={() => setModal(acc)}>
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isUPI ? 'bg-blue-100' : 'bg-emerald-100'}`}>
-                    <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`}/>
+                    <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`} />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -523,12 +659,12 @@ function BankWiseSection({ data, allPayments }) {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <div className="text-right">
-                    <div className={`font-bold text-sm ${acc.total > 0 ? 'text-emerald-700' : 'text-muted-foreground'}`}>{fmt(acc.total)}</div>
-                    <div className="text-xs text-muted-foreground">{acc.count} txn{acc.count !== 1 ? 's' : ''}</div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-500 transition-colors"/>
+                <div className="flex items-center gap-5 flex-shrink-0">
+                  <Tile label="Left" value={b ? fmt(b.opening) : '…'} hint="Balance at the start of the period" />
+                  <Tile label="Collected" value={b ? fmt(b.collection) : '…'} tone={b?.collection > 0 ? 'text-emerald-700' : 'text-muted-foreground'} />
+                  <Tile label="Withdrawn" value={b ? fmt(b.withdrawn + b.expenses) : '…'} tone={b && b.withdrawn + b.expenses > 0 ? 'text-amber-700' : 'text-muted-foreground'} hint="Withdrawals + expenses paid from this account" />
+                  <Tile label="Balance" value={b ? fmt(b.balance) : '…'} tone={b && b.balance < 0 ? 'text-red-600' : 'text-indigo-700'} />
+                  <ChevronRight className="h-4 w-4 text-slate-300 group-hover:text-indigo-500 transition-colors" />
                 </div>
               </div>
             );
@@ -536,101 +672,10 @@ function BankWiseSection({ data, allPayments }) {
         </CardContent>
       </Card>
 
-      {modal && (() => {
-        const txns = getTxns(modal.id);
-        const total = txns.reduce((s,t) => s + Number(t.amount||0), 0);
-        const isUPI  = modal.mode === 'UPI';
-        const isBank = modal.mode === 'Bank Transfer';
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setModal(null)}>
-            <div className="absolute inset-0 bg-black/40"/>
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
-              onClick={e => e.stopPropagation()}>
-              <div className="px-5 py-4 border-b border-slate-100 flex-shrink-0">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center flex-shrink-0 ${isUPI ? 'bg-blue-100' : 'bg-emerald-100'}`}>
-                      <IndianRupee className={`h-4 w-4 ${isUPI ? 'text-blue-600' : 'text-emerald-600'}`}/>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-bold text-slate-800">{modal.label}</h2>
-                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${isUPI ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>{modal.mode}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {isUPI && modal.upiId && <span>UPI: <b className="font-mono">{modal.upiId}</b>{modal.upiName ? ` — ${modal.upiName}` : ''}</span>}
-                        {isBank && <span>{modal.bankName}{modal.accountHolder ? ` · ${modal.accountHolder}` : ''}{modal.accountNumber ? ` · A/C: ${modal.accountNumber}` : ''}{modal.ifscCode ? ` · ${modal.ifscCode}` : ''}</span>}
-                      </div>
-                    </div>
-                  </div>
-                  <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none mt-0.5">✕</button>
-                </div>
-                <div className="mt-3 flex flex-wrap items-end gap-2">
-                  <div>
-                    <div className="text-xs text-slate-500 mb-1">From</div>
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                      onClick={e => e.stopPropagation()}
-                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400"/>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 mb-1">To</div>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                      onClick={e => e.stopPropagation()}
-                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 h-8 focus:outline-none focus:border-indigo-400"/>
-                  </div>
-                  {(dateFrom||dateTo) && (
-                    <button onClick={e=>{e.stopPropagation();setDateFrom('');setDateTo('');}}
-                      className="text-xs text-red-400 hover:text-red-600 h-8 px-1">✕ Clear</button>
-                  )}
-                  <button onClick={e=>{e.stopPropagation();downloadCSV(modal,txns);}}
-                    className="ml-auto flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-3 h-8 transition-colors">
-                    ↓ Download CSV
-                  </button>
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5">
-                    <div className="text-xs text-indigo-500">Total Collected</div>
-                    <div className="font-bold text-indigo-700">{fmt(total)}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
-                    <div className="text-xs text-muted-foreground">Transactions</div>
-                    <div className="font-bold text-slate-700">{txns.length}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="overflow-y-auto flex-1 px-5 py-3 space-y-2">
-                {txns.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-12">
-                    <IndianRupee className="h-8 w-8 mx-auto mb-2 opacity-20"/>
-                    <p className="text-sm">No verified transactions{(dateFrom||dateTo) ? ' in selected date range' : ''}</p>
-                  </div>
-                ) : txns.map((tx, ti) => (
-                  <div key={tx._id||ti} className="border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-colors">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs text-slate-400 font-mono w-5">#{ti+1}</span>
-                          <span className="font-semibold text-slate-800 text-sm">{tx.studentName}</span>
-                          <span className="font-bold text-emerald-700">{fmt(tx.amount)}</span>
-                          {tx.mode && <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{tx.mode}</span>}
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-4 gap-y-0.5 pl-7">
-                          {tx.utrRef && <span>UTR: <b className="font-mono text-foreground">{tx.utrRef}</b></span>}
-                          {tx.upiId  && <span>UPI: {tx.upiId}</span>}
-                          {tx.accountHolder && <span>A/C Holder: <b>{tx.accountHolder}</b></span>}
-                          <span>Paid: {fmtD(tx.paidAt)}</span>
-                          <span className="text-emerald-600">✓ Verified: {fmtD(tx.verifiedAt)}</span>
-                          {tx.verifiedBy?.name && <span>by {tx.verifiedBy.name}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {modal && (
+        <AccountModal key={modal.id} acc={modal} allPayments={allPayments} onClose={() => setModal(null)}
+          initialFrom={month ? range.from : ''} initialTo={month ? range.to : ''} />
+      )}
     </>
   );
 }

@@ -514,10 +514,13 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
       };
     });
 
-    // Accumulate verified transactions — match strictly by ObjectId
+    // Accumulate verified transactions — match strictly by ObjectId.
+    // "Verified" here means the same as in the Payment Desk Bank Book (verified or not_required), and document payments count too,
+    // so these totals agree with the Bank Book.
+    const isCounted = tx => ['verified', 'not_required'].includes(tx.verificationStatus || 'not_required');
     allPayments.forEach(p => {
       (p.transactions || []).forEach(tx => {
-        if (tx.verificationStatus !== 'verified') return;
+        if (!isCounted(tx)) return;
         if (!tx.paidToAccount) return; // skip unassigned
         const key = String(tx.paidToAccount);
         if (!bankWiseMap[key]) return; // account not in active list
@@ -525,6 +528,14 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
         bankWiseMap[key].count += 1;
       });
     });
+    const paidDocs = await StudentDoc.find({ 'payments.verified': true }).select('student name payments').populate('student', 'name').lean();
+    paidDocs.forEach(d => (d.payments || []).forEach(pay => {
+      if (!pay.verified || !pay.paidToAccount) return;
+      const key = String(pay.paidToAccount);
+      if (!bankWiseMap[key]) return;
+      bankWiseMap[key].total += pay.amount || 0;
+      bankWiseMap[key].count += 1;
+    }));
 
     const bankWiseBreakdown = Object.values(bankWiseMap).sort((a, b) => b.total - a.total);
 
@@ -535,9 +546,16 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
       studentName: studentMap[String(p.student)] || '',
       transactions: (p.transactions || []).map(tx => ({
         ...tx,
+        verificationStatus: isCounted(tx) ? 'verified' : tx.verificationStatus,
         paidToAccount: tx.paidToAccount ? String(tx.paidToAccount) : null,
       })),
     }));
+    paidDocs.forEach(d => {
+      const txs = (d.payments || []).filter(pay => pay.verified && pay.paidToAccount).map(pay => ({
+        ...pay, verificationStatus: 'verified', paidToAccount: String(pay.paidToAccount), verifiedBy: undefined,
+      }));
+      if (txs.length) allPaymentsFlat.push({ studentName: `${d.student?.name || ''} · ${d.name}`, transactions: txs });
+    });
 
     return res.json({ studentCount, centerCount, counselorCount, statusBreakdown, totalFees, totalPaid, totalDue: totalFees - totalPaid, centersBreakdown, monthlyFees, bankWiseBreakdown, allPaymentsFlat });
   }
