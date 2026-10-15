@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check, FileSpreadsheet, FileText,
+  CalendarClock, Check, FileSpreadsheet, FileText, Landmark,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -22,6 +22,7 @@ const NAV_CONFIG = {
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
     { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',         label: 'Team Chat',    icon: MessageSquare },
     { to: '/universities', label: 'Universities', icon: University },
@@ -57,6 +58,7 @@ const NAV_CONFIG = {
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
+    { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
     { to: '/invoice', label: 'Invoice', icon: FileText },
     { to: '/chat',       label: 'Team Chat',        icon: MessageSquare },
   ],
@@ -68,6 +70,10 @@ const NAV_CONFIG = {
     { to: '/dispatch', label: 'Documents', icon: Package },
     { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
+    { to: '/chat', label: 'Team Chat', icon: MessageSquare },
+  ],
+  Payment: [
+    { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
   PaymentCoordinator: [
@@ -88,6 +94,7 @@ const ROLE_COLORS = {
   University: 'bg-purple-500',
   Dispatch:   'bg-teal-500',
   PaymentCoordinator: 'bg-cyan-500',
+  Payment: 'bg-sky-500',
 };
 
 export function AppLayout() {
@@ -278,7 +285,7 @@ export function AppLayout() {
         </header>
 
         {/* Page content */}
-        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/centre-billing') || location.pathname.startsWith('/account-ledger') || location.pathname.startsWith('/invoice') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
+        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/centre-billing') || location.pathname.startsWith('/account-ledger') || location.pathname.startsWith('/invoice') || location.pathname.startsWith('/payment-desk') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
           <Outlet />
         </main>
       </div>

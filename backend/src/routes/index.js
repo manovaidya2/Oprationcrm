@@ -21,7 +21,7 @@ const accountLedgerC = require('../controllers/accountLedger.controller');
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
 const userCreateSchema= z.object({
   name: z.string().min(1), email: z.string().email(), password: z.string().min(6),
-  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','PaymentCoordinator']),
+  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','PaymentCoordinator','Payment']),
   centerId:     z.string().optional(),
   centerIds:    z.array(z.string()).optional(),
   universityId: z.string().optional(),
@@ -186,6 +186,9 @@ router.get('/account-ledger/centers/:centerId/settlements', protect, requireRole
 router.post('/account-ledger/centers/:centerId/settlements', protect, requireRole('Admin','Accountant'), accountLedgerC.createCenterSettlement);
 router.patch('/account-ledger/centers/:centerId/settlements/:settlementId', protect, requireRole('Admin','Accountant'), accountLedgerC.updateCenterSettlement);
 router.post('/account-ledger/centers/:centerId/settlements/:settlementId/reverse', protect, requireRole('Admin','Accountant'), accountLedgerC.reverseCenterSettlement);
+
+// ── PAYMENT DESK (role: Payment) — bulk fee settlement ────────
+router.use('/payment-desk', require('./paymentDesk.routes'));
 
 // ── AUDIT LOG ─────────────────────────────────────────────────
 router.get('/audit', protect, requireRole('Admin'), misc.listAudit);

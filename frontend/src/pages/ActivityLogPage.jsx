@@ -12,7 +12,7 @@ import { auditApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 // ── Config ───────────────────────────────────────────────────
-const ROLES = ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Dispatch', 'PaymentCoordinator'];
+const ROLES = ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Dispatch', 'PaymentCoordinator', 'Payment'];
 
 const ACTION_LABELS = {
   student_created:             { label: 'Student Added',            color: 'bg-sky-100 text-sky-700' },
@@ -49,6 +49,7 @@ const ROLE_COLORS = {
   University: 'bg-purple-100 text-purple-700',
   Dispatch:   'bg-teal-100 text-teal-700',
   PaymentCoordinator: 'bg-cyan-100 text-cyan-700',
+  Payment: 'bg-sky-100 text-sky-700',
 };
 
 const ENTITY_ICONS = {

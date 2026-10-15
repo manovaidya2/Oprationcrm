@@ -26,7 +26,8 @@ const OldPaymentTimelinePage = lazy(() => import('@/pages/OldPaymentTimelinePage
 const CentreBillingPage    = lazy(() => import('@/pages/CentreBillingPage'));
 const AccountLedgerPage    = lazy(() => import('@/pages/AccountLedgerPage'));
 const InvoicePage          = lazy(() => import('@/pages/InvoicePage'));
-const NotFoundPage         = lazy(() => import('@/pages/NotFoundPage'));
+const PaymentDeskPage       = lazy(() => import('@/pages/PaymentDeskPage'));
+const NotFoundPage        = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
   <div className="flex h-screen items-center justify-center">
@@ -45,15 +46,17 @@ const ROLE_HOME = {
   University: '/university',
   Dispatch:   '/dispatch',
   PaymentCoordinator: '/payment-coordinator',
+  Payment:    '/payment-desk',
 };
 
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
+  Payment:    ['/payment-desk', '/chat'],
   Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
   ViewerCounselor: ['/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
 };
@@ -109,7 +112,8 @@ export default function App() {
           <Route path="account-ledger"           element={<W><AccountLedgerPage /></W>} />
           <Route path="invoice"                  element={<W><InvoicePage /></W>} />
           <Route path="invoice/:centerId"        element={<W><InvoicePage /></W>} />
-          <Route path="help"                element={<W><ChatPage /></W>} />
+          <Route path="payment-desk"        element={<W><PaymentDeskPage /></W>} />
+          <Route path="help"               element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />
           <Route path="*"                   element={<W><NotFoundPage /></W>} />

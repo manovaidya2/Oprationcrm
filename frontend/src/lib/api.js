@@ -14,7 +14,10 @@ export async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || err.message || 'Request failed');
+    const error = new Error(err.error || err.message || 'Request failed');
+    error.status = res.status;
+    error.details = err.details;
+    throw error;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -234,4 +237,52 @@ export const paymentAccountsApi = {
   create: (data)     => request('/payment-accounts', { method: 'POST', body: JSON.stringify(data) }),
   update: (id, data) => request(`/payment-accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   remove: (id)       => request(`/payment-accounts/${id}`, { method: 'DELETE' }),
+};
+
+// ── PAYMENT DESK (roles: Payment, Admin) ─────────────────────
+const qs = (params = {}) => {
+  const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+  const q = new URLSearchParams(clean).toString();
+  return q ? `?${q}` : '';
+};
+
+async function downloadFile(path, params = {}) {
+  const res = await fetch(`${BASE}${path}${qs(params)}`, { headers: { Authorization: `Bearer ${token()}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || 'Download failed');
+  }
+  const disposition = res.headers.get('Content-Disposition') || '';
+  const name = (disposition.match(/filename="?([^";]+)"?/) || [])[1] || 'download.csv';
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const send = (method, path, data) => request(path, { method, body: JSON.stringify(data || {}) });
+
+export const deskApi = {
+  meta:            ()             => request('/payment-desk/meta'),
+  dayBook:         (p)            => request(`/payment-desk/day-book${qs(p)}`),
+  searchStudents:  (q, centerId)  => request(`/payment-desk/students/search${qs({ q, centerId })}`),
+  studentSummary:  (id)           => request(`/payment-desk/students/${id}/summary`),
+  addPayment:      (d)            => send('POST', '/payment-desk/payments', d),
+  editFeePayment:  (parentId, txId, d) => send('PATCH', `/payment-desk/payments/fee/${parentId}/${txId}`, d),
+  editDocPayment:  (parentId, txId, d) => send('PATCH', `/payment-desk/payments/doc/${parentId}/${txId}`, d),
+  editStudent:     (id, d)        => send('PATCH', `/payment-desk/students/${id}`, d),
+  ledger:          (p)            => request(`/payment-desk/ledger${qs(p)}`),
+  docStatus:       (p)            => request(`/payment-desk/doc-status${qs(p)}`),
+  bankBook:        (p)            => request(`/payment-desk/bank-book${qs(p)}`),
+  entries:         (p)            => request(`/payment-desk/entries${qs(p)}`),
+  createEntry:     (d)            => send('POST', '/payment-desk/entries', d),
+  updateEntry:     (id, d)        => send('PATCH', `/payment-desk/entries/${id}`, d),
+  deleteEntry:     (id)           => request(`/payment-desk/entries/${id}`, { method: 'DELETE' }),
+  billFetch:       (d)            => send('POST', '/payment-desk/university-bills/fetch', d),
+  bills:           (p)            => request(`/payment-desk/university-bills${qs(p)}`),
+  bill:            (id)           => request(`/payment-desk/university-bills/${id}`),
+  createBill:      (d)            => send('POST', '/payment-desk/university-bills', d),
+  updateBill:      (id, d)        => send('PUT', `/payment-desk/university-bills/${id}`, d),
+  deleteBill:      (id)           => request(`/payment-desk/university-bills/${id}`, { method: 'DELETE' }),
+  download:        downloadFile,
 };

@@ -16,7 +16,7 @@ const ROLE_COLORS = {
   ViewerCounselor:'bg-slate-100 text-slate-700',
   Center:'bg-sky-100 text-sky-700', Accountant:'bg-amber-100 text-amber-700',
   University:'bg-purple-100 text-purple-700', Dispatch:'bg-teal-100 text-teal-700',
-  PaymentCoordinator:'bg-cyan-100 text-cyan-700',
+  PaymentCoordinator:'bg-cyan-100 text-cyan-700', Payment:'bg-sky-100 text-sky-700',
 };
 
 const ROLE_OPTIONS = [
@@ -26,6 +26,7 @@ const ROLE_OPTIONS = [
   { value: 'Center', label: 'Center' },
   { value: 'Accountant', label: 'Accountant' },
   { value: 'PaymentCoordinator', label: 'Payment Coordinator' },
+  { value: 'Payment', label: 'Payment Desk' },
   { value: 'University', label: 'University' },
   { value: 'Dispatch', label: 'Dispatch' },
 ];
