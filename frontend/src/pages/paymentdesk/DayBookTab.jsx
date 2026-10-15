@@ -1,6 +1,7 @@
 import { Field, Pill, ScreenshotField, Stat, Pager, RangeBar, DownloadBtn, Spinner } from './shared';
 import SettlementDialog from './SettlementDialog';
 import SettlementEditDialog from './SettlementEditDialog';
+import StudentDocsDialog from './StudentDocsDialog';
 import {
   Fragment, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Pencil, Plus, Scale, Search, XCircle } from 'lucide-react';
@@ -333,11 +334,11 @@ const HEADS = [
 
 // what the edit / verify dialogs need to know about one payment line of a student
 const lineAsRow = (g, l) => ({
-  key: `${g.key}:${l.txId}`, kind: g.kind, parentId: g.parentId, txId: l.txId, studentId: g.studentId, student: g.student, course: g.course, type: g.type,
+  key: `${g.key}:${l.txId}`, kind: l.kind || g.kind, parentId: l.parentId || g.parentId, txId: l.txId, studentId: g.studentId, student: g.student, course: l.docName || g.course, type: l.kind === 'doc' ? 'OTHER DOCUMENT' : g.type,
   totalFee: g.totalFee, paid: l.amount, mode: l.mode, utrRef: l.utrRef, utrDate: l.paidAt, accountId: l.accountId, accountName: l.accountName, note: l.note,
   screenshot: l.screenshot, balance: l.balance, isAdjustment: l.isAdjustment, source: l.source, settlementId: l.settlementId,
 });
-const lineTone = l => (l.status === 'pending' ? 'bg-amber-50' : l.status === 'rejected' ? 'bg-red-50/60 text-slate-400 line-through' : !l.shown ? 'text-slate-400' : '');
+const lineTone = l => (l.status === 'pending' ? 'bg-amber-50' : l.status === 'rejected' ? 'bg-red-50/60 text-slate-400 line-through' : l.status === 'adjusted' ? 'bg-red-50' : !l.shown ? 'text-slate-400' : '');
 // One cell that stacks a student's payments; every line has the same height so the payment columns stay aligned.
 function Lines({ g, right = false, render }) {
   return (
@@ -356,6 +357,7 @@ export default function DayBookTab() {
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [docsFor, setDocsFor] = useState(null);                  // { studentId, name } -> the student's documents with fee and payments
   const [adjusting, setAdjusting] = useState(null);                // { centerId, studentId } -> settlement (payment adjustment) dialog
   const [editingSettlement, setEditingSettlement] = useState(null);  // settlement id
   const [selected, setSelected] = useState(() => new Set());     // keys of unverified rows ticked for verify / reject
@@ -372,7 +374,7 @@ export default function DayBookTab() {
   const selectable = pendingGroups.length > 0;
   const colCount = HEADS.length + (selectable ? 1 : 0);
   const pickedGroups = pendingGroups.filter(g => selected.has(g.key));
-  const pickedRows = pickedGroups.flatMap(g => g.lines.filter(l => l.status === 'pending').map(l => lineAsRow(g, l)));   // unverified payments of the ticked students
+  const pickedRows = pickedGroups.flatMap(g => g.lines.filter(l => l.status === 'pending' && !g.universityRejected).map(l => lineAsRow(g, l)));   // unverified payments of the ticked students
   const pickedAmount = pickedRows.reduce((sum, r) => sum + r.paid, 0);
   const allPicked = selectable && pickedGroups.length === pendingGroups.length;
   const toggle = (key) => setSelected(prev => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
@@ -500,14 +502,15 @@ export default function DayBookTab() {
             {loading && !data && <tr><td colSpan={colCount}><Spinner /></td></tr>}
             {groups?.length === 0 && <tr><td colSpan={colCount} className="p-12 text-center text-slate-400">No payments in this period</td></tr>}
             {groups?.map(g => (
-              <tr key={g.key} className={cn('border-t-2 border-slate-300 bg-white hover:bg-indigo-50/30', loading && 'opacity-60')}>
+              <tr key={g.key} className={cn('border-t-2 border-slate-300', g.universityRejected ? 'bg-red-50 hover:bg-red-100/70' : 'bg-white hover:bg-indigo-50/30', loading && 'opacity-60')}>
                 {selectable && (
-                  <td className={cn(TD, 'text-center')}>{g.unverifiedAmount > 0 && <input type="checkbox" title="Select this student's unverified payments" checked={selected.has(g.key)} onChange={() => toggle(g.key)} />}</td>
+                  <td className={cn(TD, 'text-center')}>{g.unverifiedAmount > 0 && !g.universityRejected && <input type="checkbox" title="Select this student's unverified payments" checked={selected.has(g.key)} onChange={() => toggle(g.key)} />}</td>
                 )}
                 <td className={cn(TD, 'min-w-[150px]')}><Pill tone={TYPE_TONE[g.type]}>{g.type}</Pill></td>
                 <td className={cn(TD, 'min-w-[220px]')}>
                   <div className="font-medium text-slate-900">{g.student}</div>
                   {g.enrollmentNumber && <div className="text-xs text-slate-500">{g.enrollmentNumber}</div>}
+                  {g.universityRejected && <div className="mt-1"><Pill tone="bg-red-100 text-red-700 border-red-300">Rejected by university</Pill></div>}
                   {g.studentAddedAt && <div className="text-[11px] text-slate-400" title="Date the student was added to the CRM">Added {fmtDate(g.studentAddedAt)}</div>}
                   {g.studentId && (
                     <Button size="sm" variant="outline" className="mt-2 h-7 px-2 text-xs" title="Payment adjustment (settlement) for this student"
@@ -518,9 +521,9 @@ export default function DayBookTab() {
                 <td className={cn(TD, 'whitespace-nowrap text-right tabular-nums')}>{fmt(g.totalFee)}</td>
 
                 <td className={cn(TDS, 'min-w-[130px]')}><Lines g={g} render={l => <span className="whitespace-nowrap">{fmtDate(l.entryDate)}</span>} /></td>
-                <td className={cn(TDS, 'min-w-[120px]')}><Lines g={g} right render={l => (l.status !== 'pending' && !l.isAdjustment ? <b className={cn('tabular-nums', l.status === 'verified' && 'text-emerald-700')}>{fmt(l.amount)}</b> : null)} /></td>
-                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'verified' && l.isAdjustment ? <b className="tabular-nums text-amber-700" title={l.settlement ? `Settlement of ${fmt(l.settlement.amount)} over ${l.settlement.studentCount} students` : 'Settlement'}>{fmt(l.amount)}</b> : null)} /></td>
-                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'pending' ? <b className="tabular-nums text-amber-800">{fmt(l.amount)}</b> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[120px]')}><Lines g={g} right render={l => (l.status !== 'pending' && l.status !== 'adjusted' && !l.isAdjustment ? <span className="flex flex-col items-end leading-tight"><b className={cn('tabular-nums', l.status === 'verified' && 'text-emerald-700')}>{fmt(l.amount)}</b>{l.docName && <span className="max-w-[110px] truncate text-[10px] font-medium text-indigo-700" title={'Payment for the document: ' + l.docName}>{l.docName}</span>}</span> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'adjusted' ? <b className="tabular-nums text-red-700" title="Adjusted away: this payment was settled inside a centre settlement">{fmt(l.amount)}</b> : l.status === 'verified' && l.isAdjustment ? <b className="tabular-nums text-amber-700" title={l.settlement ? `Settlement of ${fmt(l.settlement.amount)} over ${l.settlement.studentCount} students` : 'Settlement'}>{fmt(l.amount)}</b> : null)} /></td>
+                <td className={cn(TDS, 'min-w-[140px]')}><Lines g={g} right render={l => (l.status === 'pending' ? <span className="flex flex-col items-end leading-tight"><b className="tabular-nums text-amber-800">{fmt(l.amount)}</b>{l.docName && <span className="max-w-[120px] truncate text-[10px] font-medium text-indigo-700" title={'Payment for the document: ' + l.docName}>{l.docName}</span>}</span> : null)} /></td>
                 <td className={cn(TDS, 'min-w-[120px]')}><Lines g={g} render={l => <span className="whitespace-nowrap">{fmtDate(l.paidAt)}</span>} /></td>
                 <td className={cn(TDS, 'min-w-[170px]')}>
                   <Lines g={g} render={l => (
@@ -535,11 +538,18 @@ export default function DayBookTab() {
                     <span className="flex items-center gap-1.5">
                       <Button size="sm" variant="ghost" className="h-8 w-8 shrink-0 p-0" title={l.isAdjustment ? 'Edit or reverse this settlement' : 'Edit this payment / student'}
                         onClick={() => (l.isAdjustment && l.settlementId ? setEditingSettlement(l.settlementId) : setEditing(lineAsRow(g, l)))}><Pencil className="h-4 w-4" /></Button>
-                      {l.status === 'pending' && (<>
+                      {l.status === 'pending' && g.universityRejected && <span className="text-[11px] text-red-700">Not verifiable · use Adjust</span>}
+                      {l.status === 'pending' && !g.universityRejected && (<>
                         <Button size="sm" className="h-7 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700" disabled={reviewBusy} onClick={() => startVerify([lineAsRow(g, l)])}><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Verify</Button>
-                        {g.kind === 'fee' && <Button size="sm" variant="outline" className="h-7 border-red-300 px-2.5 text-xs text-red-700 hover:bg-red-50" disabled={reviewBusy} onClick={() => startReject([lineAsRow(g, l)])}>Reject</Button>}
+                        {g.kind === 'fee' && l.kind !== 'doc' && <Button size="sm" variant="outline" className="h-7 border-red-300 px-2.5 text-xs text-red-700 hover:bg-red-50" disabled={reviewBusy} onClick={() => startReject([lineAsRow(g, l)])}>Reject</Button>}
                       </>)}
                       {l.status === 'rejected' && <Pill tone={VERIFY_TONE.rejected}>rejected</Pill>}
+                      {l.status === 'adjusted' && (
+                        <span className="flex flex-col leading-tight" title={l.adjustedIn ? `Adjusted in settlement ${l.adjustedIn.utrRef} · ${l.adjustedIn.centre} · ${fmt(l.adjustedIn.amount)} for ${(l.adjustedIn.students || []).join(', ')}` : 'Adjusted'}>
+                          <Pill tone="bg-red-100 text-red-700 border-red-300">adjusted</Pill>
+                          {l.adjustedIn && <span className="mt-0.5 text-[10px] text-red-700">in {l.adjustedIn.utrRef}{l.adjustedIn.students?.length ? ` → ${l.adjustedIn.students.slice(0, 2).join(', ')}${l.adjustedIn.students.length > 2 ? ` +${l.adjustedIn.students.length - 2}` : ''}` : ''}</span>}
+                        </span>
+                      )}
                       {l.isAdjustment && l.settlement && <span className="text-[11px] text-amber-700">settlement · {l.settlement.studentCount} student{l.settlement.studentCount === 1 ? '' : 's'}</span>}
                     </span>
                   )} />
@@ -551,7 +561,19 @@ export default function DayBookTab() {
                 <td className={cn(TD, 'min-w-[110px]')}>{g.counselor || <span className="text-slate-400">—</span>}</td>
                 <td className={cn(TD, 'min-w-[130px]')}>{g.viewerCounselor || <span className="text-slate-400">—</span>}</td>
                 <td className={cn(TD, 'min-w-[140px]')}>{g.center}</td>
-                <td className={cn(TD, 'min-w-[110px] text-xs')}>{statusText(g.docStatus) || <span className="text-slate-400">—</span>}</td>
+                <td className={cn(TD, 'min-w-[170px] text-xs')}>
+                  {g.kind === 'fee' && g.studentId ? (
+                    <button type="button" className="w-full text-left" title="Documents of this student with fee and payments: click to add or edit" onClick={() => setDocsFor({ studentId: String(g.studentId), name: g.student })}>
+                      {g.addedDocs?.length ? (
+                        <span className="flex flex-col gap-1">{g.addedDocs.map(d => (
+                          <span key={d.docId} className={cn('rounded border px-1.5 py-0.5 text-[11px] leading-tight', d.fee > 0 && d.paid >= d.fee ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : d.paid > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700')}>
+                            <b>{d.name}</b> · {fmt(d.paid)} / {fmt(d.fee)}{d.unverified > 0 && <span className="text-amber-700"> · {fmt(d.unverified)} unverified</span>}
+                          </span>
+                        ))}</span>
+                      ) : <span className="text-indigo-600 underline decoration-dotted">+ add documents</span>}
+                    </button>
+                  ) : (statusText(g.docStatus) || <span className="text-slate-400">—</span>)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -612,6 +634,7 @@ export default function DayBookTab() {
         </DialogContent>
       </Dialog>
 
+      {docsFor && <StudentDocsDialog studentId={docsFor.studentId} studentName={docsFor.name} onClose={() => setDocsFor(null)} onChanged={reload} />}
       {adjusting && <SettlementDialog initialCenterId={adjusting.centerId} initialStudentId={adjusting.studentId} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); reload(); }} />}
       {editingSettlement && <SettlementEditDialog settlementId={editingSettlement} onClose={() => setEditingSettlement(null)} onSaved={() => { setEditingSettlement(null); reload(); }} />}
 

@@ -15,7 +15,7 @@ const PaymentAccount   = require('../models/PaymentAccount');
 const CenterSettlement = require('../models/CenterSettlement');
 const User             = require('../models/User');
 const { audit, notify } = require('../utils/helpers');
-const { EPS, COUNTED, fail, r2, num, isId, esc } = require('../utils/accountsUtil');
+const { EPS, COUNTED, PENDING, isUniRejected, fail, r2, num, isId, esc } = require('../utils/accountsUtil');
 
 const EXCLUDED = ['Draft', 'Cancelled', 'Rejected'];
 const SOURCE = 'Center Monthly Settlement';
@@ -24,6 +24,8 @@ const paidOf = p => r2((p?.transactions || [])
   .filter(t => (t.type || 'Fee') === 'Fee' && COUNTED.includes(t.verificationStatus || 'not_required'))
   .reduce((s, t) => s + (t.amount || 0), 0));
 const monthOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+// A rejected student's payments that are still waiting (not a settlement, not already adjusted)
+const adjustableTx = p => (p?.transactions || []).filter(t => (t.type || 'Fee') === 'Fee' && PENDING.includes(t.verificationStatus) && t.source !== SOURCE);
 const centerName = c => c?.name || c?.organisationName || '';
 
 function parseAllocations(raw) {
@@ -55,22 +57,30 @@ const labelNote = note => `Course fee settled via centre payment${note ? ` - ${n
 // A centre's students with their fee, paid and balance, for picking who the payment is for.
 exports.students = asyncHandler(async (req, res) => {
   if (!isId(req.query.centerId)) throw fail('Choose a centre');
-  const filter = { center: req.query.centerId, applicationStatus: { $nin: EXCLUDED } };
+  const filter = { center: req.query.centerId, $or: [{ applicationStatus: { $nin: EXCLUDED } }, { applicationStatus: 'Rejected' }, { rejectedVia: 'university' }] };
   const q = String(req.query.search || '').trim();
-  if (q) { const rx = new RegExp(esc(q), 'i'); filter.$or = [{ name: rx }, { enrollmentNumber: rx }, { phone: rx }]; }
-  const students = await Student.find(filter).select('name enrollmentNumber courseName courseYear applicationStatus createdAt')
+  if (q) { const rx = new RegExp(esc(q), 'i'); filter.$and = [{ $or: [{ name: rx }, { enrollmentNumber: rx }, { phone: rx }] }]; }
+  const students = await Student.find(filter).select('name enrollmentNumber courseName courseYear applicationStatus rejectedVia rejectionReason createdAt')
     .sort('createdAt').limit(1500).lean();
   const payments = await Payment.find({ student: { $in: students.map(s => s._id) } }).select('student totalFee discount transactions').lean();
   const byStudent = new Map(payments.map(p => [String(p.student), p]));
   const rows = students.map(s => {
     const p = byStudent.get(String(s._id));
     const net = netFee(p), paid = paidOf(p);
+    if (isUniRejected(s)) {
+      const tx = adjustableTx(p);
+      return {
+        studentId: s._id, name: s.name, enrollmentNumber: s.enrollmentNumber || '', course: `${s.courseName || ''} ${s.courseYear || ''}`.trim(),
+        applicationStatus: s.applicationStatus, createdAt: s.createdAt, netFee: net, paid, due: 0, pendingCount: tx.length,
+        universityRejected: true, reason: s.rejectionReason || '', adjustable: r2(tx.reduce((a, t) => a + (t.amount || 0), 0)),
+      };
+    }
     return {
       studentId: s._id, name: s.name, enrollmentNumber: s.enrollmentNumber || '', course: `${s.courseName || ''} ${s.courseYear || ''}`.trim(),
       applicationStatus: s.applicationStatus, createdAt: s.createdAt, netFee: net, paid, due: Math.max(0, r2(net - paid)),
       pendingCount: (p?.transactions || []).filter(t => (t.type || 'Fee') === 'Fee' && ['pending_counselor', 'pending_accountant'].includes(t.verificationStatus)).length,
     };
-  }).filter(r => req.query.all === '1' || r.due > EPS);
+  }).filter(r => (r.universityRejected ? r.adjustable > EPS : (req.query.all === '1' || r.due > EPS)));
   res.json(rows);
 });
 
@@ -81,7 +91,10 @@ exports.create = asyncHandler(async (req, res) => {
   const center = await Center.findById(b.centerId).select('name organisationName').lean();
   if (!center) throw fail('Centre not found', 404);
   const wanted = parseAllocations(b.allocations);
-  if (!wanted.length) throw fail('Select at least one student');
+  if (!wanted.length) throw fail('Select at least one student to receive the payment');
+  let sources = b.sources || [];
+  if (typeof sources === 'string') { try { sources = JSON.parse(sources); } catch { throw fail('Rejected students could not be read'); } }
+  sources = [...new Set((Array.isArray(sources) ? sources : []).filter(isId).map(String))];
   const mode = b.mode === 'Bank Transfer' ? 'Bank Transfer' : b.mode === 'UPI' ? 'UPI' : null;
   if (!mode) throw fail('Select a payment mode');
   const utrRef = String(b.utrRef || '').trim();
@@ -97,7 +110,7 @@ exports.create = asyncHandler(async (req, res) => {
   try {
     await session.withTransaction(async () => {
       // everything is re-read and re-checked inside the transaction (it may be retried)
-      const students = await Student.find({ _id: { $in: wanted.map(w => w.studentId) }, center: center._id }).select('name applicationStatus').session(session).lean();
+      const students = await Student.find({ _id: { $in: wanted.map(w => w.studentId) }, center: center._id }).select('name applicationStatus rejectedVia').session(session).lean();
       if (students.length !== wanted.length) throw fail('One or more students do not belong to this centre');
       const nameOf = new Map(students.map(s => [String(s._id), s]));
       const payments = await Payment.find({ student: { $in: students.map(s => s._id) } }).session(session);
@@ -113,6 +126,7 @@ exports.create = asyncHandler(async (req, res) => {
       let total = 0;
       for (const w of wanted) {
         const student = nameOf.get(w.studentId);
+        if (isUniRejected(student)) throw fail(`${student.name} was rejected by the university; their payment is adjusted, not credited`);
         if (EXCLUDED.includes(student.applicationStatus)) throw fail(`${student.name} is ${student.applicationStatus} and cannot be adjusted`);
         const payment = byStudent.get(w.studentId);
         if (!payment || netFee(payment) <= 0) throw fail(`Set the fee for ${student.name} before adjusting`);
@@ -131,6 +145,24 @@ exports.create = asyncHandler(async (req, res) => {
         settlement.allocations.push({ student: student._id, payment: payment._id, transactionId: payment.transactions[payment.transactions.length - 1]._id, totalFee: payment.netFee, amount: w.amount });
         total = r2(total + w.amount);
       }
+      // university-rejected students: their waiting payments become "adjusted" and point at this settlement
+      for (const sid of sources) {
+        const st = await Student.findOne({ _id: sid, center: center._id }).select('name applicationStatus rejectedVia').session(session).lean();
+        if (!st) throw fail('A rejected student does not belong to this centre');
+        if (!isUniRejected(st)) throw fail(`${st.name} is not rejected by the university`);
+        const pay = await Payment.findOne({ student: st._id }).session(session);
+        const txs = adjustableTx(pay);
+        if (!txs.length) throw fail(`${st.name} has no waiting payment to adjust`);
+        let amt = 0;
+        for (const t of txs) {
+          t.statusBeforeAdjust = t.verificationStatus; t.verificationStatus = 'adjusted'; t.adjustedIn = settlement._id;
+          t.verificationNote = `Adjusted in settlement ${utrRef}${note ? ` - ${note}` : ''}`; t.verifiedBy = req.user._id; t.verifiedAt = new Date();
+          amt = r2(amt + (t.amount || 0));
+        }
+        pay.lastUpdatedBy = req.user._id; pay.lastUpdatedAt = new Date();
+        await pay.save({ session });
+        settlement.adjustedSources.push({ student: st._id, payment: pay._id, transactionIds: txs.map(t => t._id), amount: amt });
+      }
       settlement.amount = total;
       settlement.studentCount = settlement.allocations.length;
       await settlement.save({ session });
@@ -140,7 +172,7 @@ exports.create = asyncHandler(async (req, res) => {
 
   const saved = await CenterSettlement.findById(savedId).lean();
   await audit('payment_desk_settlement_created', 'CenterSettlement', saved._id, req.user,
-    { centerId: center._id, utrRef, amount: saved.amount, students: saved.studentCount, screenshot: !!shot },
+    { centerId: center._id, utrRef, amount: saved.amount, students: saved.studentCount, rejectedAdjusted: sources.length, screenshot: !!shot },
     `${centerName(center)}: payment adjustment ₹${saved.amount} (${utrRef}) applied to ${saved.studentCount} student${saved.studentCount === 1 ? '' : 's'}`);
   const centreUsers = await User.find({ role: 'Center', centerId: center._id, isActive: true }).select('_id').lean();
   await notify(centreUsers.map(u => u._id), { message: `Your payment of ₹${saved.amount} (${utrRef}) was applied to ${saved.studentCount} student fee record${saved.studentCount === 1 ? '' : 's'}.`, type: 'payment_verified', role: 'Center' });
@@ -151,7 +183,7 @@ exports.create = asyncHandler(async (req, res) => {
 exports.get = asyncHandler(async (req, res) => {
   const s = await CenterSettlement.findById(req.params.id)
     .populate('center', 'name organisationName').populate('recordedBy', 'name')
-    .populate('allocations.student', 'name enrollmentNumber courseName courseYear').lean();
+    .populate('allocations.student', 'name enrollmentNumber courseName courseYear').populate('adjustedSources.student', 'name enrollmentNumber').lean();
   if (!s) throw fail('Settlement not found', 404);
   res.json(s);
 });
@@ -231,9 +263,13 @@ exports.reverse = asyncHandler(async (req, res) => {
     await session.withTransaction(async () => {
       const doc = await CenterSettlement.findById(req.params.id).session(session);
       if (!doc || doc.status !== 'Completed') throw fail('Settlement is not active');
-      const payments = await Payment.find({ _id: { $in: doc.allocations.map(a => a.payment) } }).session(session);
+      const payments = await Payment.find({ _id: { $in: [...doc.allocations.map(a => a.payment), ...(doc.adjustedSources || []).map(a => a.payment)] } }).session(session);
       for (const payment of payments) {
         payment.transactions = payment.transactions.filter(t => String(t.centerSettlement) !== String(doc._id));
+        // rejected students' payments go back to waiting
+        for (const t of payment.transactions) {
+          if (String(t.adjustedIn) === String(doc._id)) { t.verificationStatus = t.statusBeforeAdjust || 'pending_accountant'; t.adjustedIn = undefined; t.statusBeforeAdjust = undefined; t.verificationNote = 'Settlement reversed; waiting again'; }
+        }
         payment.lastUpdatedBy = req.user._id; payment.lastUpdatedAt = new Date();
         await payment.save({ session });
       }

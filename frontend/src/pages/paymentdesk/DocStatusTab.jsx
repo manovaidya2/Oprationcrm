@@ -11,10 +11,11 @@ import {
 } from './helpers';
 
 const STAGES = [
-  'Request in review', 'Yet to come from university', 'At resource centre', 'Dispatched to centre',
+  'Received / added by counsellor', 'Request in review', 'Yet to come from university', 'At resource centre', 'Dispatched to centre',
   'Delivered - confirmed by centre', 'Rejected / changes requested',
 ];
 const STAGE_TONE = {
+  'Received / added by counsellor': 'bg-teal-50 text-teal-700 border-teal-200',
   'Request in review': 'bg-slate-100 text-slate-700 border-slate-200',
   'Yet to come from university': 'bg-amber-50 text-amber-700 border-amber-200',
   'At resource centre': 'bg-indigo-50 text-indigo-700 border-indigo-200',
@@ -54,7 +55,7 @@ export default function DocStatusTab() {
           </Field>
           <Field label="Source">
             <select className={selectCls} value={f.origin} onChange={e => set({ origin: e.target.value })}>
-              <option value="">All</option><option value="Request">Centre requests</option><option value="Inventory">Dispatch inventory</option>
+              <option value="">All</option><option value="Request">Centre requests</option><option value="Added">Added by counsellor</option><option value="Inventory">Dispatch inventory</option>
             </select>
           </Field>
           <Field label="Search">

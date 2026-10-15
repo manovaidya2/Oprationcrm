@@ -55,7 +55,9 @@ function sendCsv(res, filename, ...tables) {
   res.send('﻿' + body);
 }
 const stamp = () => ist(new Date());
+// A student the university rejected: their payments are not verified, they are adjusted into a centre settlement instead.
+const isUniRejected = s => !!s && (['University_Rejected', 'Rejected'].includes(s.applicationStatus) || (['Accountant_Rejected', 'Cancelled'].includes(s.applicationStatus) && s.rejectedVia === 'university'));
 
 module.exports = {
-  EPS, COUNTED, PENDING, fail, r2, num, isId, esc, parseYmd, parseRange, ist, sendCsv, stamp,
+  EPS, COUNTED, PENDING, isUniRejected, fail, r2, num, isId, esc, parseYmd, parseRange, ist, sendCsv, stamp,
 };

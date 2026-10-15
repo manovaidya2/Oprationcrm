@@ -9,6 +9,7 @@ const upload  = require('../middleware/upload');
 
 const authC   = require('../controllers/auth.controller');
 const studentC= require('../controllers/student.controller');
+const addedDocsC = require('../controllers/addedDocs.controller');
 const payC    = require('../controllers/payment.controller');
 const docC    = require('../controllers/document.controller');
 const misc    = require('../controllers/misc.controller');
@@ -88,6 +89,12 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 router.get   ('/students',     protect, studentC.list);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
+router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor'), addedDocsC.list);
+router.post  ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor'), addedDocsC.add);
+router.patch ('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor'), addedDocsC.update);
+router.delete('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor'), addedDocsC.remove);
+router.delete('/students/:id/added-docs/:docId/payments/:payId', protect, requireRole('Admin'), addedDocsC.removePayment);
+router.post  ('/students/:id/added-docs/:docId/payments', protect, requireRole('Admin','Counselor'), upload.single('paymentScreenshot'), addedDocsC.addPayment);
 router.post  ('/students',     protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.create);
 router.put   ('/students/:id', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.any(), studentC.update);
 router.delete('/students/:id', protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), studentC.remove);

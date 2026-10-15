@@ -3,6 +3,7 @@ const { protect, requireRole } = require('../middleware/auth');
 const book  = require('../controllers/accountsBook.controller');
 const money = require('../controllers/accountsMoney.controller');
 const settle = require('../controllers/accountsSettlement.controller');
+const addedDocs = require('../controllers/addedDocs.controller');
 const upload = require('../middleware/upload');   // optional payment screenshot (image / PDF, max 10 MB)
 
 // Payment desk — Admin, Payment and Accountant only
@@ -31,6 +32,13 @@ router.patch('/payments/doc/:parentId/:txId',     desk, upload.single('paymentSc
 // Ledger + document status
 router.get('/ledger',        desk, book.ledger);
 router.get('/doc-status',    desk, book.docStatus);
+router.get('/added-docs',    desk, addedDocs.deskList);
+router.get('/students/:id/added-docs',                  desk, addedDocs.list);
+router.post('/students/:id/added-docs',                 desk, addedDocs.add);
+router.patch('/students/:id/added-docs/:docId',         desk, addedDocs.update);
+router.delete('/students/:id/added-docs/:docId',        desk, addedDocs.remove);
+router.delete('/students/:id/added-docs/:docId/payments/:payId', requireRole('Admin'), addedDocs.removePayment);
+router.post('/students/:id/added-docs/:docId/payments', desk, upload.single('paymentScreenshot'), addedDocs.addPayment);
 
 // Bank / cash book, income & expenses
 router.get   ('/bank-book',     desk, money.bankBook);

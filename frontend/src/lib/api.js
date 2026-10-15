@@ -90,6 +90,14 @@ export const counselorsApi = {
 export const studentsApi = {
   getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`), // pass {page, limit} for paginated response
   getOne:          (id)          => request(`/students/${id}`),
+  addedDocs: {
+    list:       (id)              => request(`/students/${id}/added-docs`),
+    add:        (id, d)           => request(`/students/${id}/added-docs`, { method: 'POST', body: JSON.stringify(d) }),
+    update:     (id, docId, d)    => request(`/students/${id}/added-docs/${docId}`, { method: 'PATCH', body: JSON.stringify(d) }),
+    remove:     (id, docId)       => request(`/students/${id}/added-docs/${docId}`, { method: 'DELETE' }),
+    addPayment: (id, docId, fd)   => uploadRequest(`/students/${id}/added-docs/${docId}/payments`, 'POST', fd),
+    removePayment: (id, docId, payId) => request(`/students/${id}/added-docs/${docId}/payments/${payId}`, { method: 'DELETE' }),
+  },
   create:          (data)        => request('/students', { method: 'POST', body: JSON.stringify(data) }),
   createExistingAdmission: (formData) => uploadRequest('/students/existing-admission', 'POST', formData),
   update:          (id, data)    => request(`/students/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -279,6 +287,14 @@ export const deskApi = {
   editStudent:     (id, d)        => send('PATCH', `/payment-desk/students/${id}`, d),
   ledger:          (p)            => request(`/payment-desk/ledger${qs(p)}`),
   docStatus:       (p)            => request(`/payment-desk/doc-status${qs(p)}`),
+  addedDocs: {
+    list:       (id)              => request(`/payment-desk/students/${id}/added-docs`),
+    add:        (id, d)           => send('POST', `/payment-desk/students/${id}/added-docs`, d),
+    update:     (id, docId, d)    => send('PATCH', `/payment-desk/students/${id}/added-docs/${docId}`, d),
+    remove:     (id, docId)       => request(`/payment-desk/students/${id}/added-docs/${docId}`, { method: 'DELETE' }),
+    addPayment: (id, docId, fd)   => send('POST', `/payment-desk/students/${id}/added-docs/${docId}/payments`, fd),
+    removePayment: (id, docId, payId) => request(`/payment-desk/students/${id}/added-docs/${docId}/payments/${payId}`, { method: 'DELETE' }),
+  },
   bankBook:        (p)            => request(`/payment-desk/bank-book${qs(p)}`),
   entries:         (p)            => request(`/payment-desk/entries${qs(p)}`),
   createEntry:     (d)            => send('POST', '/payment-desk/entries', d),

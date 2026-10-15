@@ -36,6 +36,8 @@ const centerSettlementSchema = new mongoose.Schema({
   reversedAt: { type: Date },
   reversalReason: { type: String, trim: true },
   allocations: [allocationSchema],
+  // university-rejected students whose (unverified) payments were adjusted inside this settlement
+  adjustedSources: [{ _id: false, student: { type: mongoose.Schema.Types.ObjectId, ref: 'Student' }, payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' }, transactionIds: [mongoose.Schema.Types.ObjectId], amount: Number }],
 }, { timestamps: true });
 
 centerSettlementSchema.index({ center: 1, billingMonth: 1, createdAt: -1 });

@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi, counselorsApi, universitiesApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
+import StudentDocsPanel from '@/components/StudentDocsPanel';
 import { activeUniversities } from '@/lib/universities';
 import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
@@ -587,6 +588,7 @@ export default function StudentDetailPage() {
           <TabsTrigger value="fees">Fees</TabsTrigger>
           <TabsTrigger value="docs">Documents</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
+          <TabsTrigger value="univdocs">Other Documents</TabsTrigger>
         </TabsList>
 
         {/* ── Info Tab ── */}
@@ -845,6 +847,11 @@ export default function StudentDetailPage() {
               </CardContent>
             </Card>
           ))}
+        </TabsContent>
+
+        {/* ── Degree / other documents with their fee and payments ── */}
+        <TabsContent value="univdocs" className="mt-4">
+          <StudentDocsPanel studentId={student._id} api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
         </TabsContent>
 
         {/* ── Payments Tab ── */}

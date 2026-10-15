@@ -25,9 +25,12 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const list = useMemo(() => rows || [], [rows]);
 
   const q = search.trim().toLowerCase();
+  const targets = useMemo(() => list.filter(r => !r.universityRejected), [list]);
   const visible = useMemo(() => (q ? list.filter(r => r.name.toLowerCase().includes(q) || r.enrollmentNumber.toLowerCase().includes(q)) : list), [list, q]);
-  const amountOf = r => { const v = picks[r.studentId]; return v === undefined ? 0 : (v === '' ? r.due : (Number(v) || 0)); };
-  const chosen = list.filter(r => picks[r.studentId] !== undefined);
+  const amountOf = r => { if (r.universityRejected) return 0; const v = picks[r.studentId]; return v === undefined ? 0 : (v === '' ? r.due : (Number(v) || 0)); };
+  const chosenAll = list.filter(r => picks[r.studentId] !== undefined);
+  const chosen = chosenAll.filter(r => !r.universityRejected);          // students who receive the payment
+  const sources = chosenAll.filter(r => r.universityRejected);          // rejected students whose payment is adjusted here
   const total = r2(chosen.reduce((s, r) => s + amountOf(r), 0));
   const bad = chosen.some(r => amountOf(r) <= 0 || amountOf(r) > r.due + EPS);
   const receivedNum = Number(received) || 0;
@@ -35,12 +38,13 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const ready = chosen.length > 0 && !bad && f.utrRef.trim() && f.paidAt;
 
   const toggle = r => setPicks(p => { const n = { ...p }; if (n[r.studentId] !== undefined) delete n[r.studentId]; else n[r.studentId] = ''; return n; });
-  const tickAll = () => setPicks(p => { const n = { ...p }; visible.forEach(r => { if (n[r.studentId] === undefined) n[r.studentId] = ''; }); return n; });
+  const tickAll = () => setPicks(p => { const n = { ...p }; visible.filter(r => !r.universityRejected).forEach(r => { if (n[r.studentId] === undefined) n[r.studentId] = ''; }); return n; });
   // Spread the amount received over the students, oldest first (same idea as Centre Billing)
   const distribute = () => {
     let left = receivedNum;
     const next = {};
-    for (const r of list) { if (left <= EPS) break; const give = Math.min(r.due, left); next[r.studentId] = String(r2(give)); left = r2(left - give); }
+    for (const r of targets) { if (left <= EPS) break; const give = Math.min(r.due, left); next[r.studentId] = String(r2(give)); left = r2(left - give); }
+    sources.forEach(r => { next[r.studentId] = ''; });
     setPicks(next);
     toast.success(left > EPS ? `Spread over ${Object.keys(next).length} students. ${fmt(left)} is more than their total balance.` : `Spread over ${Object.keys(next).length} students (oldest first).`);
   };
@@ -51,10 +55,11 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
       const fd = new FormData();
       fd.append('centerId', centerId);
       fd.append('allocations', JSON.stringify(chosen.map(r => ({ studentId: r.studentId, amount: amountOf(r) }))));
+      fd.append('sources', JSON.stringify(sources.map(r => r.studentId)));
       ['mode', 'utrRef', 'paidAt', 'accountId', 'note'].forEach(k => fd.append(k, f[k] ?? ''));
       if (file) fd.append('paymentScreenshot', file);
       const s = await deskApi.createSettlement(fd);
-      toast.success(`${fmt(s.amount)} adjusted across ${s.studentCount} student${s.studentCount === 1 ? '' : 's'}. They are verified and balances are updated everywhere.`);
+      toast.success(`${fmt(s.amount)} adjusted across ${s.studentCount} student${s.studentCount === 1 ? '' : 's'}.${sources.length ? ` ${sources.length} rejected student${sources.length === 1 ? '' : 's'}' payment marked adjusted.` : ''} Balances are updated everywhere.`);
       onSaved();
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
@@ -67,7 +72,7 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
           <DialogTitle>Payment adjustment (settlement)</DialogTitle>
           <DialogDescription>
             One payment from a centre, spread over its students. The same UTR and screenshot go on every selected student, they are marked <b>verified</b>, and balances update everywhere.
-            This is the same settlement you see in Centre Billing.
+            This is the same settlement you see in Centre Billing. Students <b className="text-red-700">rejected by the university</b> are listed in red: tick them to mark their waiting payment as <b>adjusted</b> into this settlement (it is not verified).
           </DialogDescription>
         </DialogHeader>
 
@@ -94,7 +99,7 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
 
         <div className="overflow-hidden rounded-xl border border-slate-300">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-300 bg-slate-50 px-4 py-2 text-xs text-slate-600">
-            <span>{centerId ? `${list.length} student${list.length === 1 ? '' : 's'} with a balance` : 'Choose a centre to see its students'}</span>
+            <span>{centerId ? `${targets.length} student${targets.length === 1 ? '' : 's'} with a balance${list.length > targets.length ? ` · ${list.length - targets.length} rejected by university` : ''}` : 'Choose a centre to see its students'}</span>
             <span className="flex gap-2">
               <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!visible.length} onClick={tickAll}>Select all shown</Button>
               <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!chosen.length} onClick={() => setPicks({})}>Clear</Button>
@@ -118,6 +123,21 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
                 {visible.map(r => {
                   const on = picks[r.studentId] !== undefined;
                   const amt = amountOf(r);
+                  if (r.universityRejected) {
+                    return (
+                      <tr key={r.studentId} className={cn(ROW, 'bg-red-50', on && 'bg-red-100')}>
+                        <td className={cn(TD, 'text-center')}><input type="checkbox" checked={on} onChange={() => toggle(r)} /></td>
+                        <td className={TD}>
+                          <div className="font-medium">{r.name} <span className="text-xs font-normal text-slate-500">{r.enrollmentNumber}</span></div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">{r.course}<Pill tone="bg-red-100 text-red-700 border-red-300">Rejected by university</Pill>{r.reason && <span className="text-red-700">{r.reason}</span>}</div>
+                        </td>
+                        <td className={cn(TD, 'text-right tabular-nums')}>{fmt(r.netFee)}</td>
+                        <td className={cn(TD, 'text-right tabular-nums text-slate-400')}>{fmt(r.paid)}</td>
+                        <td className={cn(TD, 'text-right text-xs text-slate-400')}>—</td>
+                        <td className={cn(TD, 'text-right text-xs')}><b className="tabular-nums text-red-700">{fmt(r.adjustable)}</b><div className="text-red-700">to mark adjusted ({r.pendingCount} payment{r.pendingCount === 1 ? '' : 's'})</div></td>
+                      </tr>
+                    );
+                  }
                   const invalid = on && (amt <= 0 || amt > r.due + EPS);
                   return (
                     <tr key={r.studentId} className={cn(ROW, on && 'bg-indigo-50/60')}>
@@ -163,7 +183,7 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
 
         <DialogFooter className="items-center gap-2">
           <div className="mr-auto text-sm">
-            <b className="tabular-nums">{chosen.length}</b> student{chosen.length === 1 ? '' : 's'} · adjusting <b className="tabular-nums text-indigo-700">{fmt(total)}</b>
+            <b className="tabular-nums">{chosen.length}</b> student{chosen.length === 1 ? '' : 's'} · adjusting <b className="tabular-nums text-indigo-700">{fmt(total)}</b>{sources.length > 0 && <span className="ml-2 text-xs text-red-700">+ {sources.length} rejected student{sources.length === 1 ? '' : 's'} marked adjusted ({fmt(r2(sources.reduce((a, r) => a + r.adjustable, 0)))})</span>}{sources.length > 0 && chosen.length === 0 && <span className="ml-2 text-xs text-slate-500">also tick who receives the payment</span>}
             {receivedNum > 0 && Math.abs(diff) > EPS && <span className={cn('ml-3 text-xs', diff < 0 ? 'text-red-600' : 'text-amber-700')}>{diff < 0 ? `${fmt(-diff)} more than received` : `${fmt(diff)} of the received amount is not assigned`}</span>}
             {receivedNum > 0 && Math.abs(diff) <= EPS && total > 0 && <span className="ml-3 text-xs text-emerald-700">matches the amount received</span>}
           </div>

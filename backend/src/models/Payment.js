@@ -25,10 +25,13 @@ const transactionSchema = new mongoose.Schema({
   // Verification flow for Fee payments added by Center
   verificationStatus: {
     type: String,
-    enum: ['not_required', 'pending_counselor', 'pending_accountant', 'verified', 'rejected'],
+    enum: ['not_required', 'pending_counselor', 'pending_accountant', 'verified', 'rejected', 'adjusted'],
     default: 'not_required',
   },
   verificationNote: { type: String, trim: true },
+  // 'adjusted' = the student was rejected by the university; this payment was settled inside a centre settlement instead of being verified
+  adjustedIn:         { type: mongoose.Schema.Types.ObjectId, ref: 'CenterSettlement' },
+  statusBeforeAdjust: { type: String },
   verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   verifiedAt: { type: Date },
   // Which company account was payment made to
