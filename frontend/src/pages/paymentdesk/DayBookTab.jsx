@@ -415,6 +415,7 @@ export default function DayBookTab() {
             <select className={selectCls} value={f.dateBasis} onChange={e => set({ dateBasis: e.target.value })}>
               <option value="createdAt">Entry date (date of transaction)</option>
               <option value="paidAt">UTR date (payment date)</option>
+              <option value="studentAt">Student entry date (when the student was added)</option>
             </select>
           </Field>
           <Field label="Centre">
@@ -507,6 +508,7 @@ export default function DayBookTab() {
                 <td className={cn(TD, 'min-w-[220px]')}>
                   <div className="font-medium text-slate-900">{g.student}</div>
                   {g.enrollmentNumber && <div className="text-xs text-slate-500">{g.enrollmentNumber}</div>}
+                  {g.studentAddedAt && <div className="text-[11px] text-slate-400" title="Date the student was added to the CRM">Added {fmtDate(g.studentAddedAt)}</div>}
                   {g.studentId && (
                     <Button size="sm" variant="outline" className="mt-2 h-7 px-2 text-xs" title="Payment adjustment (settlement) for this student"
                       onClick={() => setAdjusting({ centerId: String(g.centerId || ''), studentId: String(g.studentId) })}><Scale className="mr-1 h-3.5 w-3.5" />Adjust</Button>

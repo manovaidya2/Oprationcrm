@@ -139,7 +139,7 @@ const verificationOf = tx => {
   const st = tx.verificationStatus || 'not_required';
   return COUNTED.includes(st) ? 'verified' : PENDING.includes(st) ? 'pending' : 'rejected';
 };
-const STUDENT_FIELDS = 'name enrollmentNumber courseName courseYear applicationStatus rejectionReason statusHistory counselor center';
+const STUDENT_FIELDS = 'name enrollmentNumber courseName courseYear applicationStatus rejectionReason statusHistory counselor center createdAt';
 
 function reasonText(s) {
   if (s.enrollmentNumber) return s.enrollmentNumber;
@@ -158,17 +158,24 @@ const prevView = (prev, accLabel) => prev ? {
 async function buildDayBook(q, { all = false } = {}) {
   const { from, toExcl } = parseRange(q);
   const basis = q.dateBasis === 'paidAt' ? 'paidAt' : 'createdAt';
+  const studentBasis = q.dateBasis === 'studentAt';            // filter by when the student was added, not by the payment dates
   const ver = ['pending', 'rejected', 'all'].includes(q.ver) ? q.ver : 'verified';
   const typeF = ['new', 'old', 'document'].includes(q.type) ? q.type : 'all';
   const accountF = q.accountId || '';
   const search = String(q.search || '').trim().toLowerCase();
   const rows = [];
   const unverified = { count: 0, amount: 0 };
-  const inRange = d => d && d >= from && d < toExcl;
+  const inRange = d => studentBasis || (d && d >= from && d < toExcl);   // with the student basis the student was already picked by date, so all their payments count
+  let studentIds = null;
+  if (studentBasis) {
+    const sf = { createdAt: { $gte: from, $lt: toExcl } };
+    if (isId(q.centerId)) sf.center = q.centerId;
+    studentIds = (await Student.find(sf).select('_id').lean()).map(x => x._id);
+  }
   const accountOk = id => !accountF || (accountF === 'none' ? !id : String(id || '') === accountF);
 
   if (typeF !== 'document') {
-    const filter = { transactions: { $elemMatch: { type: 'Fee', [basis]: { $gte: from, $lt: toExcl } } } };
+    const filter = studentBasis ? { student: { $in: studentIds }, 'transactions.0': { $exists: true } } : { transactions: { $elemMatch: { type: 'Fee', [basis]: { $gte: from, $lt: toExcl } } } };
     if (isId(q.centerId)) filter.center = q.centerId;
     const payments = await Payment.find(filter)
       .populate({ path: 'student', select: STUDENT_FIELDS, populate: { path: 'counselor', select: 'name' } })
@@ -190,7 +197,7 @@ async function buildDayBook(q, { all = false } = {}) {
         rows.push({
           key: `fee:${p._id}:${tx._id}`, groupKey: `fee:${p._id}`, _lines: lines, kind: 'fee', parentId: p._id, txId: tx._id,
           studentId: p.student._id, type: old ? 'OLD ADMISSION' : 'NEW ADMISSION',
-          entryDate: tx.createdAt || tx.paidAt, utrDate: tx.paidAt, sortDate: tx[basis],
+          entryDate: tx.createdAt || tx.paidAt, utrDate: tx.paidAt, sortDate: studentBasis ? p.student.createdAt : tx[basis], studentAddedAt: p.student.createdAt,
           student: p.student.name, enrollmentNumber: p.student.enrollmentNumber || '', course: `${p.student.courseName || ''} ${p.student.courseYear || ''}`.trim(),
           totalFee: t.net, paid: isAdjustmentTx(tx) ? 0 : (tx.amount || 0), adjustment: isAdjustmentTx(tx) ? (tx.amount || 0) : 0,
           isAdjustment: isAdjustmentTx(tx), source: tx.source || 'Manual', settlementId: tx.centerSettlement || null, balance: t.balance, ...all,
@@ -204,7 +211,7 @@ async function buildDayBook(q, { all = false } = {}) {
   }
 
   if (typeF === 'all' || typeF === 'document') {
-    const filter = { origin: { $ne: 'Inventory' }, payments: { $elemMatch: { [basis]: { $gte: from, $lt: toExcl } } } };
+    const filter = studentBasis ? { origin: { $ne: 'Inventory' }, student: { $in: studentIds }, 'payments.0': { $exists: true } } : { origin: { $ne: 'Inventory' }, payments: { $elemMatch: { [basis]: { $gte: from, $lt: toExcl } } } };
     if (isId(q.centerId)) filter.center = q.centerId;
     const docs = await StudentDocument.find(filter)
       .populate({ path: 'student', select: STUDENT_FIELDS })
@@ -223,7 +230,7 @@ async function buildDayBook(q, { all = false } = {}) {
         rows.push({
           key: `doc:${d._id}:${p._id}`, groupKey: `doc:${d._id}`, _lines: lines, kind: 'doc', parentId: d._id, txId: p._id,
           studentId: d.student?._id, type: 'OTHER DOCUMENT',
-          entryDate: p.createdAt || p.paidAt, utrDate: p.paidAt, sortDate: p[basis],
+          entryDate: p.createdAt || p.paidAt, utrDate: p.paidAt, sortDate: studentBasis ? (d.student?.createdAt || p[basis]) : p[basis], studentAddedAt: d.student?.createdAt || null,
           student: d.student?.name || '', enrollmentNumber: d.student?.enrollmentNumber || '', course: d.name,
           totalFee: t.net, paid: p.amount || 0, adjustment: 0, isAdjustment: false, source: 'Manual', balance: t.balance, ...all,
           utrRef: p.utrRef || '', mode: p.mode || '', accountId: p.paidToAccount || null, accountName: p.paidToAccountLabel || '',
@@ -265,7 +272,7 @@ async function buildDayBook(q, { all = false } = {}) {
     let g = byGroup.get(r.groupKey);
     if (!g) {
       g = { key: r.groupKey, kind: r.kind, parentId: r.parentId, studentId: r.studentId, type: r.type, student: r.student, enrollmentNumber: r.enrollmentNumber,
-        course: r.course, totalFee: r.totalFee, reason: r.reason, applicationStatus: r.applicationStatus, counselor: r.counselor, viewerCounselor: r.viewerCounselor,
+        course: r.course, studentAddedAt: r.studentAddedAt, totalFee: r.totalFee, reason: r.reason, applicationStatus: r.applicationStatus, counselor: r.counselor, viewerCounselor: r.viewerCounselor,
         center: r.center, centerId: r.centerId, docStatus: r.docStatus, lines: r._lines, shownTx: new Set() };
       byGroup.set(r.groupKey, g);
     }
