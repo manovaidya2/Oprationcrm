@@ -343,7 +343,7 @@ function Lines({ g, right = false, render }) {
   return (
     <div>
       {g.lines.map(l => (
-        <div key={String(l.txId)} className={cn('flex h-11 items-center border-t border-slate-100 px-4 first:border-t-0', right && 'justify-end', lineTone(l))}>{render(l)}</div>
+        <div key={String(l.txId)} className={cn('flex h-11 items-center overflow-hidden border-t border-slate-100 px-4 first:border-t-0', right && 'justify-end', lineTone(l))}>{render(l)}</div>
       ))}
     </div>
   );
@@ -527,7 +527,7 @@ export default function DayBookTab() {
                     </span>
                   )} />
                 </td>
-                <td className={cn(TDS, 'min-w-[150px]')}><Lines g={g} render={l => (l.accountName || <span className="text-slate-400">—</span>)} /></td>
+                <td className={cn(TDS, 'min-w-[200px]')}><Lines g={g} render={l => (l.accountName ? <span title={l.accountName} className="line-clamp-2 text-[11px] leading-tight">{l.accountName}</span> : <span className="text-slate-400">—</span>)} /></td>
                 <td className={cn(TDS, 'min-w-[250px]')}>
                   <Lines g={g} render={l => (
                     <span className="flex items-center gap-1.5">
