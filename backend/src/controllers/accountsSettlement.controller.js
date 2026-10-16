@@ -79,8 +79,9 @@ exports.students = asyncHandler(async (req, res) => {
       studentId: s._id, name: s.name, enrollmentNumber: s.enrollmentNumber || '', course: `${s.courseName || ''} ${s.courseYear || ''}`.trim(),
       applicationStatus: s.applicationStatus, createdAt: s.createdAt, netFee: net, paid, due: Math.max(0, r2(net - paid)),
       pendingCount: (p?.transactions || []).filter(t => (t.type || 'Fee') === 'Fee' && ['pending_counselor', 'pending_accountant'].includes(t.verificationStatus)).length,
+      noFee: net <= 0,           // fee not entered yet: listed (so nobody is missed) but cannot receive money until the fee is set
     };
-  }).filter(r => (r.universityRejected ? r.adjustable > EPS : (req.query.all === '1' || r.due > EPS)));
+  }).filter(r => (r.universityRejected ? r.adjustable > EPS : (req.query.all === '1' || r.due > EPS || r.noFee)));   // students who have paid nothing are listed too
   res.json(rows);
 });
 

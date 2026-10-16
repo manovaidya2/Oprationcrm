@@ -28,7 +28,7 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const targets = useMemo(() => list.filter(r => !r.universityRejected), [list]);
   const visible = useMemo(() => (q ? list.filter(r => r.name.toLowerCase().includes(q) || r.enrollmentNumber.toLowerCase().includes(q)) : list), [list, q]);
   const amountOf = r => { if (r.universityRejected) return 0; const v = picks[r.studentId]; return v === undefined ? 0 : (v === '' ? r.due : (Number(v) || 0)); };
-  const chosenAll = list.filter(r => picks[r.studentId] !== undefined);
+  const chosenAll = list.filter(r => picks[r.studentId] !== undefined && !r.noFee);
   const chosen = chosenAll.filter(r => !r.universityRejected);          // students who receive the payment
   const sources = chosenAll.filter(r => r.universityRejected);          // rejected students whose payment is adjusted here
   const total = r2(chosen.reduce((s, r) => s + amountOf(r), 0));
@@ -38,12 +38,12 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const ready = chosen.length > 0 && !bad && f.utrRef.trim() && f.paidAt;
 
   const toggle = r => setPicks(p => { const n = { ...p }; if (n[r.studentId] !== undefined) delete n[r.studentId]; else n[r.studentId] = ''; return n; });
-  const tickAll = () => setPicks(p => { const n = { ...p }; visible.filter(r => !r.universityRejected).forEach(r => { if (n[r.studentId] === undefined) n[r.studentId] = ''; }); return n; });
+  const tickAll = () => setPicks(p => { const n = { ...p }; visible.filter(r => !r.universityRejected && !r.noFee).forEach(r => { if (n[r.studentId] === undefined) n[r.studentId] = ''; }); return n; });
   // Spread the amount received over the students, oldest first (same idea as Centre Billing)
   const distribute = () => {
     let left = receivedNum;
     const next = {};
-    for (const r of targets) { if (left <= EPS) break; const give = Math.min(r.due, left); next[r.studentId] = String(r2(give)); left = r2(left - give); }
+    for (const r of targets.filter(x => !x.noFee)) { if (left <= EPS) break; const give = Math.min(r.due, left); next[r.studentId] = String(r2(give)); left = r2(left - give); }
     sources.forEach(r => { next[r.studentId] = ''; });
     setPicks(next);
     toast.success(left > EPS ? `Spread over ${Object.keys(next).length} students. ${fmt(left)} is more than their total balance.` : `Spread over ${Object.keys(next).length} students (oldest first).`);
@@ -135,6 +135,18 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
                         <td className={cn(TD, 'text-right tabular-nums text-slate-400')}>{fmt(r.paid)}</td>
                         <td className={cn(TD, 'text-right text-xs text-slate-400')}>—</td>
                         <td className={cn(TD, 'text-right text-xs')}><b className="tabular-nums text-red-700">{fmt(r.adjustable)}</b><div className="text-red-700">to mark adjusted ({r.pendingCount} payment{r.pendingCount === 1 ? '' : 's'})</div></td>
+                      </tr>
+                    );
+                  }
+                  if (r.noFee) {
+                    return (
+                      <tr key={r.studentId} className={cn(ROW, 'bg-slate-50')}>
+                        <td className={cn(TD, 'text-center')}><input type="checkbox" disabled title="Set this student's fee first" /></td>
+                        <td className={TD}>
+                          <div className="font-medium">{r.name} <span className="text-xs font-normal text-slate-500">{r.enrollmentNumber}</span></div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">{r.course}<Pill>{statusText(r.applicationStatus)}</Pill><Pill tone="bg-amber-50 text-amber-700 border-amber-200">Fee not set</Pill></div>
+                        </td>
+                        <td colSpan={4} className={cn(TD, 'text-right text-xs text-slate-500')}>Set this student's fee (Day Book, edit) before adjusting a payment to them</td>
                       </tr>
                     );
                   }
