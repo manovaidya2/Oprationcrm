@@ -20,7 +20,7 @@ async function loadStudent(req) {
   const s = await Student.findById(req.params.id).select('name enrollmentNumber center counselor university').lean();
   if (!s) throw fail('Student not found', 404);
   if (req.user.role === 'Center' && String(s.center) !== String(req.user.centerId || '')) throw fail('Forbidden', 403);
-  if (req.user.role === 'Counselor') {
+  if (['Counselor', 'ViewerCounselor'].includes(req.user.role)) {          // own students / linked centres only
     const c = await Counselor.findById(req.user.counselorId).select('centers').lean();
     const own = String(s.counselor || '') === String(req.user.counselorId || '');
     const centre = (c?.centers || []).some(id => String(id) === String(s.center));

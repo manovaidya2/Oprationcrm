@@ -859,10 +859,10 @@ export default function StudentDetailPage() {
 
         {/* ── Degree / other documents with their fee and payments ── */}
         <TabsContent value="univdocs" className="mt-4">
-          <StudentDocsPanel studentId={student._id} category="Other" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
+          <StudentDocsPanel studentId={student._id} category="Other" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch'} />
         </TabsContent>
         <TabsContent value="marksheets" className="mt-4">
-          <StudentDocsPanel studentId={student._id} category="Marksheet" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
+          <StudentDocsPanel studentId={student._id} category="Marksheet" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch'} />
         </TabsContent>
 
         {/* ── Payments Tab ── */}
