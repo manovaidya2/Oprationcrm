@@ -21,6 +21,9 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const [f, setF] = useState({ utrRef: '', paidAt: todayYmd(), mode: 'UPI', accountId: '', note: '' });
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [fund, setFund] = useState('new');                 // 'new' = a new payment (UTR); 'advance' = take it from the centre's advance balance
+  const { data: advData } = useDeskData(() => (centerId ? deskApi.advanceSummary({ centerId }) : Promise.resolve(null)), [centerId]);
+  const advBalance = centerId ? (advData?.centres?.[0]?.balance || 0) : 0;
   const { data: rows, loading } = useDeskData(() => (centerId ? deskApi.settlementStudents({ centerId }) : Promise.resolve([])), [centerId]);
   const list = useMemo(() => rows || [], [rows]);
 
@@ -35,13 +38,15 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
   const bad = chosen.some(r => amountOf(r) <= 0 || amountOf(r) > r.due + EPS);
   const receivedNum = Number(received) || 0;
   const diff = receivedNum > 0 ? r2(receivedNum - total) : 0;
-  const ready = chosen.length > 0 && !bad && f.utrRef.trim() && f.paidAt;
+  const fromAdvance = fund === 'advance';
+  const overAdvance = fromAdvance && total > advBalance + EPS;
+  const ready = chosen.length > 0 && !bad && f.paidAt && (fromAdvance ? total > 0 && !overAdvance : f.utrRef.trim());
 
   const toggle = r => setPicks(p => { const n = { ...p }; if (n[r.studentId] !== undefined) delete n[r.studentId]; else n[r.studentId] = ''; return n; });
   const tickAll = () => setPicks(p => { const n = { ...p }; visible.filter(r => !r.universityRejected && !r.noFee).forEach(r => { if (n[r.studentId] === undefined) n[r.studentId] = ''; }); return n; });
   // Spread the amount received over the students, oldest first (same idea as Centre Billing)
   const distribute = () => {
-    let left = receivedNum;
+    let left = fromAdvance && !receivedNum ? advBalance : receivedNum;
     const next = {};
     for (const r of targets.filter(x => !x.noFee)) { if (left <= EPS) break; const give = Math.min(r.due, left); next[r.studentId] = String(r2(give)); left = r2(left - give); }
     sources.forEach(r => { next[r.studentId] = ''; });
@@ -57,9 +62,10 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
       fd.append('allocations', JSON.stringify(chosen.map(r => ({ studentId: r.studentId, amount: amountOf(r) }))));
       fd.append('sources', JSON.stringify(sources.map(r => r.studentId)));
       ['mode', 'utrRef', 'paidAt', 'accountId', 'note'].forEach(k => fd.append(k, f[k] ?? ''));
-      if (file) fd.append('paymentScreenshot', file);
+      fd.append('fundSource', fund);
+      if (file && !fromAdvance) fd.append('paymentScreenshot', file);
       const s = await deskApi.createSettlement(fd);
-      toast.success(`${fmt(s.amount)} adjusted across ${s.studentCount} student${s.studentCount === 1 ? '' : 's'}.${sources.length ? ` ${sources.length} rejected student${sources.length === 1 ? '' : 's'}' payment marked adjusted.` : ''} Balances are updated everywhere.`);
+      toast.success(`${fromAdvance ? 'From the centre advance: ' : ''}${fmt(s.amount)} adjusted across ${s.studentCount} student${s.studentCount === 1 ? '' : 's'}.${sources.length ? ` ${sources.length} rejected student${sources.length === 1 ? '' : 's'}' payment marked adjusted.` : ''} Balances are updated everywhere.`);
       onSaved();
     } catch (e) { toast.error(e.message); }
     finally { setBusy(false); }
@@ -78,7 +84,7 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
 
         <div className="grid gap-3 md:grid-cols-3">
           <Field label="Centre *" className="md:col-span-1">
-            <select className={selectCls} value={centerId} onChange={e => { setCenterId(e.target.value); setPicks({}); }}>
+            <select className={selectCls} value={centerId} onChange={e => { setCenterId(e.target.value); setPicks({}); setFund('new'); }}>
               <option value="">Select centre…</option>
               {(meta?.centers || []).map(c => <option key={c._id} value={c._id}>{c.name || c.organisationName}{c.city ? ` · ${c.city}` : ''}</option>)}
             </select>
@@ -96,6 +102,19 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
             </div>
           </Field>
         </div>
+
+        {centerId && (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button type="button" onClick={() => setFund('new')} className={cn('rounded-lg border p-3 text-left text-sm', fund === 'new' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-slate-300 hover:bg-slate-50')}>
+              <div className="font-semibold">New payment</div>
+              <div className="text-xs text-slate-500">Money received now: enter its UTR, account and screenshot.</div>
+            </button>
+            <button type="button" disabled={advBalance <= 0} onClick={() => setFund('advance')} className={cn('rounded-lg border p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60', fund === 'advance' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-slate-300 hover:bg-slate-50')}>
+              <div className="font-semibold">From the centre's advance <span className="ml-1 rounded bg-indigo-100 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-indigo-700">{fmt(advBalance)}</span></div>
+              <div className="text-xs text-slate-500">{advBalance > 0 ? 'Use money the centre already paid in advance. No UTR needed; the advance balance goes down.' : 'This centre has no advance balance.'}</div>
+            </button>
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-xl border border-slate-300">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-300 bg-slate-50 px-4 py-2 text-xs text-slate-600">
@@ -176,8 +195,9 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
-          <Field label="UTR / reference no. *" className="md:col-span-2"><Input value={f.utrRef} onChange={e => setF(p => ({ ...p, utrRef: e.target.value }))} placeholder="Same UTR is used for every selected student" /></Field>
-          <Field label="Payment date *"><Input type="date" value={f.paidAt} onChange={e => setF(p => ({ ...p, paidAt: e.target.value }))} /></Field>
+          {!fromAdvance && <Field label="UTR / reference no. *" className="md:col-span-2"><Input value={f.utrRef} onChange={e => setF(p => ({ ...p, utrRef: e.target.value }))} placeholder="Same UTR is used for every selected student" /></Field>}
+          <Field label={fromAdvance ? 'Date of adjustment *' : 'Payment date *'}><Input type="date" value={f.paidAt} onChange={e => setF(p => ({ ...p, paidAt: e.target.value }))} /></Field>
+          {!fromAdvance && (<>
           <Field label="Mode">
             <select className={selectCls} value={f.mode} onChange={e => setF(p => ({ ...p, mode: e.target.value }))}>
               <option value="UPI">UPI</option><option value="Bank Transfer">Bank Transfer</option>
@@ -189,13 +209,14 @@ export default function SettlementDialog({ initialCenterId = '', initialStudentI
               {accounts.map(a => <option key={a._id} value={a._id}>{a.label} ({a.mode})</option>)}
             </select>
           </Field>
+          </>)}
           <Field label="Note (optional)" className="md:col-span-2"><Input value={f.note} onChange={e => setF(p => ({ ...p, note: e.target.value }))} /></Field>
-          <div className="md:col-span-4"><ScreenshotField file={file} onFile={setFile} /></div>
+          {!fromAdvance && <div className="md:col-span-4"><ScreenshotField file={file} onFile={setFile} /></div>}
         </div>
 
         <DialogFooter className="items-center gap-2">
           <div className="mr-auto text-sm">
-            <b className="tabular-nums">{chosen.length}</b> student{chosen.length === 1 ? '' : 's'} · adjusting <b className="tabular-nums text-indigo-700">{fmt(total)}</b>{sources.length > 0 && <span className="ml-2 text-xs text-red-700">+ {sources.length} rejected student{sources.length === 1 ? '' : 's'} marked adjusted ({fmt(r2(sources.reduce((a, r) => a + r.adjustable, 0)))})</span>}{sources.length > 0 && chosen.length === 0 && <span className="ml-2 text-xs text-slate-500">also tick who receives the payment</span>}
+            <b className="tabular-nums">{chosen.length}</b> student{chosen.length === 1 ? '' : 's'} · adjusting <b className="tabular-nums text-indigo-700">{fmt(total)}</b>{fromAdvance && <span className={cn('ml-3 text-xs', overAdvance ? 'text-red-600' : 'text-indigo-700')}>{overAdvance ? `${fmt(total - advBalance)} more than the advance balance (${fmt(advBalance)})` : `advance left after this: ${fmt(r2(advBalance - total))}`}</span>}{sources.length > 0 && <span className="ml-2 text-xs text-red-700">+ {sources.length} rejected student{sources.length === 1 ? '' : 's'} marked adjusted ({fmt(r2(sources.reduce((a, r) => a + r.adjustable, 0)))})</span>}{sources.length > 0 && chosen.length === 0 && <span className="ml-2 text-xs text-slate-500">also tick who receives the payment</span>}
             {receivedNum > 0 && Math.abs(diff) > EPS && <span className={cn('ml-3 text-xs', diff < 0 ? 'text-red-600' : 'text-amber-700')}>{diff < 0 ? `${fmt(-diff)} more than received` : `${fmt(diff)} of the received amount is not assigned`}</span>}
             {receivedNum > 0 && Math.abs(diff) <= EPS && total > 0 && <span className="ml-3 text-xs text-emerald-700">matches the amount received</span>}
           </div>

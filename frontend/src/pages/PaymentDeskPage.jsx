@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BookOpen, Building2, FileText, Landmark, Receipt, University } from 'lucide-react';
+import { BookOpen, Building2, FileText, Landmark, Receipt, University, Wallet } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import DayBookTab from './paymentdesk/DayBookTab';
 import LedgerTab from './paymentdesk/LedgerTab';
@@ -7,10 +7,12 @@ import BankBookTab from './paymentdesk/BankBookTab';
 import ExpensesTab from './paymentdesk/ExpensesTab';
 import DocStatusTab from './paymentdesk/DocStatusTab';
 import UniversityBillTab from './paymentdesk/UniversityBillTab';
+import AdvanceTab from './paymentdesk/AdvanceTab';
 
 const TABS = [
   { value: 'daybook', label: 'Day Book', icon: BookOpen, Comp: DayBookTab },
   { value: 'ledger', label: 'Ledger', icon: Building2, Comp: LedgerTab },
+  { value: 'advance', label: 'Centre Advance', icon: Wallet, Comp: AdvanceTab },
   { value: 'bank', label: 'Bank / Cash Book', icon: Landmark, Comp: BankBookTab },
   { value: 'expenses', label: 'Income & Expenses', icon: Receipt, Comp: ExpensesTab },
   { value: 'docs', label: 'Document Status', icon: FileText, Comp: DocStatusTab },

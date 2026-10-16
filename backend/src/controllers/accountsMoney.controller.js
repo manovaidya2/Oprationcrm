@@ -10,6 +10,7 @@ const StudentDocument = require('../models/StudentDocument');
 const PaymentAccount  = require('../models/PaymentAccount');
 const University      = require('../models/University');
 const AccountEntry    = require('../models/AccountEntry');
+const CentreAdvance   = require('../models/CentreAdvance');
 const UniversityBill  = require('../models/UniversityBill');
 const { audit } = require('../utils/helpers');
 const { fail, r2, num, isId, parseYmd, parseRange, ist, sendCsv, stamp } = require('../utils/accountsUtil');
@@ -25,12 +26,12 @@ async function collections(from, toExcl) {
     _id: { acc: '$p.paidToAccount', day: { $dateToString: { format: '%Y-%m-%d', date: '$p.paidAt', timezone: 'Asia/Kolkata' } } },
     total: { $sum: '$p.amount' }, count: { $sum: 1 },
   };
-  const [fees, docs] = await Promise.all([
+  const [fees, docs, advances] = await Promise.all([
     Payment.aggregate([
       { $match: { 'transactions.paidAt': range } },
       { $unwind: '$transactions' },
       { $replaceRoot: { newRoot: { p: '$transactions' } } },
-      { $match: { 'p.paidAt': range, 'p.type': { $in: ['Fee', null] }, 'p.verificationStatus': { $in: ['verified', 'not_required', null] } } },
+      { $match: { 'p.paidAt': range, 'p.type': { $in: ['Fee', null] }, 'p.verificationStatus': { $in: ['verified', 'not_required', null] }, 'p.source': { $ne: 'Centre Advance' } } },   // money paid out of a centre's advance was counted when it was deposited
       { $group: group },
     ]),
     StudentDocument.aggregate([
@@ -40,9 +41,14 @@ async function collections(from, toExcl) {
       { $match: { 'p.paidAt': range, 'p.verified': true } },
       { $group: group },
     ]),
+    // advances received from centres are real bank money: counted on the day they were received
+    CentreAdvance.aggregate([
+      { $match: { kind: 'Deposit', status: 'Active', date: range } },
+      { $group: { _id: { acc: '$account', day: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'Asia/Kolkata' } } }, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
   ]);
   const out = new Map();
-  [...fees, ...docs].forEach(r => {
+  [...fees, ...docs, ...advances].forEach(r => {
     const key = `${r._id.acc || 'none'}|${r._id.day}`;
     const e = out.get(key) || { acc: r._id.acc ? String(r._id.acc) : 'none', day: r._id.day, total: 0, count: 0 };
     e.total = r2(e.total + r.total); e.count += r.count;

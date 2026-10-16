@@ -4,6 +4,7 @@ const book  = require('../controllers/accountsBook.controller');
 const money = require('../controllers/accountsMoney.controller');
 const settle = require('../controllers/accountsSettlement.controller');
 const addedDocs = require('../controllers/addedDocs.controller');
+const advance = require('../controllers/accountsAdvance.controller');
 const upload = require('../middleware/upload');   // optional payment screenshot (image / PDF, max 10 MB)
 
 // Payment desk — Admin, Payment and Accountant only
@@ -34,6 +35,12 @@ router.patch('/payments/doc/:parentId/:txId',     desk, upload.single('paymentSc
 router.get('/ledger',        desk, book.ledger);
 router.get('/doc-status',    desk, book.docStatus);
 router.get('/added-docs',    desk, addedDocs.deskList);
+router.get('/advance',                       desk, advance.summary);
+router.get('/advance/export.csv',            desk, advance.exportCsv);
+router.get('/advance/:centerId/history',     desk, advance.history);
+router.post('/advance',                      desk, upload.single('paymentScreenshot'), advance.deposit);
+router.post('/advance/pay',                  desk, advance.payStudent);
+router.post('/advance/entries/:id/reverse',  desk, advance.reverseEntry);
 router.get('/students/:id/added-docs',                  desk, addedDocs.list);
 router.post('/students/:id/added-docs',                 desk, addedDocs.add);
 router.post('/students/:id/added-docs/:docId/file',       desk, upload.single('file'), addedDocs.uploadFile);

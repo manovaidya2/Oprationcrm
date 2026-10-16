@@ -52,9 +52,12 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
   const [file, setFile] = useState(null);
   const [dup, setDup] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [useAdv, setUseAdv] = useState(false);          // take the money from the centre's advance balance instead of a new payment
+  const { data: advD } = useDeskData(() => (picked?.centerId ? deskApi.advanceSummary({ centerId: String(picked.centerId) }) : Promise.resolve(null)), [picked?.studentId, open]);
+  const advBal = picked ? (advD?.centres?.[0]?.balance || 0) : 0;
   const { data: results, loading } = useDeskData(() => (dq.length >= 2 && !picked ? deskApi.searchStudents(dq) : Promise.resolve([])), [dq, picked, open]);
 
-  const reset = () => { setQ(''); setPicked(null); setDup(null); setFile(null); setF(blank()); };
+  const reset = () => { setUseAdv(false); setQ(''); setPicked(null); setDup(null); setFile(null); setF(blank()); };
   const close = () => { reset(); onClose(); };
   // Fill the form from the student: balance as the amount, and the account / mode they paid into last time
   const pick = s => {
@@ -67,11 +70,18 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
   const amount = Number(f.amount) || 0;
   const over = picked && amount > picked.due + EPS;
   const after = picked ? Math.max(0, r2(picked.due - amount)) : 0;
-  const ready = picked && amount > 0 && !over && f.utrRef.trim() && f.paidAt;
+  const overAdv = useAdv && amount > advBal + EPS;
+  const ready = picked && amount > 0 && !over && f.paidAt && (useAdv ? !overAdv : f.utrRef.trim());
 
   const save = async (confirmDuplicate = false) => {
     setBusy(true);
     try {
+      if (useAdv) {
+        const r = await deskApi.payFromAdvance({ studentId: picked.studentId, amount, paidAt: f.paidAt, note: f.note });
+        toast.success(`${fmt(amount)} paid for ${picked.name} from the centre advance. Advance balance left: ${fmt(r.balance)}.`);
+        reset(); onSaved();
+        return;
+      }
       const fd = new FormData();
       fd.append('studentId', picked.studentId);
       ['amount', 'mode', 'utrRef', 'paidAt', 'accountId', 'note'].forEach(k => fd.append(k, f[k] ?? ''));
@@ -121,7 +131,7 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
                   <div className="text-base font-semibold leading-tight">{picked.name}</div>
                   <div className="text-xs text-slate-500">{picked.enrollmentNumber || 'No enrollment no. yet'}</div>
                 </div>
-                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setPicked(null); setDup(null); }}>Change</Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setPicked(null); setDup(null); setUseAdv(false); }}>Change</Button>
               </div>
               <dl className="space-y-1 text-xs">
                 {[['Course', picked.course], ['University', picked.university], ['Centre', picked.center], ['Counsellor', picked.counselor], ['Status', statusText(picked.applicationStatus)]].map(([k, v]) => (
@@ -146,12 +156,24 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
 
             {/* Payment details */}
             <div className="space-y-3 md:col-span-3">
+              {advBal > 0 && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button type="button" onClick={() => setUseAdv(false)} className={cn('rounded-lg border p-2.5 text-left text-sm', !useAdv ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-slate-300 hover:bg-slate-50')}>
+                    <div className="font-semibold">New payment</div><div className="text-xs text-slate-500">Money received now (UTR needed)</div>
+                  </button>
+                  <button type="button" onClick={() => setUseAdv(true)} className={cn('rounded-lg border p-2.5 text-left text-sm', useAdv ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-slate-300 hover:bg-slate-50')}>
+                    <div className="font-semibold">From centre advance <span className="ml-1 rounded bg-indigo-100 px-1.5 py-0.5 text-xs tabular-nums text-indigo-700">{fmt(advBal)}</span></div>
+                    <div className="text-xs text-slate-500">{picked.center} paid in advance. No UTR needed</div>
+                  </button>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Amount paid (₹) *">
                   <Input type="number" min="0" value={f.amount} onChange={e => setF(p => ({ ...p, amount: e.target.value }))} className={cn(over && 'border-red-400')} />
                   {over && <span className="text-[11px] text-red-600">More than the balance due of {fmt(picked.due)}</span>}
                 </Field>
                 <Field label="Date of UTR (payment date) *"><Input type="date" value={f.paidAt} onChange={e => setF(p => ({ ...p, paidAt: e.target.value }))} /></Field>
+                {!useAdv && (<>
                 <Field label="UTR / reference no. *" className="sm:col-span-2"><Input value={f.utrRef} onChange={e => { setF(p => ({ ...p, utrRef: e.target.value })); setDup(null); }} placeholder="e.g. 4123 5678 9012" /></Field>
                 <Field label="Mode">
                   <select className={selectCls} value={f.mode} onChange={e => setF(p => ({ ...p, mode: e.target.value }))}>
@@ -167,10 +189,12 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
                     {accounts.filter(a => a.isActive !== false).map(a => <option key={a._id} value={a._id}>{a.label} ({a.mode})</option>)}
                   </select>
                 </Field>
+                </>)}
                 <Field label="Note (optional)" className="sm:col-span-2"><Input value={f.note} onChange={e => setF(p => ({ ...p, note: e.target.value }))} /></Field>
               </div>
-              <ScreenshotField file={file} onFile={setFile} />
-              <DuplicateWarning matches={dup} />
+              {!useAdv && <ScreenshotField file={file} onFile={setFile} />}
+              {!useAdv && <DuplicateWarning matches={dup} />}
+              {overAdv && <div className="text-xs text-red-600">More than the centre's advance balance of {fmt(advBal)}</div>}
             </div>
           </div>
         )}
@@ -180,7 +204,7 @@ function AddPaymentDialog({ open, onClose, onSaved, accounts }) {
           <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
           {picked && (
             <Button onClick={() => save(!!dup)} disabled={busy || !ready}>
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{dup ? 'Save anyway' : 'Save as verified payment'}
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{dup ? 'Save anyway' : useAdv ? 'Pay from advance' : 'Save as verified payment'}
             </Button>
           )}
         </DialogFooter>
@@ -540,7 +564,7 @@ export default function DayBookTab() {
                   <Lines g={g} render={l => (
                     <span className="flex items-center gap-1.5">
                       <Button size="sm" variant="ghost" className="h-8 w-8 shrink-0 p-0" title={l.isAdjustment ? 'Edit or reverse this settlement' : 'Edit this payment / student'}
-                        onClick={() => (l.isAdjustment && l.settlementId ? setEditingSettlement(l.settlementId) : setEditing(lineAsRow(g, l)))}><Pencil className="h-4 w-4" /></Button>
+                        onClick={() => (l.isAdjustment && l.settlementId ? setEditingSettlement(l.settlementId) : l.source === 'Centre Advance' ? toast.info('Paid from the centre advance. To undo it, use Reverse in the Centre Advance tab.') : setEditing(lineAsRow(g, l)))}><Pencil className="h-4 w-4" /></Button>
                       {l.status === 'pending' && g.universityRejected && <span className="text-[11px] text-red-700">Not verifiable · use Adjust</span>}
                       {l.status === 'pending' && !g.universityRejected && (<>
                         <Button size="sm" className="h-7 bg-emerald-600 px-2.5 text-xs hover:bg-emerald-700" disabled={reviewBusy} onClick={() => startVerify([lineAsRow(g, l)])}><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Verify</Button>

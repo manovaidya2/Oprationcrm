@@ -14,6 +14,7 @@ const Payment          = require('../models/Payment');
 const PaymentAccount   = require('../models/PaymentAccount');
 const CenterSettlement = require('../models/CenterSettlement');
 const User             = require('../models/User');
+const CentreAdvance    = require('../models/CentreAdvance');
 const { audit, notify } = require('../utils/helpers');
 const { EPS, COUNTED, PENDING, isUniRejected, fail, r2, num, isId, esc } = require('../utils/accountsUtil');
 
@@ -51,6 +52,7 @@ async function accountFor(id) {
   return acc;
 }
 
+const ADV_SOURCE = 'Centre Advance';
 const labelNote = note => `Course fee settled via centre payment${note ? ` - ${note}` : ''}`;
 
 // GET /payment-desk/settlement/students?centerId=&search=&all=1
@@ -96,15 +98,16 @@ exports.create = asyncHandler(async (req, res) => {
   let sources = b.sources || [];
   if (typeof sources === 'string') { try { sources = JSON.parse(sources); } catch { throw fail('Rejected students could not be read'); } }
   sources = [...new Set((Array.isArray(sources) ? sources : []).filter(isId).map(String))];
-  const mode = b.mode === 'Bank Transfer' ? 'Bank Transfer' : b.mode === 'UPI' ? 'UPI' : null;
+  const fromAdvance = b.fundSource === 'advance';          // the money comes out of the centre's advance balance instead of a new payment
+  const mode = fromAdvance ? 'Bank Transfer' : b.mode === 'Bank Transfer' ? 'Bank Transfer' : b.mode === 'UPI' ? 'UPI' : null;
   if (!mode) throw fail('Select a payment mode');
-  const utrRef = String(b.utrRef || '').trim();
+  const utrRef = fromAdvance ? 'ADVANCE' : String(b.utrRef || '').trim();
   if (!utrRef) throw fail('UTR / reference number is required');
   const paidAt = b.paidAt ? new Date(b.paidAt) : null;
   if (!paidAt || Number.isNaN(paidAt.getTime())) throw fail('Enter a valid payment date');
-  const acc = await accountFor(b.accountId);
+  const acc = fromAdvance ? null : await accountFor(b.accountId);
   const note = String(b.note || '').trim();
-  const shot = req.file ? `/uploads/${req.file.filename}` : '';
+  const shot = !fromAdvance && req.file ? `/uploads/${req.file.filename}` : '';
 
   const session = await mongoose.startSession();
   let savedId;
@@ -122,7 +125,7 @@ exports.create = asyncHandler(async (req, res) => {
         upiId: acc?.upiId || '', bankName: acc?.bankName || '', accountHolder: acc?.accountHolder || '',
         accountNumber: acc?.accountNumber || '', ifscCode: acc?.ifscCode || '',
         paidAt, note, paidToAccount: acc?._id, paidToAccountLabel: acc?.label || '', recordedBy: req.user._id,
-        via: 'Payment Desk', paymentScreenshot: shot,
+        via: 'Payment Desk', paymentScreenshot: shot, fundedFromAdvance: fromAdvance,
       });
       let total = 0;
       for (const w of wanted) {
@@ -135,10 +138,10 @@ exports.create = asyncHandler(async (req, res) => {
         if (w.amount > due + EPS) throw fail(`${student.name}: ₹${w.amount} is more than the balance due of ₹${due}`);
         payment.transactions.push({
           amount: w.amount, mode, utrRef, upiId: settlement.upiId, bankName: settlement.bankName, accountHolder: settlement.accountHolder,
-          accountNumber: settlement.accountNumber, ifscCode: settlement.ifscCode, note: labelNote(note), paidAt,
+          accountNumber: settlement.accountNumber, ifscCode: settlement.ifscCode, note: fromAdvance ? `Paid from centre advance${note ? ` - ${note}` : ''}` : labelNote(note), paidAt,
           recordedBy: req.user._id, verifiedBy: req.user._id, verifiedAt: new Date(), type: 'Fee', verificationStatus: 'verified',
-          paidToAccount: acc?._id, paidToAccountLabel: acc?.label || '', paymentScreenshot: shot,
-          source: SOURCE, centerSettlement: settlement._id, settlementMonth: settlement.billingMonth,
+          paidToAccount: acc?._id, paidToAccountLabel: fromAdvance ? 'Centre advance' : (acc?.label || ''), paymentScreenshot: shot,
+          source: fromAdvance ? ADV_SOURCE : SOURCE, centerSettlement: settlement._id, settlementMonth: settlement.billingMonth,
         });
         payment.lastUpdatedBy = req.user._id;
         payment.lastUpdatedAt = new Date();
@@ -166,7 +169,12 @@ exports.create = asyncHandler(async (req, res) => {
       }
       settlement.amount = total;
       settlement.studentCount = settlement.allocations.length;
+      if (fromAdvance) {
+        const balance = await CentreAdvance.balanceOf(center._id, session);
+        if (total > balance + EPS) throw fail(`The centre's advance balance is only ₹${balance}, but ₹${total} is being adjusted`);
+      }
       await settlement.save({ session });
+      if (fromAdvance) await CentreAdvance.create([{ center: center._id, kind: 'Used', amount: total, date: paidAt, settlement: settlement._id, studentCount: settlement.studentCount, note, recordedBy: req.user._id }], { session });
       savedId = settlement._id;
     });
   } finally { await session.endSession(); }
@@ -197,6 +205,7 @@ exports.update = asyncHandler(async (req, res) => {
   const settlement = await CenterSettlement.findById(req.params.id);
   if (!settlement) throw fail('Settlement not found', 404);
   if (settlement.status === 'Reversed') throw fail('A reversed settlement cannot be edited');
+  if (settlement.fundedFromAdvance) throw fail('This adjustment was paid from the centre advance, so it has no payment details to edit. Reverse it to give the balance back.');
 
   const changes = [];
   const next = {};
@@ -274,6 +283,7 @@ exports.reverse = asyncHandler(async (req, res) => {
         payment.lastUpdatedBy = req.user._id; payment.lastUpdatedAt = new Date();
         await payment.save({ session });
       }
+      await CentreAdvance.updateMany({ settlement: doc._id, status: 'Active' }, { status: 'Reversed', reversedBy: req.user._id, reversedAt: new Date(), reversalReason: 'Settlement reversed' }, { session });   // the advance comes back
       doc.status = 'Reversed'; doc.reversedBy = req.user._id; doc.reversedAt = new Date(); doc.reversalReason = reason;
       await doc.save({ session });
     });

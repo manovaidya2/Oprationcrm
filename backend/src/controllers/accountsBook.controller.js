@@ -50,7 +50,7 @@ async function viewerCounselorsByCenter(centerIds) {
 // ── Fee timeline ──────────────────────────────────────────────
 // "Payment adjustment" = a settlement: one centre payment (one UTR) spread over many students, made in Centre Billing
 // or on the Payment Desk. Only verified amounts exist here; ordinary payments leave it empty.
-const ADJUSTMENT_SOURCES = ['Center Monthly Settlement'];
+const ADJUSTMENT_SOURCES = ['Center Monthly Settlement', 'Centre Advance'];       // 'Centre Advance' = paid out of the centre's advance balance
 const isAdjustmentTx = tx => ADJUSTMENT_SOURCES.includes(tx.source);
 const keyOf = (tx, i) => [new Date(tx.paidAt || tx.createdAt || 0).getTime(), new Date(tx.createdAt || tx.paidAt || 0).getTime(), i];
 const cmpKey = (a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
@@ -730,6 +730,7 @@ exports.editFeePayment = asyncHandler(async (req, res) => {
   const payment = await Payment.findById(req.params.parentId).populate('student', 'name');
   const tx = payment?.transactions.id(req.params.txId);
   if (!tx || (tx.type || 'Fee') !== 'Fee') throw fail('Payment not found', 404);
+  if (tx.source === 'Centre Advance' && !tx.centerSettlement) throw fail('This was paid from the centre advance. Reverse it from the Centre Advance tab.');
   if (tx.source === 'Center Monthly Settlement') throw fail('This is a settlement (payment adjustment). Edit or reverse the whole settlement from its row.');
   await applyEdit(req, tx, payment.student?.name || 'student', { paymentId: payment._id, txId: tx._id }, () => payment.save(), 'Payment', payment._id);
   res.json(await summaryFor(payment.student._id));

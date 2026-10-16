@@ -23,6 +23,7 @@ const centerSettlementSchema = new mongoose.Schema({
   ifscCode: { type: String, trim: true },
   paidAt: { type: Date, required: true },
   note: { type: String, trim: true },
+  fundedFromAdvance: { type: Boolean, default: false },         // paid from the centre's advance balance, not from a new payment
   via: { type: String, default: 'Centre Billing' },            // 'Centre Billing' or 'Payment Desk'
   paymentScreenshot: { type: String, trim: true },
   paidToAccount: { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },

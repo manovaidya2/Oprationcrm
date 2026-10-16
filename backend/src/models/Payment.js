@@ -37,7 +37,7 @@ const transactionSchema = new mongoose.Schema({
   // Which company account was payment made to
   paidToAccount:     { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel:{ type: String, trim: true }, // denormalized label for quick display
-  source:            { type: String, enum: ['Manual', 'Center Monthly Settlement', 'Center Bulk Receipt'], default: 'Manual' },
+  source:            { type: String, enum: ['Manual', 'Center Monthly Settlement', 'Center Bulk Receipt', 'Centre Advance'], default: 'Manual' },
   // Legacy: 'Center Bulk Receipt' / feeReceipt were written by a removed bulk-settlement screen. Kept so old rows still load and save.
   feeReceipt:        { type: mongoose.Schema.Types.ObjectId },
   centerSettlement:  { type: mongoose.Schema.Types.ObjectId, ref: 'CenterSettlement' },

@@ -74,6 +74,8 @@ export default function SettlementEditDialog({ settlementId, onClose, onSaved })
             </div>
             {reversed ? (
               <div className="rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">This settlement was reversed{s.reversalReason ? `: ${s.reversalReason}` : ''}. It can no longer be changed.</div>
+            ) : s.fundedFromAdvance ? (
+              <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">This adjustment was paid from the <b>centre's advance</b>, so it has no UTR or account to edit. To undo it, reverse the whole settlement: the amount goes back to the centre's advance balance.</div>
             ) : (
               <div className="grid gap-3 md:grid-cols-3">
                 <Field label="UTR / reference"><Input value={v.utrRef} onChange={e => set('utrRef', e.target.value)} /></Field>
@@ -97,7 +99,7 @@ export default function SettlementEditDialog({ settlementId, onClose, onSaved })
         <DialogFooter className="items-center gap-2">
           {s && !reversed && <Button variant="outline" className="mr-auto border-red-300 text-red-700 hover:bg-red-50" onClick={reverse} disabled={busy}><Undo2 className="mr-1.5 h-4 w-4" />Reverse whole settlement</Button>}
           <Button variant="outline" onClick={onClose} disabled={busy}>Close</Button>
-          {s && !reversed && <Button onClick={save} disabled={busy || !dirty}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save for all {s.studentCount}</Button>}
+          {s && !reversed && !s.fundedFromAdvance && <Button onClick={save} disabled={busy || !dirty}>{busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save for all {s.studentCount}</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>

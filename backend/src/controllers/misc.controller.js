@@ -544,12 +544,17 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
     (await Student.find({}).select('_id name').lean()).forEach(s => { studentMap[String(s._id)] = s.name; });
     const allPaymentsFlat = allPayments.map(p => ({
       studentName: studentMap[String(p.student)] || '',
-      transactions: (p.transactions || []).map(tx => ({
+      transactions: (p.transactions || []).filter(tx => tx.source !== 'Centre Advance').map(tx => ({
         ...tx,
         verificationStatus: isCounted(tx) ? 'verified' : tx.verificationStatus,
         paidToAccount: tx.paidToAccount ? String(tx.paidToAccount) : null,
       })),
     }));
+    // advance deposits from centres are bank money too
+    const CentreAdvance = require('../models/CentreAdvance');
+    (await CentreAdvance.find({ kind: 'Deposit', status: 'Active', account: { $ne: null } }).populate('center', 'name organisationName').lean()).forEach(a => {
+      allPaymentsFlat.push({ studentName: `${a.center?.name || a.center?.organisationName || 'Centre'} · Advance`, transactions: [{ amount: a.amount, mode: a.mode, utrRef: a.utrRef, paidAt: a.date, verificationStatus: 'verified', paidToAccount: String(a.account), type: 'Fee' }] });
+    });
     paidDocs.forEach(d => {
       const txs = (d.payments || []).filter(pay => pay.verified && pay.paidToAccount).map(pay => ({
         ...pay, verificationStatus: 'verified', paidToAccount: String(pay.paidToAccount), verifiedBy: undefined,
