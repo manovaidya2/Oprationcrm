@@ -91,7 +91,9 @@ export const studentsApi = {
   getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`), // pass {page, limit} for paginated response
   getOne:          (id)          => request(`/students/${id}`),
   addedDocs: {
-    list:       (id)              => request(`/students/${id}/added-docs`),
+    list:       (id, category, asCentre) => request(`/students/${id}/added-docs?category=${category || ''}${asCentre ? '&asCentre=1' : ''}`),
+    uploadFile: (id, docId, fd)   => uploadRequest(`/students/${id}/added-docs/${docId}/file`, 'POST', fd),
+    setVisible: (id, docId, visible) => request(`/students/${id}/added-docs/${docId}/visibility`, { method: 'PATCH', body: JSON.stringify({ visible }) }),
     add:        (id, d)           => request(`/students/${id}/added-docs`, { method: 'POST', body: JSON.stringify(d) }),
     update:     (id, docId, d)    => request(`/students/${id}/added-docs/${docId}`, { method: 'PATCH', body: JSON.stringify(d) }),
     remove:     (id, docId)       => request(`/students/${id}/added-docs/${docId}`, { method: 'DELETE' }),
@@ -288,7 +290,9 @@ export const deskApi = {
   ledger:          (p)            => request(`/payment-desk/ledger${qs(p)}`),
   docStatus:       (p)            => request(`/payment-desk/doc-status${qs(p)}`),
   addedDocs: {
-    list:       (id)              => request(`/payment-desk/students/${id}/added-docs`),
+    list:       (id, category)    => request(`/payment-desk/students/${id}/added-docs?category=${category || ''}`),
+    uploadFile: (id, docId, fd)   => send('POST', `/payment-desk/students/${id}/added-docs/${docId}/file`, fd),
+    setVisible: (id, docId, visible) => send('PATCH', `/payment-desk/students/${id}/added-docs/${docId}/visibility`, { visible }),
     add:        (id, d)           => send('POST', `/payment-desk/students/${id}/added-docs`, d),
     update:     (id, docId, d)    => send('PATCH', `/payment-desk/students/${id}/added-docs/${docId}`, d),
     remove:     (id, docId)       => request(`/payment-desk/students/${id}/added-docs/${docId}`, { method: 'DELETE' }),

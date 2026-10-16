@@ -191,7 +191,8 @@ function mergeInventoryDispatchStatus(inventoryDoc, requestDoc) {
 
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
-  const filter = req.user.role === 'University' ? {} : { origin: { $ne: 'Inventory' } };
+  // documents added from the student page (origin 'Added') have their own tabs and are not part of the request / dispatch flow
+  const filter = req.user.role === 'University' ? { origin: { $ne: 'Added' } } : { origin: { $nin: ['Inventory', 'Added'] } };
   if (isValidObjectId(req.query.studentId)) filter.student = req.query.studentId;
 
   const { role, centerId, counselorId, universityId } = req.user;
@@ -887,7 +888,7 @@ function docPaymentBucket(doc) {
 
 exports.documentPaymentTimeline = asyncHandler(async (req, res) => {
   const docs = await StudentDoc.find({
-    origin: { $ne: 'Inventory' },
+    origin: { $nin: ['Inventory', 'Added'] },
     status: { $in: ['Center_Notified', 'Fee_Rejected', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered'] },
   })
     .populate('student', 'name phone email courseName courseYear enrollmentNumber')
@@ -1075,7 +1076,7 @@ exports.inventoryList = asyncHandler(async (req, res) => {
   ]);
 
   const studentIds = students.map(s => s._id);
-  const docs = await StudentDoc.find({ student: { $in: studentIds } })
+  const docs = await StudentDoc.find({ student: { $in: studentIds }, origin: { $ne: 'Added' } })
     .populate('student', 'name enrollmentNumber courseName')
     .populate('center', 'name')
     .populate('university', 'name shortName')

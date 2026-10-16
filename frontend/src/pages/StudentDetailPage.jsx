@@ -282,6 +282,7 @@ export default function StudentDetailPage() {
   const { user } = useAuth();
 
   const [student, setStudent] = useState(null);
+  const [centreDocs, setCentreDocs] = useState({ Other: [], Marksheet: [] });      // what was shown to the centre (centre login only)
   const [payment, setPayment] = useState(null);
   const [docs,    setDocs]    = useState([]);
   const [centers, setCenters]  = useState([]);
@@ -324,6 +325,11 @@ export default function StudentDetailPage() {
   const editDocFileRef = useRef();
 
   const [fwdDoc, setFwdDoc] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== 'Center') return;
+    Promise.all([studentsApi.addedDocs.list(id, 'Other'), studentsApi.addedDocs.list(id, 'Marksheet')]).then(([o, m]) => setCentreDocs({ Other: o, Marksheet: m })).catch(() => {});
+  }, [id, user?.role]);
 
   const load = useCallback(async () => {
     try {
@@ -478,6 +484,7 @@ export default function StudentDetailPage() {
   if (loading) return <div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground"/></div>;
   if (!student) return <div className="text-center py-16 text-muted-foreground">Student not found</div>;
 
+  const isCenter = user?.role === 'Center';
   const isViewerCounselor = user?.role === 'ViewerCounselor';
   const canEdit = !isViewerCounselor && (!student.coreLocked || user?.role === 'Admin');
   const isCounselor = user?.role === 'Counselor';
@@ -588,7 +595,8 @@ export default function StudentDetailPage() {
           <TabsTrigger value="fees">Fees</TabsTrigger>
           <TabsTrigger value="docs">Documents</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
-          <TabsTrigger value="univdocs">Other Documents</TabsTrigger>
+          {(!isCenter || centreDocs.Marksheet.length > 0) && <TabsTrigger value="marksheets">Marksheets</TabsTrigger>}
+          {(!isCenter || centreDocs.Other.length > 0) && <TabsTrigger value="univdocs">Other Documents</TabsTrigger>}
         </TabsList>
 
         {/* ── Info Tab ── */}
@@ -851,7 +859,10 @@ export default function StudentDetailPage() {
 
         {/* ── Degree / other documents with their fee and payments ── */}
         <TabsContent value="univdocs" className="mt-4">
-          <StudentDocsPanel studentId={student._id} api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
+          <StudentDocsPanel studentId={student._id} category="Other" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
+        </TabsContent>
+        <TabsContent value="marksheets" className="mt-4">
+          <StudentDocsPanel studentId={student._id} category="Marksheet" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin} />
         </TabsContent>
 
         {/* ── Payments Tab ── */}

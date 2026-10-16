@@ -161,14 +161,15 @@ async function addedDocsByStudent(studentIds) {
   const ids = [...new Set(studentIds.filter(Boolean).map(String))];
   const map = new Map();
   if (!ids.length) return map;
-  const docs = await StudentDocument.find({ student: { $in: ids }, origin: 'Added' }).select('student name chargeFee payments').sort('createdAt').lean();
+  const docs = await StudentDocument.find({ student: { $in: ids }, origin: 'Added' }).select('student name chargeFee payments category fileUrl visibleToCenter').sort('createdAt').lean();
   for (const d of docs) {
     const paid = r2((d.payments || []).reduce((a, p) => a + (p.amount || 0), 0));
     const verifiedPaid = r2((d.payments || []).filter(p => p.verified).reduce((a, p) => a + (p.amount || 0), 0));
     const k = String(d.student);
     if (!map.has(k)) map.set(k, []);
-    map.get(k).push({ docId: d._id, name: d.name, fee: d.chargeFee || 0, paid, verifiedPaid, unverified: r2(paid - verifiedPaid) });
+    map.get(k).push({ docId: d._id, name: d.name, category: d.category === 'Marksheet' ? 'Marksheet' : 'Other', hasFile: !!d.fileUrl, shown: !!d.visibleToCenter, fee: d.chargeFee || 0, paid, verifiedPaid, unverified: r2(paid - verifiedPaid) });
   }
+  for (const [k, list] of map) map.set(k, [...list.filter(x => x.category === 'Marksheet'), ...list.filter(x => x.category !== 'Marksheet')]);   // marksheets first
   return map;
 }
 

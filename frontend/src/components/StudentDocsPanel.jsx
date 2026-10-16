@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Clock, FileText, Loader2, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
+import { CheckCircle2, Clock, Eye, EyeOff, FileText, Loader2, Paperclip, Pencil, Plus, Trash2, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,7 +51,10 @@ function PaymentForm({ doc, accounts, onSubmit, onCancel, busy }) {
 
 // Documents of one student (degree, marksheets, other documents), each with a fee and its payments.
 // api = { list(id), add(id, body), update(id, docId, body), remove(id, docId), addPayment(id, docId, formData) }
-export default function StudentDocsPanel({ studentId, api, canEdit, onChange }) {
+// category: 'Other' (degree / other documents) or 'Marksheet'. canEdit=false is the read-only view (the centre sees only what was shown to it).
+export default function StudentDocsPanel({ studentId, api, canEdit, onChange, category = 'Other', asCentre = false }) {
+  const isMarksheet = category === 'Marksheet';
+  const options = DOCUMENT_OPTIONS.filter(o => /marksheet|transcript/i.test(o) === isMarksheet);
   const isAdmin = useAuth().user?.role === 'Admin';
   const [docs, setDocs] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -61,7 +64,7 @@ export default function StudentDocsPanel({ studentId, api, canEdit, onChange }) 
   const [paying, setPaying] = useState(null);       // docId with the payment form open
   const [feeEdit, setFeeEdit] = useState(null);     // { id, value }
 
-  const load = useCallback(() => api.list(studentId).then(setDocs).catch(e => { toast.error(e.message); setDocs([]); }), [api, studentId]);
+  const load = useCallback(() => api.list(studentId, category, asCentre).then(setDocs).catch(e => { toast.error(e.message); setDocs([]); }), [api, studentId, category, asCentre]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { paymentAccountsApi.list().then(a => setAccounts((a || []).filter(x => x.isActive !== false))).catch(() => {}); }, []);
 
@@ -71,7 +74,7 @@ export default function StudentDocsPanel({ studentId, api, canEdit, onChange }) 
     catch (e) { toast.error(e.message); return false; }
     finally { setBusy(false); }
   };
-  const add = async () => { if (await run(() => api.add(studentId, { name: name.trim(), chargeFee: Number(fee) || 0 }), 'Document added')) { setName(''); setFee(''); } };
+  const add = async () => { if (await run(() => api.add(studentId, { name: name.trim(), chargeFee: Number(fee) || 0, category }), 'Document added')) { setName(''); setFee(''); } };
 
   return (
     <div className="space-y-3">
@@ -79,18 +82,18 @@ export default function StudentDocsPanel({ studentId, api, canEdit, onChange }) 
         <div className="rounded-lg border bg-muted/30 p-3">
           <div className="grid gap-2 md:grid-cols-[1.6fr_160px_auto]">
             <div>
-              <Input list="student-doc-options" value={name} onChange={e => setName(e.target.value)} placeholder="Document (e.g. Degree Certificate)" onKeyDown={e => e.key === 'Enter' && name.trim() && add()} />
-              <datalist id="student-doc-options">{DOCUMENT_OPTIONS.map(o => <option key={o} value={o} />)}</datalist>
+              <Input list={`student-doc-options-${category}`} value={name} onChange={e => setName(e.target.value)} placeholder={isMarksheet ? 'Marksheet (e.g. Marksheet Year One)' : 'Document (e.g. Degree Certificate)'} onKeyDown={e => e.key === 'Enter' && name.trim() && add()} />
+              <datalist id={`student-doc-options-${category}`}>{options.map(o => <option key={o} value={o} />)}</datalist>
             </div>
             <Input type="number" min="0" value={fee} onChange={e => setFee(e.target.value)} placeholder="Fee (₹)" />
-            <Button onClick={add} disabled={busy || !name.trim()}><Plus className="mr-1.5 h-4 w-4" />Add document</Button>
+            <Button onClick={add} disabled={busy || !name.trim()}><Plus className="mr-1.5 h-4 w-4" />{isMarksheet ? 'Add marksheet' : 'Add document'}</Button>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">Add every document of this student and its fee, then add the payment against it. It shows in the Payment Desk Day Book and Document Status.</p>
+          <p className="mt-2 text-xs text-muted-foreground">Add each {isMarksheet ? 'marksheet' : 'document'} with its fee, upload the file, then add the payment against it. It shows in the Payment Desk Day Book and Document Status. Use “Show to centre” to let the centre see it.</p>
         </div>
       )}
       {docs === null && <div className="py-6 text-center text-sm text-muted-foreground">Loading…</div>}
       {docs?.length === 0 && (
-        <div className="rounded-lg border border-dashed py-10 text-center"><FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">No documents added yet</p></div>
+        <div className="rounded-lg border border-dashed py-10 text-center"><FileText className="mx-auto mb-2 h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">{canEdit ? `No ${isMarksheet ? 'marksheets' : 'documents'} added yet` : 'Nothing has been shared with the centre yet'}</p></div>
       )}
       {docs?.map(d => (
         <div key={d._id} className="rounded-lg border bg-card p-3 text-sm">
@@ -112,6 +115,25 @@ export default function StudentDocsPanel({ studentId, api, canEdit, onChange }) 
               {canEdit && (d.payments.length === 0 || isAdmin) && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-red-600" disabled={busy} title={d.payments.length ? 'Delete this document and its payments (Admin)' : 'Remove this document'}
                 onClick={() => { if (d.payments.length && !window.confirm(`Delete "${d.name}" and its ${d.payments.length} payment${d.payments.length === 1 ? '' : 's'} (${inr(d.paid)})? This cannot be undone.`)) return; run(() => api.remove(studentId, d._id), 'Document deleted'); }}><Trash2 className="h-4 w-4" /></Button>}
             </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            {d.fileUrl
+              ? <a className="inline-flex items-center gap-1 rounded border bg-muted/30 px-2 py-1 text-indigo-700 hover:bg-muted" href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" title={d.fileName}><Paperclip className="h-3.5 w-3.5" />View file{d.fileName ? ` · ${d.fileName.slice(0, 28)}` : ''}</a>
+              : <span className="text-muted-foreground">No file uploaded</span>}
+            {canEdit && (
+              <label className="inline-flex cursor-pointer items-center gap-1 rounded border px-2 py-1 hover:bg-muted">
+                <Paperclip className="h-3.5 w-3.5" />{d.fileUrl ? 'Replace file' : 'Upload file / screenshot'}
+                <input type="file" accept="image/*,.pdf" className="hidden" disabled={busy}
+                  onChange={async e => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; const fd = new FormData(); fd.append('file', f); await run(() => api.uploadFile(studentId, d._id, fd), 'File uploaded'); }} />
+              </label>
+            )}
+            {canEdit && (
+              <Button size="sm" variant={d.visibleToCenter ? 'default' : 'outline'} className="h-7 text-xs" disabled={busy}
+                title={d.visibleToCenter ? 'The centre can see this. Click to hide it again.' : 'Let the centre see this document'}
+                onClick={() => run(() => api.setVisible(studentId, d._id, !d.visibleToCenter), d.visibleToCenter ? 'Hidden from the centre' : 'Now visible to the centre')}>
+                {d.visibleToCenter ? <Eye className="mr-1 h-3.5 w-3.5" /> : <EyeOff className="mr-1 h-3.5 w-3.5" />}{d.visibleToCenter ? 'Shown to centre' : 'Show to centre'}
+              </Button>
+            )}
           </div>
           {d.payments.length > 0 && (
             <div className="mt-2 space-y-1">

@@ -567,7 +567,7 @@ export default function DayBookTab() {
                       {g.addedDocs?.length ? (
                         <span className="flex flex-col gap-1">{g.addedDocs.map(d => (
                           <span key={d.docId} className={cn('rounded border px-1.5 py-0.5 text-[11px] leading-tight', d.fee > 0 && d.paid >= d.fee ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : d.paid > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700')}>
-                            <b>{d.name}</b> · {fmt(d.paid)} / {fmt(d.fee)}{d.unverified > 0 && <span className="text-amber-700"> · {fmt(d.unverified)} unverified</span>}
+                            {d.category === 'Marksheet' && <span className="mr-1 rounded bg-sky-100 px-1 text-[9px] font-semibold uppercase text-sky-700">marksheet</span>}<b>{d.name}</b> · {fmt(d.paid)} / {fmt(d.fee)}{d.hasFile && <span title="File uploaded"> 📎</span>}{d.shown && <span className="text-indigo-700" title="Visible to the centre"> · shown to centre</span>}{d.unverified > 0 && <span className="text-amber-700"> · {fmt(d.unverified)} unverified</span>}
                           </span>
                         ))}</span>
                       ) : <span className="text-indigo-600 underline decoration-dotted">+ add documents</span>}

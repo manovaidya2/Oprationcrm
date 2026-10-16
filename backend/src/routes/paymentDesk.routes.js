@@ -35,6 +35,8 @@ router.get('/doc-status',    desk, book.docStatus);
 router.get('/added-docs',    desk, addedDocs.deskList);
 router.get('/students/:id/added-docs',                  desk, addedDocs.list);
 router.post('/students/:id/added-docs',                 desk, addedDocs.add);
+router.post('/students/:id/added-docs/:docId/file',       desk, upload.single('file'), addedDocs.uploadFile);
+router.patch('/students/:id/added-docs/:docId/visibility', desk, addedDocs.setVisibility);
 router.patch('/students/:id/added-docs/:docId',         desk, addedDocs.update);
 router.delete('/students/:id/added-docs/:docId',        desk, addedDocs.remove);
 router.delete('/students/:id/added-docs/:docId/payments/:payId', requireRole('Admin'), addedDocs.removePayment);

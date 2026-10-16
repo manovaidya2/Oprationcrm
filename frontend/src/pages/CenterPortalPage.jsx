@@ -1,4 +1,5 @@
 import { MEDIA } from '../lib/api';
+import StudentDocsPanel from '@/components/StudentDocsPanel';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -1977,6 +1978,15 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const { user, switchedCenter } = useAuth();
   const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
   const [s,setS]         = useState(student);
+  // Marksheets / Other Documents the counsellor chose to show to this centre. Each tab exists only while it has something shown.
+  const [shownDocs,setShownDocs] = useState({ Marksheet:[], Other:[] });
+  useEffect(()=>{
+    if (user?.role!=='Center' && !isCounselorSwitch) return;       // a counsellor switched into the centre sees exactly what the centre sees
+    let off=false;
+    Promise.all([studentsApi.addedDocs.list(student._id,'Marksheet',true),studentsApi.addedDocs.list(student._id,'Other',true)])
+      .then(([m,o])=>{ if(!off) setShownDocs({ Marksheet:m, Other:o }); }).catch(()=>{});
+    return ()=>{ off=true; };
+  },[student._id,user?.role,isCounselorSwitch]);
   const [editOpen,setEditOpen] = useState(false);
   const [editTab,setEditTab]   = useState('details');
   const [form,setForm]   = useState({});
@@ -2297,7 +2307,19 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
           <TabsTrigger value="payments" className="flex-1 rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-2">
             <CreditCard className="h-3.5 w-3.5 mr-1.5"/>Payments
           </TabsTrigger>
+          {shownDocs.Marksheet.length>0&&(
+            <TabsTrigger value="marksheets" className="flex-1 rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-2">
+              <FileText className="h-3.5 w-3.5 mr-1.5"/>Marksheets
+            </TabsTrigger>
+          )}
+          {shownDocs.Other.length>0&&(
+            <TabsTrigger value="otherdocs" className="flex-1 rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-2">
+              <FileText className="h-3.5 w-3.5 mr-1.5"/>Other Documents
+            </TabsTrigger>
+          )}
         </TabsList>
+        <TabsContent value="marksheets" className="mt-4"><StudentDocsPanel studentId={s._id} category="Marksheet" api={studentsApi.addedDocs} canEdit={false} asCentre/></TabsContent>
+        <TabsContent value="otherdocs" className="mt-4"><StudentDocsPanel studentId={s._id} category="Other" api={studentsApi.addedDocs} canEdit={false} asCentre/></TabsContent>
         <TabsContent value="fees" className="mt-4"><FeeSection studentId={s._id} appStatus={s.applicationStatus} student={s}/></TabsContent>
         <TabsContent value="docs" className="mt-4">
           {s.submissionDocs?.length>0&&(

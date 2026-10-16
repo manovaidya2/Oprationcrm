@@ -89,7 +89,9 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 router.get   ('/students',     protect, studentC.list);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
-router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor'), addedDocsC.list);
+router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','PaymentCoordinator','Center'), addedDocsC.list);
+router.post  ('/students/:id/added-docs/:docId/file',       protect, requireRole('Admin','Counselor'), upload.single('file'), addedDocsC.uploadFile);
+router.patch ('/students/:id/added-docs/:docId/visibility', protect, requireRole('Admin','Counselor'), addedDocsC.setVisibility);
 router.post  ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor'), addedDocsC.add);
 router.patch ('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor'), addedDocsC.update);
 router.delete('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor'), addedDocsC.remove);

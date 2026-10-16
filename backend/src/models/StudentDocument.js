@@ -60,6 +60,11 @@ const studentDocSchema = new mongoose.Schema({
   type:      { type: String, trim: true },                  // Identity, Academic, Other
   note:      { type: String, trim: true },
   origin:    { type: String, enum: ['Request', 'Inventory', 'Added'], default: 'Request' },
+  // origin 'Added' only: which student-page tab it belongs to, and whether the centre may see it
+  category:        { type: String, enum: ['Other', 'Marksheet'], default: 'Other' },
+  visibleToCenter: { type: Boolean, default: false },
+  sharedAt:        { type: Date },
+  sharedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   requestType: { type: String, enum: ['Soft Copy', 'Hard Copy'], default: 'Soft Copy' },
 
   // Uploaded file
