@@ -278,6 +278,7 @@ export const deskApi = {
   searchStudents:  (q, centerId)  => request(`/payment-desk/students/search${qs({ q, centerId })}`),
   studentSummary:  (id)           => request(`/payment-desk/students/${id}/summary`),
   addPayment:      (d)            => send('POST', '/payment-desk/payments', d),
+  addStudent:      (fd)           => send('POST', '/payment-desk/students', fd),
   reviewPayments:  (d)            => send('POST', '/payment-desk/payments/review', d),
   settlementStudents: (p)         => request(`/payment-desk/settlement/students${qs(p)}`),
   createSettlement:(fd)           => send('POST', '/payment-desk/settlements', fd),

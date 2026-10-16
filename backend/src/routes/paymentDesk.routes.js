@@ -14,6 +14,7 @@ router.get('/meta', desk, book.meta);
 
 // Day book + student autofill + write-back edits
 router.get  ('/day-book',                         desk, book.dayBook);
+router.post ('/students',                        desk, upload.single('paymentScreenshot'), book.addStudent);
 router.get  ('/students/search',                  desk, book.searchStudents);
 router.get  ('/students/:id/summary',             desk, book.studentSummary);
 router.patch('/students/:id',                     desk, book.editStudent);

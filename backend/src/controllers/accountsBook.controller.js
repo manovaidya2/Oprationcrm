@@ -473,6 +473,90 @@ exports.addPayment = asyncHandler(async (req, res) => {
   res.status(201).json(await summaryFor(student._id));
 });
 
+// ── Add a student (details + fee + optional first payment) straight from the Day Book ──
+// POST /payment-desk/students   (multipart: optional paymentScreenshot)
+const DESK_STAGES = ['Submitted', 'Counselor_Approved', 'Sent_To_University', 'Enrolled'];
+const clean = v => (v === undefined || v === null ? '' : String(v).trim());
+exports.addStudent = asyncHandler(async (req, res) => {
+  const b = req.body;
+  const name = clean(b.name);
+  if (!name) throw fail('Enter the student name');
+  if (!isId(b.centerId)) throw fail('Choose the centre this student is from');
+  const center = await Center.findById(b.centerId).populate('assignedCounselor', 'name');
+  if (!center) throw fail('Centre not found', 404);
+  let counselorId = center.assignedCounselor?._id || center.assignedCounselor;
+  if (!counselorId) counselorId = (await Counselor.findOne({ centers: center._id, isActive: true }).select('_id').lean())?._id;
+  if (!counselorId) throw fail('This centre has no counsellor. Assign a counsellor to the centre first.');
+
+  let university = null;
+  if (b.universityId) {
+    if (!isId(b.universityId)) throw fail('Invalid university');
+    university = await University.findById(b.universityId).lean();
+    if (!university) throw fail('University not found', 404);
+    if (university.isActive === false) throw fail('This university is inactive and cannot be selected');
+  }
+  const stage = DESK_STAGES.includes(b.applicationStatus) ? b.applicationStatus : 'Submitted';
+  const enrollmentNumber = clean(b.enrollmentNumber);
+  if (stage === 'Enrolled' && !enrollmentNumber) throw fail('Enter the enrollment number for an enrolled student');
+  const phone = clean(b.phone);
+  if (phone && !/^[0-9+\-\s]{6,15}$/.test(phone)) throw fail('Enter a valid phone number');
+
+  const totalFee = r2(num(b.totalFee || 0)), discount = r2(num(b.discount || 0));
+  if (!Number.isFinite(totalFee) || totalFee < 0) throw fail('Enter a valid total fee');
+  if (!Number.isFinite(discount) || discount < 0 || discount > totalFee) throw fail('Discount cannot be more than the total fee');
+  const net = r2(totalFee - discount);
+
+  // optional first payment, validated BEFORE anything is saved
+  const amount = r2(num(b.amount || 0));
+  const withPayment = Number.isFinite(amount) && amount > 0;
+  let tx = null, acc = null;
+  if (withPayment) {
+    if (net <= 0) throw fail('Enter the fee before adding a payment');
+    if (amount > net + EPS) throw fail(`The payment (₹${amount}) is more than the fee after discount (₹${net})`);
+    const mode = b.mode === 'Bank Transfer' ? 'Bank Transfer' : b.mode === 'UPI' ? 'UPI' : null;
+    if (!mode) throw fail('Select a payment mode');
+    const utrRef = clean(b.utrRef);
+    if (!utrRef) throw fail('UTR / reference number is required for the payment');
+    const paidAt = b.paidAt ? new Date(b.paidAt) : null;
+    if (!paidAt || Number.isNaN(paidAt.getTime())) throw fail('Enter a valid payment date');
+    const matches = await findDuplicateUtrMatches(utrRef);
+    if (matches.length && !(b.confirmDuplicate === true || b.confirmDuplicate === 'true')) throw fail('This UTR already exists on other payments', 409, { duplicateMatches: matches });
+    acc = await accountFor(b.accountId);
+    tx = {
+      amount, mode, utrRef, paidAt, note: clean(b.note) || 'Added with the student from Payment desk',
+      upiId: acc?.upiId || '', bankName: acc?.bankName || '', accountHolder: acc?.accountHolder || '', accountNumber: acc?.accountNumber || '', ifscCode: acc?.ifscCode || '',
+      paidToAccount: acc?._id, paidToAccountLabel: acc?.label || '', paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
+      type: 'Fee', verificationStatus: 'verified', verificationNote: 'Added by Payment desk',
+      recordedBy: req.user._id, verifiedBy: req.user._id, verifiedAt: new Date(),
+    };
+  }
+
+  const order = ['Draft', 'Submitted', 'Counselor_Approved', 'Sent_To_University', 'Enrolled'];
+  const now = new Date();
+  const student = await Student.create({
+    name, fatherName: clean(b.fatherName), phone, email: clean(b.email),
+    gender: ['Male', 'Female', 'Other'].includes(b.gender) ? b.gender : undefined,
+    courseName: clean(b.courseName), courseYear: clean(b.courseYear),
+    university: university?._id, universityName: university?.name || '',
+    enrollmentNumber, coreLocked: !!enrollmentNumber,
+    center: center._id, counselor: counselorId, applicationStatus: stage,
+    createdBy: req.user._id, lastUpdatedBy: req.user._id, lastUpdatedAt: now,
+    statusHistory: order.slice(0, order.indexOf(stage) + 1).map(st => ({ status: st, note: st === stage ? (clean(b.note) || 'Added from Payment Desk') : 'Added from Payment Desk', changedBy: req.user._id, role: req.user.role, at: now })),
+  });
+  try {
+    await Payment.create({ student: student._id, center: center._id, totalFee, discount, lastUpdatedBy: req.user._id, lastUpdatedAt: now, transactions: tx ? [tx] : [] });
+  } catch (e) {
+    await Student.deleteOne({ _id: student._id });       // never leave a student without a fee record
+    throw e;
+  }
+  await Counselor.updateOne({ _id: counselorId }, { $addToSet: { centers: center._id } });
+  await audit('payment_desk_student_added', 'Student', student._id, req.user, { name, centerId: center._id, totalFee, discount, paid: withPayment ? amount : 0, stage },
+    `Payment desk added student ${name} (${centerName(center)})${withPayment ? ` with a verified payment of ₹${amount}` : ''}`);
+  await tellCentre(center._id, `${name} was added to your centre by the Payment desk${withPayment ? ` with a payment of ₹${amount}` : ''}.`, student._id);
+  await tellCounselor(counselorId, `${name} (${centerName(center)}) was added from the Payment desk.`, { studentId: student._id });
+  res.status(201).json(await summaryFor(student._id));
+});
+
 // ── Verify / reject unverified payments straight from the Day Book ──
 // Uses the same status fields the Counselor and Accountant screens read, so a payment verified here
 // disappears from their pending queues and counts as paid everywhere.

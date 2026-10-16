@@ -2,9 +2,10 @@ import { Field, Pill, ScreenshotField, Stat, Pager, RangeBar, DownloadBtn, Spinn
 import SettlementDialog from './SettlementDialog';
 import SettlementEditDialog from './SettlementEditDialog';
 import StudentDocsDialog from './StudentDocsDialog';
+import AddStudentDialog from './AddStudentDialog';
 import {
   Fragment, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Pencil, Plus, Scale, Search, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Paperclip, Pencil, Plus, Scale, Search, UserPlus, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -356,6 +357,7 @@ export default function DayBookTab() {
   const [f, setFilters] = useState({ from: monthStartYmd(), to: todayYmd(), dateBasis: 'createdAt', centerId: '', accountId: '', type: 'all', ver: 'all', search: '' });
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
+  const [addingStudent, setAddingStudent] = useState(false);
   const [editing, setEditing] = useState(null);
   const [docsFor, setDocsFor] = useState(null);                  // { studentId, name } -> the student's documents with fee and payments
   const [adjusting, setAdjusting] = useState(null);                // { centerId, studentId } -> settlement (payment adjustment) dialog
@@ -410,6 +412,7 @@ export default function DayBookTab() {
             <DownloadBtn path="/payment-desk/export/day-book.csv" params={params} />
             <Button size="sm" variant="outline" onClick={() => setAdjusting({ centerId: '', studentId: '' })}><Scale className="mr-1.5 h-4 w-4" />Adjust payments</Button>
             <Button size="sm" onClick={() => setAdding(true)}><Plus className="mr-1.5 h-4 w-4" />Add payment</Button>
+            <Button size="sm" className="bg-gradient-to-r from-indigo-600 to-violet-600 px-4 font-semibold shadow-md ring-2 ring-indigo-200 hover:from-indigo-700 hover:to-violet-700" onClick={() => setAddingStudent(true)}><UserPlus className="mr-1.5 h-4 w-4" />Add student</Button>
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-6">
@@ -638,6 +641,7 @@ export default function DayBookTab() {
       {adjusting && <SettlementDialog initialCenterId={adjusting.centerId} initialStudentId={adjusting.studentId} onClose={() => setAdjusting(null)} onSaved={() => { setAdjusting(null); reload(); }} />}
       {editingSettlement && <SettlementEditDialog settlementId={editingSettlement} onClose={() => setEditingSettlement(null)} onSaved={() => { setEditingSettlement(null); reload(); }} />}
 
+      <AddStudentDialog open={addingStudent} onClose={() => setAddingStudent(false)} onSaved={() => { setAddingStudent(false); reload(); }} />
       <AddPaymentDialog open={adding} onClose={() => setAdding(false)} accounts={accounts} onSaved={() => { setAdding(false); reload(); }} />
       {editing && <EditDialog key={editing.key} row={editing} accounts={accounts} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }} />}
     </div>
