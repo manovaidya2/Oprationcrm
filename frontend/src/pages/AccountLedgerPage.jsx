@@ -240,7 +240,9 @@ export default function AccountLedgerPage() {
             <FileSpreadsheet className="h-5 w-5 text-indigo-600" />
             Account Ledger
           </h1>
-          <div className="text-xs text-muted-foreground">All students billing ledger</div>
+          <div className="text-xs text-muted-foreground">
+            {['Counselor', 'ViewerCounselor'].includes(user?.role) ? 'Billing ledger for your students only' : 'All students billing ledger'}
+          </div>
         </div>
         <Button size="sm" variant="outline" onClick={downloadCsv} disabled={filteredRows.length === 0}>
           <Download className="mr-1 h-4 w-4" />

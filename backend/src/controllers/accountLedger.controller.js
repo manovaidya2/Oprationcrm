@@ -13,6 +13,16 @@ async function assignedCenterFilter(req) {
   return { _id: { $in: counselor?.centers || [] } };
 }
 
+// Counselors see only their own students — same rule as their Students page:
+// assigned to them, or in one of their centres. Admin / Accountant see everyone.
+async function ledgerStudentFilter(req) {
+  if (!['Counselor', 'ViewerCounselor'].includes(req.user?.role)) return {};
+  const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  const or = [{ center: { $in: counselor?.centers || [] } }];
+  if (req.user.counselorId) or.unshift({ counselor: req.user.counselorId });
+  return { $or: or };
+}
+
 async function assertLedgerCenterAccess(req, centerId) {
   if (!['Counselor', 'ViewerCounselor'].includes(req.user?.role)) return;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
@@ -577,9 +587,7 @@ exports.reverseCenterSettlement = asyncHandler(async (req, res) => {
 });
 
 exports.students = asyncHandler(async (req, res) => {
-  const centerFilter = await assignedCenterFilter(req);
-  const allowedCenters = centerFilter._id?.$in || null;
-  const filter = allowedCenters ? { center: { $in: allowedCenters } } : {};
+  const filter = await ledgerStudentFilter(req);
   const page = Math.max(1, Number(req.query.page || 1));
   const limit = Math.max(0, Math.min(500, Number(req.query.limit || 0)));
   const skip = limit ? (page - 1) * limit : 0;

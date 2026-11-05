@@ -1,4 +1,4 @@
-const EMPTY_FILTERS = { search: '', status: 'all', center: 'all' };
+const EMPTY_FILTERS = { search: '', status: 'all', center: 'all', submittedFrom: '', submittedTo: '' };
 
 let filters = { ...EMPTY_FILTERS };
 

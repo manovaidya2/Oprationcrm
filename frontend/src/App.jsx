@@ -57,8 +57,8 @@ const ROLE_ALLOWED = {
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
   Payment:    ['/payment-desk', '/chat'],
-  Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
-  ViewerCounselor: ['/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/centre-billing', '/invoice', '/chat'],
+  Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  ViewerCounselor: ['/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
 };
 
 function ProtectedRoute({ children }) {

@@ -185,6 +185,32 @@ exports.list = asyncHandler(async (req, res) => {
   if (req.query.counselorId)  andConditions.push({ counselor: req.query.counselorId });
   if (req.query.universityId) andConditions.push({ university: req.query.universityId });
 
+  // Admission submitted date = first 'Submitted' entry in statusHistory (same rule as the account ledger)
+  const submittedFrom = req.query.submittedFrom ? new Date(req.query.submittedFrom) : null;
+  const submittedTo   = req.query.submittedTo   ? new Date(req.query.submittedTo)   : null;
+  if (submittedFrom || submittedTo) {
+    if ([submittedFrom, submittedTo].some(d => d && Number.isNaN(d.getTime()))) {
+      const e = new Error('Invalid submitted date'); e.status = 400; throw e;
+    }
+    const range = [{ $ne: ['$$at', null] }];
+    if (submittedFrom) range.push({ $gte: ['$$at', submittedFrom] });
+    if (submittedTo)   range.push({ $lte: ['$$at', submittedTo] });
+    // Earliest 'Submitted' date, or null when the student was never submitted
+    const firstSubmittedAt = { $reduce: {
+      input: { $ifNull: ['$statusHistory', []] },
+      initialValue: null,
+      in: { $cond: [
+        { $and: [
+          { $eq: ['$$this.status', 'Submitted'] },
+          { $or: [{ $eq: ['$$value', null] }, { $lt: ['$$this.at', '$$value'] }] },
+        ] },
+        '$$this.at',
+        '$$value',
+      ] },
+    } };
+    andConditions.push({ $expr: { $let: { vars: { at: firstSubmittedAt }, in: { $and: range } } } });
+  }
+
   if (req.query.search) {
     const q = req.query.search;
     const matchingCenters = await Center.find({ name: { $regex: q, $options: 'i' } }).select('_id').lean();

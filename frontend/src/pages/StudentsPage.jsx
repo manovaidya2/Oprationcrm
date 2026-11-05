@@ -35,11 +35,34 @@ const ALL_STATUSES = Object.keys(STATUS_LABELS);
 const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
 const fmtAmt  = n => n != null && n !== '' ? Number(n).toString() : '';
 
-// Get the date when application was first submitted from statusHistory
+// Earliest 'Submitted' entry in statusHistory — same rule the server uses for the submitted-date filter
+function firstSubmittedAt(student) {
+  const times = (student.statusHistory || [])
+    .filter(h => h.status === 'Submitted' && h.at)
+    .map(h => new Date(h.at).getTime());
+  return times.length ? new Date(Math.min(...times)) : null;
+}
+
 function getSubmittedDate(student) {
-  const hist = student.statusHistory || [];
-  const entry = hist.find(h => h.status === 'Submitted');
-  return entry?.at ? fmtDate(entry.at) : '';
+  const at = firstSubmittedAt(student);
+  return at ? fmtDate(at) : '';
+}
+
+function inSubmittedRange(student, from, to) {
+  if (!from && !to) return true;
+  const at = firstSubmittedAt(student);
+  if (!at) return false;
+  if (from && at < new Date(`${from}T00:00:00`)) return false;
+  if (to   && at > new Date(`${to}T23:59:59.999`)) return false;
+  return true;
+}
+
+// Picked days are local (IST) — send exact start/end-of-day instants so the server doesn't shift them to UTC
+function submittedRangeParams(from, to) {
+  const params = {};
+  if (from) params.submittedFrom = new Date(`${from}T00:00:00`).toISOString();
+  if (to)   params.submittedTo   = new Date(`${to}T23:59:59.999`).toISOString();
+  return params;
 }
 
 function emptyExistingForm() {
@@ -76,10 +99,12 @@ export default function StudentsPage() {
   const [search,    setSearch]    = useState(initialFilters.search);
   const [statusF,   setStatusF]   = useState(initialFilters.status);
   const [centerF,   setCenterF]   = useState(initialFilters.center);
+  const [submittedFrom, setSubmittedFrom] = useState(initialFilters.submittedFrom);
+  const [submittedTo,   setSubmittedTo]   = useState(initialFilters.submittedTo);
 
   useEffect(() => {
-    setStudentListFilters({ search, status: statusF, center: centerF });
-  }, [search, statusF, centerF]);
+    setStudentListFilters({ search, status: statusF, center: centerF, submittedFrom, submittedTo });
+  }, [search, statusF, centerF, submittedFrom, submittedTo]);
 
   // Selection
   const [selected, setSelected] = useState(new Set());
@@ -155,16 +180,16 @@ export default function StudentsPage() {
   }
 
   const fetchStudentsPage = useCallback((page, limit) => {
-    const params = { page, limit };
+    const params = { page, limit, ...submittedRangeParams(submittedFrom, submittedTo) };
     if (statusF && statusF !== 'all') params.status   = statusF;
     if (centerF && centerF !== 'all') params.centerId = centerF;
     if (search)                        params.search   = search;
     return studentsApi.getAll(params);
-  }, [search, statusF, centerF]);
+  }, [search, statusF, centerF, submittedFrom, submittedTo]);
 
   const PAGE_SIZE = 40;
   const { items: students, total: studentsTotal, page, setPage, pages, loading, reload: load } =
-    usePagedFetch(fetchStudentsPage, { limit: PAGE_SIZE, prefetch: false, deps: [search, statusF, centerF] });
+    usePagedFetch(fetchStudentsPage, { limit: PAGE_SIZE, prefetch: false, deps: [search, statusF, centerF, submittedFrom, submittedTo] });
 
   useEffect(() => {
     Promise.all([
@@ -183,6 +208,33 @@ export default function StudentsPage() {
   }, []);
 
   useEffect(() => { setSelected(new Set()); }, [students]);
+
+  // CSV export filters: current list filters + the dialog's submitted-date range
+  const exportParams = submittedRangeParams(dateFrom, dateTo);
+  if (statusF && statusF !== 'all') exportParams.status   = statusF;
+  if (centerF && centerF !== 'all') exportParams.centerId = centerF;
+  if (search)                        exportParams.search   = search;
+
+  // Live count of students the CSV will contain ("export all" mode only — selected rows are counted locally)
+  const csvCountKey = csvOpen && selected.size === 0 ? JSON.stringify(exportParams) : null;
+  const [csvCount, setCsvCount] = useState({ key: null, total: null });
+  useEffect(() => {
+    if (!csvCountKey) return;
+    let cancelled = false;
+    studentsApi.getAll({ ...JSON.parse(csvCountKey), page: 1, limit: 1 })
+      .then(res => { if (!cancelled) setCsvCount({ key: csvCountKey, total: res?.total ?? 0 }); })
+      .catch(() => { if (!cancelled) setCsvCount({ key: csvCountKey, total: null }); });
+    return () => { cancelled = true; };
+  }, [csvCountKey]);
+  const selectedInRange = students.filter(s => selected.has(s._id) && inSubmittedRange(s, dateFrom, dateTo)).length;
+  const csvTotal = selected.size > 0 ? selectedInRange : (csvCount.key === csvCountKey ? csvCount.total : undefined);
+  // undefined = still counting, null = count failed (export still allowed)
+
+  function openCsvDialog() {
+    setDateFrom(submittedFrom);
+    setDateTo(submittedTo);
+    setCsvOpen(true);
+  }
 
   // ── Selection helpers ──────────────────────────────────────
   const allSelected  = students.length > 0 && students.every(s => selected.has(s._id));
@@ -206,18 +258,19 @@ export default function StudentsPage() {
     try {
       // Selected rows come from the current page; "export all" pulls the full
       // filtered list from the server (the on-screen list is paginated).
+      // The submitted-date range is applied before payments/docs are fetched, so only matching students are loaded.
       let toExport;
       if (selected.size > 0) {
-        toExport = students.filter(s => selected.has(s._id));
+        toExport = students.filter(s => selected.has(s._id) && inSubmittedRange(s, dateFrom, dateTo));
       } else {
-        const params = {};
-        if (statusF && statusF !== 'all') params.status   = statusF;
-        if (centerF && centerF !== 'all') params.centerId = centerF;
-        if (search)                        params.search   = search;
-        const all = await studentsApi.getAll(params);
+        const all = await studentsApi.getAll(exportParams);
         toExport = Array.isArray(all) ? all : (all?.students || []);
       }
-      if (toExport.length === 0) { toast.error('No students to export'); setCsvLoading(false); return; }
+      if (toExport.length === 0) {
+        toast.error(dateFrom || dateTo ? 'No students submitted in this date range' : 'No students to export');
+        setCsvLoading(false);
+        return;
+      }
 
       const enriched = await Promise.all(toExport.map(async s => {
         let pay = null, docs = [];
@@ -225,21 +278,6 @@ export default function StudentsPage() {
         try { docs = await docsApi.list({ studentId: s._id, all: '1' }); } catch {}
         return { s, pay, docs };
       }));
-
-      const filtered = enriched.filter(({ s }) => {
-  if (!dateFrom && !dateTo) return true;
-  const submittedDate = getSubmittedDate(s);
-  if (!submittedDate) return false;
-  const hist = s.statusHistory || [];
-  const entry = hist.find(h => h.status === 'Submitted');
-  if (!entry?.at) return false;
-  const d = new Date(entry.at);
-  if (dateFrom && d < new Date(dateFrom)) return false;
-  if (dateTo   && d > new Date(dateTo + 'T23:59:59')) return false;
-  return true;
-});
-
-      if (filtered.length === 0) { toast.error('No students match the date filter'); setCsvLoading(false); return; }
 
       const headers = [
         // Student basic
@@ -263,7 +301,7 @@ export default function StudentsPage() {
         'Doc4 Name', 'Doc4 Current Status', 'Doc4 Charge', 'Doc4 Paid', 'Doc4 Requested Date', 'Doc4 Request Expiry', 'Doc4 Uni Dispatched Date', 'Doc4 Dispatch Received Date', 'Doc4 Center Dispatched Date', 'Doc4 Center Received Date',
       ];
 
-      const rows = filtered.map((item, rowIdx) => {
+      const rows = enriched.map((item, rowIdx) => {
         const { s, pay, docs } = item;
         const txs = pay?.transactions || [];
         const verifiedTxs = txs.filter(t => t.verificationStatus === 'verified' && t.verifiedAt);
@@ -330,10 +368,9 @@ export default function StudentsPage() {
           s.enrollmentNumber || '',
           getSubmittedDate(s), 
           (() => {
-            const hist = s.statusHistory || [];
-            const entry = hist.find(h => h.status === 'Submitted');
-            if (!entry?.at) return '';
-            const exp = new Date(entry.at);
+            const at = firstSubmittedAt(s);
+            if (!at) return '';
+            const exp = new Date(at);
             exp.setDate(exp.getDate() + 16);
             return fmtDate(exp);
           })(),                                  // ← new value
@@ -361,7 +398,7 @@ export default function StudentsPage() {
       a.download = `students${suffix}${dateSuffix}.csv`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success(`CSV downloaded — ${filtered.length} student${filtered.length > 1 ? 's' : ''}`);
+      toast.success(`CSV downloaded — ${enriched.length} student${enriched.length > 1 ? 's' : ''}`);
       setCsvOpen(false);
     } catch(e) { toast.error('Export failed: ' + e.message); }
     finally { setCsvLoading(false); }
@@ -458,7 +495,7 @@ export default function StudentsPage() {
           {someSelected && <span className="ml-2 text-sm font-normal text-indigo-600">{selected.size} selected</span>}
         </h1>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setCsvOpen(true)}>
+          <Button variant="outline" size="sm" onClick={openCsvDialog}>
             <Download className="h-4 w-4 mr-1"/>CSV
           </Button>
           {isAdmin && (
@@ -505,6 +542,24 @@ export default function StudentsPage() {
             </SelectContent>
           </Select>
         )}
+        <div className="flex items-center gap-2" title="Filter by the date the admission was first submitted">
+          <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">Submitted</span>
+          <Input type="date" className="w-36" aria-label="Submitted from" value={submittedFrom}
+            max={submittedTo || undefined} onChange={e => setSubmittedFrom(e.target.value)} />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input type="date" className="w-36" aria-label="Submitted to" value={submittedTo}
+            min={submittedFrom || undefined} onChange={e => setSubmittedTo(e.target.value)} />
+          {(submittedFrom || submittedTo) && (
+            <button
+              type="button"
+              aria-label="Clear submitted date filter"
+              onClick={() => { setSubmittedFrom(''); setSubmittedTo(''); }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Select All bar */}
@@ -589,6 +644,7 @@ export default function StudentsPage() {
                         {s.counselor?.name && <span>· {s.counselor.name}</span>}
                         {s.courseName      && <span>· {s.courseName} {s.courseYear}</span>}
                         {s.phone           && <span>· {s.phone}</span>}
+                        {getSubmittedDate(s) && <span>· Submitted {getSubmittedDate(s)}</span>}
                       </div>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -614,27 +670,33 @@ export default function StudentsPage() {
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-sm space-y-1">
               <div className="font-medium text-slate-700">Students to export:</div>
               <div className="text-slate-500">
-                {selected.size > 0
-                  ? <span className="text-indigo-600 font-semibold">{selected.size} selected student{selected.size > 1 ? 's' : ''}</span>
-                  : <span>All <b>{studentsTotal}</b> students (current filters)</span>}
+                {csvTotal === undefined
+                  ? <span className="inline-flex items-center gap-1.5"><Loader2 className="h-3.5 w-3.5 animate-spin"/>Counting students…</span>
+                  : csvTotal === null
+                    ? <span>All students matching the current filters</span>
+                    : <span>
+                        <b className={csvTotal > 0 ? 'text-indigo-600' : 'text-red-600'}>{csvTotal}</b> student{csvTotal === 1 ? '' : 's'} will be downloaded
+                        {selected.size > 0 && <span className="text-slate-400"> (from {selected.size} selected)</span>}
+                      </span>}
               </div>
               {centerF !== 'all' && <div className="text-xs text-slate-400">Center: {centers.find(c=>c._id===centerF)?.name}</div>}
               {statusF !== 'all' && <div className="text-xs text-slate-400">Status: {STATUS_LABELS[statusF]}</div>}
+              {(dateFrom || dateTo) && <div className="text-xs text-slate-400">Submitted: {dateFrom ? fmtDate(`${dateFrom}T00:00:00`) : 'Start'} to {dateTo ? fmtDate(`${dateTo}T00:00:00`) : 'Today'}</div>}
             </div>
 
             <div>
               <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
-                Filter by Payment Verified Date <span className="text-slate-400 font-normal normal-case">(optional)</span>
+                Filter by Admission Submitted Date <span className="text-slate-400 font-normal normal-case">(optional)</span>
               </Label>
-              <p className="text-xs text-slate-400 mt-0.5 mb-2">Only students whose application was submitted in this date range will be included.</p>
+              <p className="text-xs text-slate-400 mt-0.5 mb-2">Only students whose admission was first submitted in this date range will be downloaded.</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs text-slate-500">From</Label>
-                  <Input type="date" className="mt-1 h-9" value={dateFrom} onChange={e => setDateFrom(e.target.value)}/>
+                  <Input type="date" className="mt-1 h-9" value={dateFrom} max={dateTo || undefined} onChange={e => setDateFrom(e.target.value)}/>
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500">To</Label>
-                  <Input type="date" className="mt-1 h-9" value={dateTo} onChange={e => setDateTo(e.target.value)}/>
+                  <Input type="date" className="mt-1 h-9" value={dateTo} min={dateFrom || undefined} onChange={e => setDateTo(e.target.value)}/>
                 </div>
               </div>
               {(dateFrom || dateTo) && (
@@ -656,8 +718,8 @@ export default function StudentsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCsvOpen(false)}>Cancel</Button>
-            <Button onClick={doExportCSV} disabled={csvLoading} className="bg-indigo-600 hover:bg-indigo-700">
-              {csvLoading ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin"/>Preparing…</> : <><Download className="h-4 w-4 mr-1.5"/>Download CSV</>}
+            <Button onClick={doExportCSV} disabled={csvLoading || csvTotal === 0} className="bg-indigo-600 hover:bg-indigo-700">
+              {csvLoading ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin"/>Preparing…</> : <><Download className="h-4 w-4 mr-1.5"/>Download CSV{csvTotal ? ` (${csvTotal})` : ''}</>}
             </Button>
           </DialogFooter>
         </DialogContent>
