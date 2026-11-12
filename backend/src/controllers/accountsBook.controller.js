@@ -17,7 +17,7 @@ const University      = require('../models/University');
 const CenterSettlement = require('../models/CenterSettlement');
 const Counselor       = require('../models/Counselor');
 const User            = require('../models/User');
-const { audit, notify, notifyRole } = require('../utils/helpers');
+const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
 const { findDuplicateUtrMatches, normalizeUtr } = require('../utils/utrDuplicate');
 const {
   EPS, COUNTED, PENDING, isUniRejected, fail, r2, num, isId, esc, parseRange, ist, sendCsv, stamp,
@@ -553,7 +553,7 @@ exports.addStudent = asyncHandler(async (req, res) => {
   await audit('payment_desk_student_added', 'Student', student._id, req.user, { name, centerId: center._id, totalFee, discount, paid: withPayment ? amount : 0, stage },
     `Payment desk added student ${name} (${centerName(center)})${withPayment ? ` with a verified payment of ₹${amount}` : ''}`);
   await tellCentre(center._id, `${name} was added to your centre by the Payment desk${withPayment ? ` with a payment of ₹${amount}` : ''}.`, student._id);
-  await tellCounselor(counselorId, `${name} (${centerName(center)}) was added from the Payment desk.`, { studentId: student._id });
+  await tellCounselor({ counselorId, centerId: center._id }, `${name} (${centerName(center)}) was added from the Payment desk.`, { studentId: student._id });
   res.status(201).json(await summaryFor(student._id));
 });
 
@@ -565,10 +565,9 @@ async function tellCentre(centerId, message, studentId) {
   const users = await User.find({ role: 'Center', centerId, isActive: true }).select('_id').lean();
   await notify(users.map(u => u._id), { message, type: 'payment_verified', role: 'Center', studentId });
 }
-async function tellCounselor(counselorId, message, extra = {}) {
-  if (!counselorId) return;
-  const u = await User.findOne({ counselorId, role: 'Counselor', isActive: true }).select('_id').lean();
-  if (u) await notify(u._id, { message, type: 'payment_verified', role: 'Counselor', ...extra });
+// target = { counselorId, centerId }: the student's counselor plus every counselor on the centre
+async function tellCounselor(target, message, extra = {}) {
+  await notifyCounselors(target, { message, type: 'payment_verified', ...extra });
 }
 
 exports.reviewPayments = asyncHandler(async (req, res) => {
@@ -621,7 +620,7 @@ exports.reviewPayments = asyncHandler(async (req, res) => {
         ? `Fee payment of ₹${tx.amount} for ${name} has been verified ✓`
         : `Fee payment of ₹${tx.amount} for ${name} was rejected: ${note}. Please correct and resubmit.`;
       await tellCentre(payment.student?.center, msg, payment.student?._id);
-      await tellCounselor(payment.student?.counselor, msg, { studentId: payment.student?._id });
+      await tellCounselor({ counselorId: payment.student?.counselor, centerId: payment.student?.center }, msg, { studentId: payment.student?._id });
       done += 1;
     }
   }
@@ -652,7 +651,7 @@ exports.reviewPayments = asyncHandler(async (req, res) => {
       `Payment desk verified ₹${amount} for document "${doc.name}" (${doc.student?.name || 'student'})${advanced ? ' — sent on to dispatch' : ''}`);
     if (advanced) {
       await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
-      await tellCounselor(doc.counselor, `Doc payment verified for "${doc.name}" - Dispatch will courier to center`, { documentId: doc._id });
+      await tellCounselor({ counselorId: doc.counselor, centerId: doc.center }, `Doc payment verified for "${doc.name}" - Dispatch will courier to center`, { documentId: doc._id });
     }
     await tellCentre(doc.center, `Your payment of ₹${amount} for document "${doc.name}" has been verified ✓`, doc.student?._id);
     done += changed;

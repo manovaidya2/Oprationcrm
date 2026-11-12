@@ -18,6 +18,7 @@ import { studentsApi, docsApi, centersApi, paymentsApi, universitiesApi, payment
 import { pageCache } from '@/lib/pageCache';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
+import { CenterCounselorsPanel } from '@/components/CenterCounselorsPanel';
 
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -360,7 +361,7 @@ function StudentModal({ student, onClose }) {
 }
 
 // ── Center Modal ──────────────────────────────────────────────
-function CenterModal({ center, onClose }) {
+function CenterModal({ center, onClose, onCounselorsChange }) {
   const navigate = useNavigate();
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -386,6 +387,7 @@ function CenterModal({ center, onClose }) {
             </div>
           </DialogTitle>
         </DialogHeader>
+        <CenterCounselorsPanel key={center._id} centerId={center._id} onChange={onCounselorsChange}/>
         {loading?(
           <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-slate-300"/></div>
         ):(
@@ -508,6 +510,7 @@ function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment
                 <div key={i} className="text-xs flex gap-2 text-slate-500">
                   <span className="font-semibold text-slate-700">{h.status?.replace(/_/g,' ')}</span>
                   {h.note&&<span className="text-slate-400">· {h.note}</span>}
+                  {h.changedBy?.name&&<span className="text-slate-500">· by <b>{h.changedBy.name}</b></span>}
                   <span className="ml-auto text-slate-400">{fmtDt(h.at)}</span>
                 </div>
               ))}
@@ -1559,6 +1562,9 @@ export default function CounselorPage() {
                         <Users className="h-3 w-3"/>Counselor: {c.assignedCounselor.name}
                       </div>
                     )}
+                    {c.coCounselors?.length > 0 && (
+                      <div className="text-xs text-indigo-500 mt-0.5">Also working: {c.coCounselors.map(co => co.name).join(', ')}</div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5 text-slate-400">
@@ -1630,7 +1636,8 @@ export default function CounselorPage() {
 
       {/* Modals */}
       {studentModal && <StudentModal student={studentModal} onClose={()=>setStudentModal(null)}/>}
-      {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}/>}
+      {centerModal  && <CenterModal  center={centerModal}   onClose={()=>setCenterModal(null)}
+        onCounselorsChange={()=>centersApi.getAll().then(setCenters).catch(()=>{})}/>}
       {docModal     && <DocModal doc={docModal} onClose={()=>setDocModal(null)} onForward={forwardDoc} onForwardToCenter={forwardDocToCenter} onForwardPayment={forwardPaymentToAccountant} accMap={payAccounts} readOnly={isViewerCounselor}/>}
 
       <Dialog open={!!docChangeDialog} onOpenChange={()=>{ setDocChangeDialog(null); setDocChangeNote(''); }}>

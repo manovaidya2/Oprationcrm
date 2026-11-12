@@ -23,6 +23,7 @@ import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const fmtDtTime = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
 const toDateInput = d => d ? new Date(d).toISOString().split('T')[0] : '';
 
 function PaidToBox({ tx, accMap=[] }) {
@@ -597,7 +598,34 @@ export default function StudentDetailPage() {
           <TabsTrigger value="payments">Payments</TabsTrigger>
           {(!isCenter || centreDocs.Marksheet.length > 0) && <TabsTrigger value="marksheets">Marksheets</TabsTrigger>}
           {(!isCenter || centreDocs.Other.length > 0) && <TabsTrigger value="univdocs">Other Documents</TabsTrigger>}
+          {!isCenter && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
+
+        {/* ── History Tab: every application step and who did it ── */}
+        {!isCenter && (
+          <TabsContent value="history" className="mt-4">
+            {student.statusHistory?.length > 0 ? (
+              <div className="space-y-1.5">
+                {[...student.statusHistory].reverse().map((h, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 rounded-lg border bg-white px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="font-medium">{h.status?.replace(/_/g, ' ')}</div>
+                      {h.note && <div className="text-xs text-muted-foreground break-words">{h.note}</div>}
+                    </div>
+                    <div className="shrink-0 text-right text-xs text-muted-foreground">
+                      <div className="font-semibold text-slate-700">
+                        {h.changedBy?.name || '—'}{(h.changedBy?.role || h.role) ? ` (${h.changedBy?.role || h.role})` : ''}
+                      </div>
+                      <div>{fmtDtTime(h.at)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground italic">No history yet</p>
+            )}
+          </TabsContent>
+        )}
 
         {/* ── Info Tab ── */}
         <TabsContent value="info" className="mt-4 space-y-4">
@@ -762,6 +790,7 @@ export default function StudentDetailPage() {
                       {tx.mode==='Bank Transfer' && tx.accountNumber && <div>Account No: <b>{tx.accountNumber}</b></div>}
                       {tx.mode==='Bank Transfer' && tx.ifscCode      && <div>IFSC: <b>{tx.ifscCode}</b></div>}
                       {tx.note && <div>Note: {tx.note}</div>}
+                      {tx.counselorReviewedBy?.name && <div>Counselor review: <b>{tx.counselorReviewedBy.name}</b> ({fmtDt(tx.counselorReviewedAt)})</div>}
                       {tx.verifiedBy?.name && <div>Settled/verified by: <b>{tx.verifiedBy.name}</b> ({tx.verifiedBy.role})</div>}
                       {tx.paymentScreenshot && (
                         <div className="mt-1.5">
@@ -821,6 +850,7 @@ export default function StudentDetailPage() {
                             <div key={i} className="text-xs flex gap-2 text-muted-foreground">
                               <span className="font-medium">{h.status?.replace(/_/g,' ')}</span>
                               {h.note && <span>· {h.note}</span>}
+                              {h.changedBy?.name && <span>· by <b>{h.changedBy.name}</b></span>}
                               <span className="ml-auto">{fmtDt(h.at)}</span>
                             </div>
                           ))}

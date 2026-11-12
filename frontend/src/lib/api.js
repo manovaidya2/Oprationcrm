@@ -69,6 +69,10 @@ export const centersApi = {
   delete:     (id)    => request(`/centers/${id}`, { method: 'DELETE' }),
   getStudents:(id)    => request(`/centers/${id}/students`),
   assignViewerCounselor: (id, counselorId) => request(`/centers/${id}/viewer-counselor`, { method: 'POST', body: JSON.stringify({ counselorId }) }),
+  // All counselors working on a centre (main + extra)
+  getCounselors:   (id)              => request(`/centers/${id}/counselors`),
+  addCounselor:    (id, counselorId) => request(`/centers/${id}/counselors`, { method: 'POST', body: JSON.stringify({ counselorId }) }),
+  removeCounselor: (id, counselorId) => request(`/centers/${id}/counselors/${counselorId}`, { method: 'DELETE' }),
   // University access control
   getUniversities: (id)     => request(`/centers/${id}/universities`),
   setUniversities: (id, ids)=> request(`/centers/${id}/universities`, { method: 'PUT', body: JSON.stringify({ universityIds: ids }) }),

@@ -27,6 +27,32 @@ exports.notify = async (userIdOrIds, { message, type = 'general', role = '', stu
   } catch (e) { console.error('notify failed', e.message); }
 };
 
+// ── Counselor logins working on a centre ─────────────────────
+// A centre can have several counselors (main = Center.assignedCounselor, plus extra ones whose
+// Counselor.centers holds the centre). They all work the same queues, so they all get the same alerts.
+// `counselorId` is the student's / document's own counselor and is always included.
+const idOf = v => (v && v._id ? v._id : v);
+exports.centreCounselorUserIds = async ({ counselorId, centerId } = {}) => {
+  const Counselor = require('../models/Counselor');
+  const User = require('../models/User');
+  const ids = new Set();
+  if (idOf(counselorId)) ids.add(String(idOf(counselorId)));
+  if (idOf(centerId)) {
+    const linked = await Counselor.find({ centers: idOf(centerId) }).select('_id').lean();
+    linked.forEach(c => ids.add(String(c._id)));
+  }
+  if (!ids.size) return [];
+  const users = await User.find({ counselorId: { $in: [...ids] }, role: 'Counselor', isActive: true }).select('_id').lean();
+  return users.map(u => u._id);
+};
+
+// Notify every counselor working on the centre; returns the user ids notified
+exports.notifyCounselors = async (target, payload) => {
+  const ids = await exports.centreCounselorUserIds(target);
+  if (ids.length) await exports.notify(ids, { role: 'Counselor', ...payload });
+  return ids;
+};
+
 // ── Find users by role and notify all of them ────────────────
 exports.notifyRole = async (roleOrRoles, payload) => {
   const User = require('../models/User');

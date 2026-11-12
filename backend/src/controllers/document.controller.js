@@ -5,7 +5,7 @@ const Payment       = require('../models/Payment');
 const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
 const mongoose      = require('mongoose');
-const { audit, notify, notifyRole } = require('../utils/helpers');
+const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
 
 async function loadDoc(id) {
   const doc = await StudentDoc.findById(id)
@@ -332,16 +332,13 @@ exports.create = asyncHandler(async (req, res) => {
 
   await doc.save();
 
-  const counselorUser = await User.findOne({ counselorId: student.counselor, isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: paidAmount > 0
-        ? `Doc request with payment: "${name}" for ${student.name} — ₹${paidAmount} paid`
-        : `Document request: "${name}" for ${student.name}`,
-      type: paidAmount > 0 ? 'doc_payment_received' : 'doc_requested',
-      role: 'Counselor', studentId, documentId: doc._id,
-    });
-  }
+  await notifyCounselors({ counselorId: student.counselor, centerId: student.center }, {
+    message: paidAmount > 0
+      ? `Doc request with payment: "${name}" for ${student.name} — ₹${paidAmount} paid`
+      : `Document request: "${name}" for ${student.name}`,
+    type: paidAmount > 0 ? 'doc_payment_received' : 'doc_requested',
+    studentId, documentId: doc._id,
+  });
   await audit('doc_requested', 'StudentDocument', doc._id, req.user, { name }, `Doc request: ${name}`);
   res.status(201).json(doc);
 });
@@ -357,7 +354,11 @@ exports.update = asyncHandler(async (req, res) => {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
   if (['Counselor', 'ViewerCounselor'].includes(req.user.role) && !centerOriginated && String(doc.counselor) !== String(req.user.counselorId)) {
-    const e = new Error('Forbidden'); e.status = 403; throw e;
+    // Any counselor working on the document's centre may edit it, not only the student's main counselor
+    const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    if (!(me?.centers || []).some(id => String(id) === String(doc.center))) {
+      const e = new Error('Forbidden'); e.status = 403; throw e;
+    }
   }
   if (centerOriginated) {
     const editableBeforeScan = ['Requested', 'Changes_Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
@@ -477,10 +478,9 @@ exports.accountantAction = asyncHandler(async (req, res) => {
   } else if (action === 'reject') {
     pushHistory(doc, 'Fee_Rejected', req.user, note||'Fee rejected by accountant');
     // Notify COUNSELOR — they decide whether to send back to center or re-forward
-    const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-    if (counselorUser) await notify(counselorUser._id, {
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
       message: `Accountant rejected doc fee: "${doc.name}" for ${doc.student?.name}. Reason: ${note||'Fee issue'}. Please review and decide next action.`,
-      type: 'doc_fee_rejected', documentId: doc._id, role: 'Counselor',
+      type: 'doc_fee_rejected', documentId: doc._id,
     });
   } else {
     // pending - keep in queue
@@ -570,13 +570,10 @@ exports.accountantForwardScan = asyncHandler(async (req, res) => {
   if (doc.status !== 'Accountant_Received') { const e = new Error('Must be Accountant_Received status'); e.status = 400; throw e; }
   pushHistory(doc, 'Counselor_Received', req.user, 'Accountant reviewed and forwarded to counselor');
   await doc.save();
-  const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Scanned document ready: "${doc.name}" for ${doc.student?.name}. Please review and forward to center.`,
-      type: 'doc_scanned', documentId: doc._id, role: 'Counselor',
-    });
-  }
+  await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+    message: `Scanned document ready: "${doc.name}" for ${doc.student?.name}. Please review and forward to center.`,
+    type: 'doc_scanned', documentId: doc._id,
+  });
   await audit('accountant_forwarded_scan', 'StudentDocument', doc._id, req.user, {}, `Accountant forwarded scan to counselor`);
   res.json(doc);
 });
@@ -688,23 +685,17 @@ exports.addPayment = asyncHandler(async (req, res) => {
   // 'Center_Notified' or 'Fee_Rejected' = scanned doc received, center now paying.
   if (doc.status === 'Requested') {
     // DO NOT change status - counselor must still forward to accountant via normal flow
-    const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-    if (counselorUser) {
-      await notify(counselorUser._id, {
-        message: `Payment attached to doc request: "${doc.name}" for ${doc.student?.name}. Forward to accountant when ready.`,
-        type: 'doc_payment_received', documentId: doc._id, role: 'Counselor',
-      });
-    }
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+      message: `Payment attached to doc request: "${doc.name}" for ${doc.student?.name}. Forward to accountant when ready.`,
+      type: 'doc_payment_received', documentId: doc._id,
+    });
   } else if (['Center_Notified', 'Fee_Rejected'].includes(doc.status)) {
     // Scanned doc payment flow - move to Payment_Submitted for counselor to verify
     pushHistory(doc, 'Payment_Submitted', req.user, 'Payment submitted - counselor to verify and forward to accountant');
-    const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-    if (counselorUser) {
-      await notify(counselorUser._id, {
-        message: `Center submitted payment for "${doc.name}" - ${doc.student?.name}. Please verify and forward to accountant.`,
-        type: 'doc_payment_received', documentId: doc._id, role: 'Counselor',
-      });
-    }
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+      message: `Center submitted payment for "${doc.name}" - ${doc.student?.name}. Please verify and forward to accountant.`,
+      type: 'doc_payment_received', documentId: doc._id,
+    });
   }
   await doc.save();
   await audit('doc_payment_added', 'StudentDocument', doc._id, req.user, { amount, utrRef }, `Payment ₹${amount} for ${doc.name}`);
@@ -759,13 +750,10 @@ exports.requestDispatch = asyncHandler(async (req, res) => {
   await doc.save();
 
   // Notify counselor to forward to accountant
-  const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Dispatch requested for "${doc.name}" — ${doc.student?.name}. Payment already complete. Please forward to accountant.`,
-      type: 'doc_payment_received', documentId: doc._id, role: 'Counselor',
-    });
-  }
+  await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+    message: `Dispatch requested for "${doc.name}" — ${doc.student?.name}. Payment already complete. Please forward to accountant.`,
+    type: 'doc_payment_received', documentId: doc._id,
+  });
   await audit('request_dispatch', 'StudentDocument', doc._id, req.user, {}, `Center requested dispatch for ${doc.name}`);
   res.json(await loadDoc(doc._id));
 });
@@ -794,8 +782,7 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
     // Notify Dispatch to send courier to center
     await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
     // Also notify Counselor
-    const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-    if (counselorUser) await notify(counselorUser._id, { message: `Doc payment verified for "${doc.name}" - Dispatch will courier to center`, type: 'payment_verified', documentId: doc._id, role: 'Counselor' });
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, { message: `Doc payment verified for "${doc.name}" - Dispatch will courier to center`, type: 'payment_verified', documentId: doc._id });
   } else {
     pushHistory(doc, 'Center_Notified', req.user, note||'Payment rejected - resubmit');
   }
@@ -818,13 +805,10 @@ exports.dispatchToCenter = asyncHandler(async (req, res) => {
   await doc.save();
 
   // Notify COUNSELOR first with courier details
-  const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Document dispatched to center: "${doc.name}" - ${company||''} Tracking: ${trackingNo}`,
-      type: 'doc_dispatched', documentId: doc._id, role: 'Counselor',
-    });
-  }
+  await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+    message: `Document dispatched to center: "${doc.name}" - ${company||''} Tracking: ${trackingNo}`,
+    type: 'doc_dispatched', documentId: doc._id,
+  });
   // Then notify center
   const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
   if (centerUser) {
@@ -853,18 +837,10 @@ exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
 
   
   
-  const counselorUser = await User.findOne({ counselorId: doc.counselor, isActive: true });
-  
-
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Center "${doc.center?.name}" confirmed receipt of courier for "${doc.name}" - Student: ${doc.student?.name}${doc.student?.enrollmentNumber ? ` (${doc.student.enrollmentNumber})` : ''}`,
-      type: 'doc_delivered', documentId: doc._id, role: 'Counselor',
-    });
-    console.log('Notification sent to:', counselorUser._id);
-  } else {
-    console.log('NO counselorUser found!');
-  }
+  await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+    message: `Center "${doc.center?.name}" confirmed receipt of courier for "${doc.name}" - Student: ${doc.student?.name}${doc.student?.enrollmentNumber ? ` (${doc.student.enrollmentNumber})` : ''}`,
+    type: 'doc_delivered', documentId: doc._id,
+  });
 
   await audit('doc_delivered', 'StudentDocument', doc._id, req.user, {}, `Delivered: ${doc.name}`);
   res.json(doc);

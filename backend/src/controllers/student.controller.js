@@ -6,7 +6,7 @@ const User       = require('../models/User');
 const Counselor  = require('../models/Counselor');
 const Center     = require('../models/Center');
 const University = require('../models/University');
-const { audit, notify, notifyRole } = require('../utils/helpers');
+const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
 
 const SUBMISSION_DOC_NAME = 'Upload All Documents (Single PDF)';
 const MAX_SUBMISSION_PDF_BYTES = 10 * 1024 * 1024;
@@ -121,6 +121,17 @@ async function canUseCenterFlow(req, centerId) {
   if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
+}
+
+// Main counselor of a centre: Center.assignedCounselor, else any active counselor linked to it.
+// A centre can have several counselors; new students are always filed under the main one.
+async function mainCounselorOf(centerId, excludeId) {
+  const center = await Center.findById(centerId).select('assignedCounselor').lean();
+  if (center?.assignedCounselor) return center.assignedCounselor;
+  const filter = { centers: centerId, isActive: true };
+  if (excludeId) filter._id = { $ne: excludeId };
+  const linked = await Counselor.findOne(filter).select('_id').lean();
+  return linked?._id || null;
 }
 
 async function assertStudentAccess(req, student) {
@@ -292,9 +303,9 @@ exports.create = asyncHandler(async (req, res) => {
   if (role === 'Center') {
     body.center = centerId;
     if (!body.counselor) {
-      const linked = await Counselor.find({ centers: centerId }).lean();
-      if (linked.length > 0) {
-        body.counselor = linked[0]._id;
+      const main = await mainCounselorOf(centerId);
+      if (main) {
+        body.counselor = main;
       } else {
         const any = await Counselor.findOne({ isActive: true }).lean();
         if (any) body.counselor = any._id;
@@ -307,7 +318,7 @@ exports.create = asyncHandler(async (req, res) => {
     const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
     const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
     if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
-    body.counselor = req.user.counselorId;
+    body.counselor = (await mainCounselorOf(body.center)) || req.user.counselorId;
     body.applicationStatus = 'Draft';
   } else if (role === 'ViewerCounselor') {
     if (!wantsCenterFlow(req)) { const e = new Error('Viewer counselors can add students only from center view'); e.status = 403; throw e; }
@@ -315,14 +326,13 @@ exports.create = asyncHandler(async (req, res) => {
     const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
     const allowed = (counselor?.centers || []).some(id => String(id) === String(body.center));
     if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
-    const primary = await Counselor.findOne({ centers: body.center, isActive: true, _id: { $ne: req.user.counselorId } }).select('_id').lean();
-    body.counselor = primary?._id || req.user.counselorId;
+    body.counselor = (await mainCounselorOf(body.center, req.user.counselorId)) || req.user.counselorId;
     body.applicationStatus = 'Draft';
   } else if (role === 'PaymentCoordinator') {
     if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
     if (!body.counselor) {
-      const linked = await Counselor.find({ centers: body.center }).lean();
-      if (linked.length > 0) body.counselor = linked[0]._id;
+      const main = await mainCounselorOf(body.center);
+      if (main) body.counselor = main;
       else {
         const any = await Counselor.findOne({ isActive: true }).lean();
         if (any) body.counselor = any._id;
@@ -737,15 +747,11 @@ exports.transferCenter = asyncHandler(async (req, res) => {
     });
   }
 
-  const targetCounselorUser = await User.findOne({ role: 'Counselor', counselorId: targetCounselorId, isActive: true });
-  if (targetCounselorUser) {
-    await notify(targetCounselorUser._id, {
-      message: `${student.name} transferred to ${targetCenter.name}. You are now the assigned counselor.`,
-      type: 'general',
-      role: 'Counselor',
-      studentId: student._id,
-    });
-  }
+  await notifyCounselors({ counselorId: targetCounselorId, centerId: targetCenter._id }, {
+    message: `${student.name} transferred to ${targetCenter.name}. The student is now in your centre's queue.`,
+    type: 'general',
+    studentId: student._id,
+  });
 
   await audit('student_center_transferred', 'Student', student._id, req.user, {
     fromCenter: oldCenterId,
@@ -845,27 +851,15 @@ exports.submit = asyncHandler(async (req, res) => {
   ).populate('center','name').populate('counselor','name').populate('university','name');
   await pushHistory(req.params.id, 'Submitted', req.user, '');
 
-  let counselorUsers = [];
-  if (s.counselor) {
-    const direct = await User.findOne({ counselorId: s.counselor, role: 'Counselor', isActive: true });
-    if (direct) counselorUsers.push(direct);
-  }
-  if (counselorUsers.length === 0 && s.center) {
-    const cds = await Counselor.find({ centers: s.center }).lean();
-    for (const cd of cds) {
-      const u = await User.findOne({ counselorId: cd._id, role:'Counselor', isActive:true });
-      if (u) counselorUsers.push(u);
-    }
-  }
-  if (counselorUsers.length === 0) {
+  // Notify the student's counselor and every other counselor working on the centre
+  const submitAlert = {
+    message: `New application: ${s.name} (${s.center?.name||''}) → ${s.university?.name||'University'} — needs review`,
+    type: 'student_submitted', role: 'Counselor', studentId: s._id,
+  };
+  const notified = await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, submitAlert);
+  if (!notified.length) {
     const any = await User.findOne({ role:'Counselor', isActive:true });
-    if (any) counselorUsers.push(any);
-  }
-  for (const cu of counselorUsers) {
-    await notify(cu._id, {
-      message: `New application: ${s.name} (${s.center?.name||''}) → ${s.university?.name||'University'} — needs review`,
-      type: 'student_submitted', role: 'Counselor', studentId: s._id,
-    });
+    if (any) await notify(any._id, submitAlert);
   }
   const paymentForCoordinator = await Payment.findOne({ student: s._id }).select('installments').lean();
   if ((paymentForCoordinator?.installments || []).length > 0) {
@@ -970,23 +964,21 @@ exports.accountantAction = asyncHandler(async (req, res) => {
       });
     }
 
-    let cu = await User.findOne({ counselorId: s.counselor, role:'Counselor', isActive:true });
-    if (!cu) cu = await User.findOne({ role:'Counselor', isActive:true });
-    if (cu) await notify(cu._id, {
+    const sentAlert = {
       message: `${s.name}'s application sent to ${s.university?.name||'University'} for enrollment`,
       type:'application_approved', studentId:s._id, role:'Counselor'
-    });
+    };
+    const notified = await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, sentAlert);
+    if (!notified.length) {
+      const any = await User.findOne({ role:'Counselor', isActive:true });
+      if (any) await notify(any._id, sentAlert);
+    }
 
   } else if (action === 'reject') {
     updateFields = { applicationStatus: 'Accountant_Rejected', rejectionReason: note||'', rejectedVia: 'accountant' };
-    let cu = await User.findOne({ counselorId: s.counselor, role:'Counselor', isActive:true });
-    if (!cu) {
-      const cd = await Counselor.find({ centers: s.center }).lean();
-      if (cd.length > 0) cu = await User.findOne({ counselorId: cd[0]._id, role:'Counselor', isActive:true });
-    }
-    if (cu) await notify(cu._id, {
+    await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, {
       message: `Accountant rejected ${s.name}'s application: ${note||'Fee issue'}. Please review.`,
-      type: 'application_rejected', role: 'Counselor', studentId: s._id,
+      type: 'application_rejected', studentId: s._id,
     });
   } else {
     updateFields = { applicationStatus: 'Accountant_Pending' };
@@ -1089,14 +1081,9 @@ exports.accountantForwardToCounselor = asyncHandler(async (req, res) => {
     { new: true }
   ).populate('center','name').populate('counselor','name').populate('university','name shortName');
 
-  let cu = await User.findOne({ counselorId: s.counselor, role:'Counselor', isActive:true });
-  if (!cu) {
-    const cd = await Counselor.find({ centers: s.center }).lean();
-    if (cd.length > 0) cu = await User.findOne({ counselorId: cd[0]._id, role:'Counselor', isActive:true });
-  }
-  if (cu) await notify(cu._id, {
+  await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, {
     message: `University rejected ${s.name}'s application (${s.university?.name||''}): ${s.rejectionReason||note||'Please review'}. Decide whether to send to center.`,
-    type: 'application_rejected', role: 'Counselor', studentId: s._id,
+    type: 'application_rejected', studentId: s._id,
   });
   await pushHistory(req.params.id, 'Accountant_Rejected', req.user, `University rejection forwarded to counselor. Reason: ${s.rejectionReason || note || ''}`);
   await audit('accountant_forward_university_reject', 'Student', s._id, req.user, { note }, `Accountant forwarded university rejection of ${s.name} to counselor`);
@@ -1127,10 +1114,9 @@ exports.assignEnrollment = asyncHandler(async (req, res) => {
   });
   s.enrollmentNumber = enrollmentNumber.trim(); s.applicationStatus = 'Enrolled';
 
-  const counselorUser = await User.findOne({ counselorId: s.counselor, isActive:true });
-  if (counselorUser) await notify(counselorUser._id, {
+  await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, {
     message: `Enrollment assigned for ${s.name}: ${enrollmentNumber} (${s.university?.name||''})`,
-    type: 'enrollment_assigned', role: 'Counselor', studentId: s._id,
+    type: 'enrollment_assigned', studentId: s._id,
   });
   const centerUser = await User.findOne({ centerId: s.center, role:'Center', isActive:true });
   if (centerUser) await notify(centerUser._id, {
@@ -1188,15 +1174,11 @@ exports.checkEnrollmentNumber = asyncHandler(async (req, res) => {
     .populate('university', 'name shortName avatarColor')
     .populate('enrollmentNumberCheckedBy', 'name role');
 
-  const counselorUser = await User.findOne({ counselorId: updated.counselor?._id || updated.counselor, role: 'Counselor', isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Enrollment number checked by center for ${updated.name}: ${updated.enrollmentNumber}`,
-      type: 'general',
-      role: 'Counselor',
-      studentId: updated._id,
-    });
-  }
+  await notifyCounselors({ counselorId: updated.counselor, centerId: updated.center }, {
+    message: `Enrollment number checked by center for ${updated.name}: ${updated.enrollmentNumber}`,
+    type: 'general',
+    studentId: updated._id,
+  });
 
   await audit('enrollment_checked', 'Student', updated._id, req.user, {
     enrollmentNumber: updated.enrollmentNumber,
@@ -1234,13 +1216,10 @@ exports.cancelApplication = asyncHandler(async (req, res) => {
     });
   }
 
-  const counselorUser = await User.findOne({ counselorId: s.counselor?._id || s.counselor, role: 'Counselor', isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Application for ${s.name} has been cancelled by Admin.${reason ? ' Reason: ' + reason : ''}`,
-      type: 'application_rejected', role: 'Counselor', studentId: s._id,
-    });
-  }
+  await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, {
+    message: `Application for ${s.name} has been cancelled by Admin.${reason ? ' Reason: ' + reason : ''}`,
+    type: 'application_rejected', studentId: s._id,
+  });
 
   await audit('cancelled', 'Student', s._id, req.user, { reason, prevStatus }, `${s.name} application cancelled by Admin (was: ${prevStatus})`);
   res.json({ success: true, message: 'Application cancelled successfully' });
@@ -1277,13 +1256,10 @@ exports.requestSettlement = asyncHandler(async (req, res) => {
     settlementRequestedAt: new Date(),
   });
 
-  const counselorUser = await User.findOne({ counselorId: s.counselor._id || s.counselor, role: 'Counselor', isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Settlement requested for cancelled student ${s.name} (${s.center?.name || ''}).${note ? ' Note: ' + note : ''} Please review and forward to accountant if approved.`,
-      type: 'settlement_requested', role: 'Counselor', studentId: s._id,
-    });
-  }
+  await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, {
+    message: `Settlement requested for cancelled student ${s.name} (${s.center?.name || ''}).${note ? ' Note: ' + note : ''} Please review and forward to accountant if approved.`,
+    type: 'settlement_requested', studentId: s._id,
+  });
 
   await pushHistory(s._id, 'Settlement_Requested', req.user, note || 'Settlement requested by center — counselor notified');
   await audit('settlement_requested', 'Student', s._id, req.user, { note }, `Settlement requested for ${s.name} by center`);

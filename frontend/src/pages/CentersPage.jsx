@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { CenterCounselorsPanel } from '@/components/CenterCounselorsPanel';
 import { toast } from 'sonner';
 import { centersApi, counselorsApi, authApi, studentsApi, universitiesApi, paymentAccountsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
@@ -359,6 +360,11 @@ function CenterCard({ center, isAdmin, isViewer = false, canViewerManage = false
             {center.assignedCounselor && (
               <div className="text-xs text-indigo-600 mt-1 flex items-center gap-1">
                 <User className="h-3 w-3"/>Counselor: {center.assignedCounselor.name}
+              </div>
+            )}
+            {center.coCounselors?.length > 0 && (
+              <div className="text-xs text-indigo-500 mt-0.5 flex items-center gap-1">
+                <Users className="h-3 w-3"/>Also working: {center.coCounselors.map(c => c.name).join(', ')}
               </div>
             )}
             {viewerCounselor && (
@@ -961,7 +967,7 @@ export default function CentersPage() {
     if (!selCounselor) return toast.error('Select a counselor');
     try {
       await counselorsApi.addCenter(selCounselor, assignOpen._id);
-      toast.success('Counselor assigned'); setAssignOpen(null); setSelCounselor(''); load();
+      toast.success('Main counselor changed'); setAssignOpen(null); setSelCounselor(''); load();
     } catch(e) { toast.error(e.message); }
   }
 
@@ -1618,15 +1624,19 @@ export default function CentersPage() {
       {/* ── Assign Counselor Dialog ─────────────────────── */}
       <Dialog open={!!assignOpen} onOpenChange={() => setAssignOpen(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Assign Counselor — {assignOpen?.name}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Counselors — {assignOpen?.name}</DialogTitle></DialogHeader>
+          {assignOpen && <CenterCounselorsPanel key={assignOpen._id} centerId={assignOpen._id} onChange={load}/>}
           {(isAdmin || isViewer) ? (
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label>Assigned Counselor</Label>
+                <Label>Change Main Counselor</Label>
                 <Select value={selCounselor} onValueChange={setSelCounselor}>
                   <SelectTrigger><SelectValue placeholder="Select counselor..."/></SelectTrigger>
                   <SelectContent>{counselors.map(c => <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  All students of this centre move to the new main counselor. The old main counselor is removed from the centre; other counselors stay.
+                </p>
               </div>
               {isAdmin && <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
                 <Label>Viewer Counselor</Label>
@@ -1646,33 +1656,16 @@ export default function CentersPage() {
                 </p>
               </div>}
               <DialogFooter>
-                <Button variant="outline" onClick={() => setAssignOpen(null)}>Cancel</Button>
+                <Button variant="outline" onClick={() => setAssignOpen(null)}>Close</Button>
                 {isAdmin && <Button variant="outline" onClick={assignViewerCounselor}>Assign Viewer</Button>}
-                <Button onClick={assignCounselor}>Assign Counselor</Button>
+                <Button onClick={assignCounselor}>Make Main Counselor</Button>
               </DialogFooter>
             </div>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground">
-                As a Counselor, you will be automatically assigned to centers you create.
-                Only Admin can reassign counselors.
-              </p>
-              {user?.counselorId && (
-                <div className="bg-muted/30 rounded-lg px-3 py-2 text-sm">
-                  <span className="text-muted-foreground">Will assign: </span>
-                  <span className="font-medium">{user.name}</span>
-                </div>
-              )}
+              <p className="text-xs text-muted-foreground">Only Admin can change the main counselor of a centre.</p>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setAssignOpen(null)}>Close</Button>
-                <Button onClick={async () => {
-                  if (!user?.counselorId) return toast.error('No counselor ID found');
-                  try {
-                    await counselorsApi.addCenter(user.counselorId, assignOpen._id);
-                    toast.success('You have been assigned to this center');
-                    setAssignOpen(null); load();
-                  } catch(e) { toast.error(e.message); }
-                }}>Assign Myself</Button>
               </DialogFooter>
             </>
           )}

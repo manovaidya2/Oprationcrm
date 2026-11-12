@@ -69,6 +69,10 @@ router.put   ('/centers/:id',      protect, requireRole('Admin','Counselor'), mi
 router.delete('/centers/:id',      protect, requireRole('Admin'), misc.deleteCenter);
 router.get   ('/centers/:id/students',     protect, misc.getCenterStudents);
 router.post  ('/centers/:id/viewer-counselor', protect, requireRole('Admin'), misc.assignViewerCounselor);
+// Several counselors per centre (main counselor = Center.assignedCounselor)
+router.get   ('/centers/:id/counselors',              protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.getCenterCounselors);
+router.post  ('/centers/:id/counselors',              protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.addCenterCounselor);
+router.delete('/centers/:id/counselors/:counselorId', protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.removeCenterCounselor);
 router.post  ('/centers/:id/docs',         protect, requireRole('Admin','Counselor','ViewerCounselor'), upload.single('file'), misc.uploadCenterDoc);
 router.delete('/centers/:id/docs/:docId',  protect, requireRole('Admin','Counselor','ViewerCounselor'), misc.deleteCenterDoc);
 // Allowed universities per center

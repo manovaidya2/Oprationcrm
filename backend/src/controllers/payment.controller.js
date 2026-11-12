@@ -3,7 +3,7 @@ const Payment = require('../models/Payment');
 const Student = require('../models/Student');
 const User    = require('../models/User');
 const Counselor = require('../models/Counselor');
-const { audit, notify, notifyRole } = require('../utils/helpers');
+const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
 const { enrichPaymentDuplicateUtrs, findDuplicateUtrMatches } = require('../utils/utrDuplicate');
 
 const CENTER_FEE_EDITABLE_STATUSES = ['Draft', 'Changes_Requested', 'Accountant_Rejected', 'University_Rejected'];
@@ -67,6 +67,7 @@ exports.get = asyncHandler(async (req, res) => {
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
+    .populate('transactions.counselorReviewedBy', 'name role')
     .populate('transactions.documentRef', 'name')
     .populate('lastUpdatedBy', 'name role');
   // Duplicate-UTR check is expensive (scans full collections) — only run it when explicitly requested
@@ -97,6 +98,7 @@ exports.accountantFeePayments = asyncHandler(async (req, res) => {
     .populate('transactions.recordedBy', 'name role')
     .populate('transactions.lastUpdatedBy', 'name role')
     .populate('transactions.verifiedBy', 'name role')
+    .populate('transactions.counselorReviewedBy', 'name role')
     .lean();
 
   const wantedStatuses = status === 'pending' ? ['pending_accountant'] : ['verified', 'rejected'];
@@ -592,15 +594,12 @@ exports.markInstallmentPaid = asyncHandler(async (req, res) => {
   });
   await payment.save();
   if (needsVerification) {
-    const counselorUser = await User.findOne({ counselorId: payment.student?.counselor, isActive: true });
-    if (counselorUser) {
-      await notify(counselorUser._id, {
-        message: `Fee payment of ₹${amount} submitted by payment coordinator for ${payment.student?.name} - please verify and forward to accountant`,
-        type: 'payment_verified',
-        role: 'Counselor',
-        studentId: payment.student?._id,
-      });
-    } else {
+    const notified = await notifyCounselors({ counselorId: payment.student?.counselor, centerId: payment.center }, {
+      message: `Fee payment of ₹${amount} submitted by payment coordinator for ${payment.student?.name} - please verify and forward to accountant`,
+      type: 'payment_verified',
+      studentId: payment.student?._id,
+    });
+    if (!notified.length) {
       await notifyRole('Counselor', {
         message: `Fee payment of ₹${amount} submitted by payment coordinator for ${payment.student?.name} - please verify and forward to accountant`,
         type: 'payment_verified',
@@ -679,15 +678,11 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   await payment.save();
 
   if (needsVerification) {
-    const counselorUser = await User.findOne({ counselorId: student.counselor, isActive: true });
-    if (counselorUser) {
-      await notify(counselorUser._id, {
-        message: `Fee payment of ₹${amount} submitted by center for ${student.name} - please verify and forward to accountant`,
-        type: 'payment_verified',
-        role: 'Counselor',
-        studentId: student._id,
-      });
-    }
+    await notifyCounselors({ counselorId: student.counselor, centerId: student.center }, {
+      message: `Fee payment of ₹${amount} submitted by center for ${student.name} - please verify and forward to accountant`,
+      type: 'payment_verified',
+      studentId: student._id,
+    });
   }
 
   await audit('payment_added', 'Payment', payment._id, req.user, { amount, utrRef, verificationStatus }, `Payment ₹${amount} recorded`);
@@ -793,9 +788,10 @@ exports.resendTransaction = asyncHandler(async (req, res) => {
   tx.verificationStatus = 'pending_counselor';
   await payment.save();
 
-  await notifyRole('Counselor', {
+  // Only the counselors of this student's centre — not every counselor in the system
+  await notifyCounselors({ counselorId: student?.counselor, centerId: student?.center }, {
     message: `Fee payment resubmitted by center for ${student?.name} — ₹${tx.amount}. Please review.`,
-    type: 'fee_payment_resubmitted', studentId: student?._id, role: 'Counselor',
+    type: 'fee_payment_resubmitted', studentId: student?._id,
   });
 
   await audit('fee_payment_resubmitted', 'Payment', payment._id, req.user, { amount: tx.amount }, `Center resubmitted fee payment of ₹${tx.amount}`);
@@ -817,10 +813,13 @@ exports.counselorRejectFeePayment = asyncHandler(async (req, res) => {
   tx.verificationNote   = note || '';
   tx.verifiedBy         = req.user._id;
   tx.verifiedAt         = new Date();
+  tx.counselorReviewedBy = req.user._id;
+  tx.counselorReviewedAt = new Date();
   await payment.save();
 
   const student = await Student.findById(req.params.studentId).populate('center');
-  const centerUsers = await User.find({ center: student?.center?._id, role: 'Center' });
+  // User stores the centre as `centerId`; the old `center` filter matched no field and so every centre login
+  const centerUsers = await User.find({ centerId: student?.center?._id, role: 'Center', isActive: true });
   await Promise.all(centerUsers.map(u => notify(u._id, {
     message: `Fee payment of ₹${tx.amount} for ${student?.name} was rejected by counselor${note ? ': ' + note : ''}. Please correct and resubmit.`,
     type: 'fee_payment_rejected', studentId: student?._id, role: 'Center',
@@ -841,11 +840,13 @@ exports.counselorForwardFeePayment = asyncHandler(async (req, res) => {
   }
 
   tx.verificationStatus = 'pending_accountant';
+  tx.counselorReviewedBy = req.user._id;
+  tx.counselorReviewedAt = new Date();
   await payment.save();
 
   const student = await Student.findById(req.params.studentId);
   await notifyRole('Accountant', {
-    message: `Fee payment verified by counselor for ${student?.name} - ₹${tx.amount}. Please verify.`,
+    message: `Fee payment verified by counselor ${req.user.name} for ${student?.name} - ₹${tx.amount}. Please verify.`,
     type: 'payment_verified',
     role: 'Accountant',
     studentId: req.params.studentId,
@@ -854,7 +855,8 @@ exports.counselorForwardFeePayment = asyncHandler(async (req, res) => {
   await audit('fee_payment_forwarded', 'Payment', payment._id, req.user, { txId: req.params.txId }, `Counselor forwarded fee payment to accountant`);
   const saved = await Payment.findById(payment._id)
     .populate('transactions.recordedBy', 'name role')
-    .populate('transactions.verifiedBy', 'name role');
+    .populate('transactions.verifiedBy', 'name role')
+    .populate('transactions.counselorReviewedBy', 'name role');
   res.json(await enrichPaymentDuplicateUtrs(saved));
 });
 
@@ -877,15 +879,11 @@ exports.accountantVerifyFeePayment = asyncHandler(async (req, res) => {
   await payment.save();
 
   const student = await Student.findById(req.params.studentId);
-  const counselorUser = await User.findOne({ counselorId: student?.counselor, isActive: true });
-  if (counselorUser) {
-    await notify(counselorUser._id, {
-      message: `Fee payment of ₹${tx.amount} for ${student?.name} ${approved ? 'verified ✓' : 'rejected ✗'} by accountant${note ? ': ' + note : ''}`,
-      type: 'payment_verified',
-      role: 'Counselor',
-      studentId: req.params.studentId,
-    });
-  }
+  await notifyCounselors({ counselorId: student?.counselor, centerId: student?.center }, {
+    message: `Fee payment of ₹${tx.amount} for ${student?.name} ${approved ? 'verified ✓' : 'rejected ✗'} by accountant${note ? ': ' + note : ''}`,
+    type: 'payment_verified',
+    studentId: req.params.studentId,
+  });
   const centerUser = await User.findOne({ centerId: student?.center, role: 'Center', isActive: true });
   if (centerUser) {
     await notify(centerUser._id, {

@@ -3,6 +3,8 @@
 // Notification, Center, Counselor, Dashboard, AuditLog
 // ============================================================
 const asyncHandler = require('express-async-handler');
+const mongoose     = require('mongoose');
+const { audit, notify } = require('../utils/helpers');
 const Notification = require('../models/Notification');
 const Center       = require('../models/Center');
 const Counselor    = require('../models/Counselor');
@@ -86,9 +88,18 @@ exports.listCenters = asyncHandler(async (req, res) => {
     }
   }
 
+  // Extra counselors (besides the main one) who also work on each centre
+  const viewerIds = (await User.find({ role: 'ViewerCounselor' }).distinct('counselorId')).filter(Boolean);
+  const linkedCounselors = await Counselor.find({ centers: { $in: centers.map(c => c._id) }, _id: { $nin: viewerIds } })
+    .select('name centers').lean();
+
   centers.forEach(c => {
     if (!c.verificationDocs)    c.verificationDocs    = [];
     if (!c.allowedUniversities) c.allowedUniversities = [];
+    const mainId = String(c.assignedCounselor?._id || c.assignedCounselor || '');
+    c.coCounselors = linkedCounselors
+      .filter(co => String(co._id) !== mainId && (co.centers || []).some(id => String(id) === String(c._id)))
+      .map(co => ({ _id: co._id, name: co.name }));
   });
 
   // Opt-in pagination — old callers without page/limit keep getting the full array
@@ -268,9 +279,14 @@ exports.deleteCounselor = asyncHandler(async (req, res) => {
   res.status(204).end();
 });
 
+// POST /api/counselors/:id/centers — make this counselor the MAIN counselor of a centre.
+// Extra counselors on the centre keep their access; only the previous main counselor is removed.
 exports.addCenterToCounselor = asyncHandler(async (req, res) => {
   const { centerId } = req.body;
   if (!centerId) { const e = new Error('centerId required'); e.status = 400; throw e; }
+  const center = await Center.findById(centerId).select('assignedCounselor').lean();
+  if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+  const previousMain = center.assignedCounselor ? String(center.assignedCounselor) : '';
 
   if (req.user.role === 'ViewerCounselor') {
     const viewer = await Counselor.findById(req.user.counselorId).select('centers').lean();
@@ -278,13 +294,18 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
     if (!allowed) { const e = new Error('You can assign counselor only for your viewer centers'); e.status = 403; throw e; }
   }
 
-  const viewerCounselorIds = await User.find({ role: 'ViewerCounselor' }).distinct('counselorId');
+  // A counselor can only claim a centre that has no main counselor yet (e.g. one they just created).
+  // Adding a helper counselor goes through POST /centers/:id/counselors instead.
+  if (req.user.role === 'Counselor') {
+    const self = String(req.params.id) === String(req.user.counselorId || '');
+    if (!self || (previousMain && previousMain !== String(req.params.id))) {
+      const e = new Error('Only Admin can change the main counselor of a centre'); e.status = 403; throw e;
+    }
+  }
 
-  // Remove this center from other primary counselors first.
-  await Counselor.updateMany(
-    { _id: { $ne: req.params.id, $nin: viewerCounselorIds.filter(Boolean) }, centers: centerId },
-    { $pull: { centers: centerId } }
-  );
+  if (previousMain && previousMain !== String(req.params.id)) {
+    await Counselor.updateOne({ _id: previousMain }, { $pull: { centers: center._id } });
+  }
 
   // Add center to the new counselor
   const c = await Counselor.findByIdAndUpdate(
@@ -300,6 +321,81 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
   await StudentDoc.updateMany({ center: centerId }, { $set: { counselor: req.params.id } });
 
   res.json(c);
+});
+
+// ── CENTRE COUNSELORS ────────────────────────────────────────
+// A centre can have several counselors. The main one is Center.assignedCounselor (students are filed
+// under them); every counselor whose Counselor.centers holds the centre can work on it and its students.
+async function centerCounselorList(center) {
+  const viewerIds = (await User.find({ role: 'ViewerCounselor' }).distinct('counselorId')).filter(Boolean);
+  const mainId = String(center.assignedCounselor || '');
+  const rows = await Counselor.find({ centers: center._id, _id: { $nin: viewerIds } })
+    .select('name email phone avatarColor isActive').sort('name').lean();
+  return rows
+    .map(c => ({ ...c, isPrimary: String(c._id) === mainId }))
+    .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
+}
+
+async function loadCenterForCounselors(req) {
+  await assertCenterAccess(req, req.params.id);
+  const center = await Center.findById(req.params.id).select('name assignedCounselor').lean();
+  if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
+  return center;
+}
+
+// GET /api/centers/:id/counselors
+exports.getCenterCounselors = asyncHandler(async (req, res) => {
+  const center = await loadCenterForCounselors(req);
+  res.json(await centerCounselorList(center));
+});
+
+// POST /api/centers/:id/counselors  { counselorId } — add another counselor to the centre
+exports.addCenterCounselor = asyncHandler(async (req, res) => {
+  const center = await loadCenterForCounselors(req);
+  const { counselorId } = req.body;
+  if (!counselorId || !mongoose.isValidObjectId(counselorId)) { const e = new Error('counselorId required'); e.status = 400; throw e; }
+
+  const [counselor, login] = await Promise.all([
+    Counselor.findById(counselorId).select('name isActive centers').lean(),
+    User.findOne({ counselorId, role: 'Counselor', isActive: true }).select('_id').lean(),
+  ]);
+  if (!counselor || counselor.isActive === false) { const e = new Error('Counselor not found'); e.status = 404; throw e; }
+  if (!login) { const e = new Error(`${counselor.name} has no active counselor login`); e.status = 400; throw e; }
+  if ((counselor.centers || []).some(id => String(id) === String(center._id))) {
+    const e = new Error(`${counselor.name} already works on this centre`); e.status = 409; throw e;
+  }
+
+  await Counselor.updateOne({ _id: counselor._id }, { $addToSet: { centers: center._id } });
+  await audit('center_counselor_added', 'Center', center._id, req.user, { counselorId: counselor._id }, `${counselor.name} added to ${center.name}`);
+  await notify(login._id, {
+    message: `${req.user.name} added you to centre ${center.name}. You can now work on its students.`,
+    role: 'Counselor',
+  });
+  res.status(201).json(await centerCounselorList(center));
+});
+
+// DELETE /api/centers/:id/counselors/:counselorId — remove an extra counselor (not the main one)
+exports.removeCenterCounselor = asyncHandler(async (req, res) => {
+  const center = await loadCenterForCounselors(req);
+  const { counselorId } = req.params;
+  if (String(center.assignedCounselor || '') === String(counselorId)) {
+    const e = new Error('The main counselor cannot be removed. Ask Admin to assign a new main counselor first.'); e.status = 400; throw e;
+  }
+  const counselor = mongoose.isValidObjectId(counselorId)
+    ? await Counselor.findOne({ _id: counselorId, centers: center._id }).select('name').lean()
+    : null;
+  if (!counselor) { const e = new Error('This counselor is not on this centre'); e.status = 404; throw e; }
+  if (await User.exists({ counselorId: counselor._id, role: 'ViewerCounselor' })) {
+    const e = new Error('Viewer counselors are managed from the Viewer Counselor setting'); e.status = 400; throw e;
+  }
+
+  await Counselor.updateOne({ _id: counselor._id }, { $pull: { centers: center._id } });
+  await audit('center_counselor_removed', 'Center', center._id, req.user, { counselorId: counselor._id }, `${counselor.name} removed from ${center.name}`);
+  const login = await User.findOne({ counselorId: counselor._id, role: 'Counselor', isActive: true }).select('_id').lean();
+  if (login && String(login._id) !== String(req.user._id)) {
+    await notify(login._id, { message: `${req.user.name} removed you from centre ${center.name}.`, role: 'Counselor' });
+  }
+  res.json(await centerCounselorList(center));
 });
 
 // ── DASHBOARD ─────────────────────────────────────────────────

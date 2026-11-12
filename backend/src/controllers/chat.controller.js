@@ -5,7 +5,14 @@ const User = require('../models/User');
 const Center = require('../models/Center');
 const Counselor = require('../models/Counselor');
 const Student = require('../models/Student');
-const { notify, audit } = require('../utils/helpers');
+const { notify, audit, notifyCounselors, centreCounselorUserIds } = require('../utils/helpers');
+
+// Centres this counselor works on — a centre's help tickets are shared by all of its counselors
+async function counselorCentreIds(req) {
+  if (req.user.role !== 'Counselor' || !req.user.counselorId) return [];
+  const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+  return (me?.centers || []).map(String);
+}
 
 function userId(req) {
   return String(req.user._id || req.user.id);
@@ -20,7 +27,11 @@ async function canAccessConversation(req, conversation) {
   if (isParticipant(conversation, userId(req))) return true;
   if (conversation.kind === 'ticket') {
     if (req.user.role === 'Center' && String(conversation.ticket?.center) === String(req.user.centerId)) return true;
-    if (req.user.role === 'Counselor' && String(conversation.ticket?.assignedTo) === userId(req)) return true;
+    if (req.user.role === 'Counselor') {
+      if (String(conversation.ticket?.assignedTo?._id || conversation.ticket?.assignedTo) === userId(req)) return true;
+      const centres = await counselorCentreIds(req);
+      if (centres.includes(String(conversation.ticket?.center?._id || conversation.ticket?.center))) return true;
+    }
   }
   return false;
 }
@@ -40,21 +51,30 @@ async function notifyConversation(conversation, sender, message) {
   const ids = (conversation.participants || [])
     .map(p => String(p._id || p))
     .filter(id => id && id !== String(sender._id || sender.id));
-  if (!ids.length) return;
   const label = conversation.kind === 'ticket'
     ? `Ticket: ${conversation.ticket?.subject || conversation.title}`
     : conversation.title || 'Team chat';
-  await notify(ids, {
-    message: `${sender.name || sender.role}: ${message.body.slice(0, 90)}${message.body.length > 90 ? '...' : ''}`,
-    type: conversation.kind === 'ticket' ? 'ticket_message' : 'chat_message',
-    role: '',
-  });
-  if (conversation.kind === 'ticket' && sender.role === 'Center' && conversation.ticket?.assignedTo) {
-    await notify(conversation.ticket.assignedTo, {
-      message: `New help reply in ${label}`,
-      type: 'ticket_message',
-      role: 'Counselor',
+  if (ids.length) {
+    await notify(ids, {
+      message: `${sender.name || sender.role}: ${message.body.slice(0, 90)}${message.body.length > 90 ? '...' : ''}`,
+      type: conversation.kind === 'ticket' ? 'ticket_message' : 'chat_message',
+      role: '',
     });
+  }
+  if (conversation.kind === 'ticket' && sender.role === 'Center') {
+    // The assigned counselor plus every other counselor on the centre who is not already in the chat
+    const centreCounselors = (await centreCounselorUserIds({ centerId: conversation.ticket?.center })).map(String);
+    const targets = [...new Set([
+      String(conversation.ticket?.assignedTo || ''),
+      ...centreCounselors.filter(id => !ids.includes(id)),
+    ])].filter(Boolean);
+    if (targets.length) {
+      await notify(targets, {
+        message: `New help reply in ${label}`,
+        type: 'ticket_message',
+        role: 'Counselor',
+      });
+    }
   }
 }
 
@@ -83,6 +103,10 @@ exports.list = asyncHandler(async (req, res) => {
   } else if (req.user.role === 'Center') {
     filter.kind = 'ticket';
     filter['ticket.center'] = req.user.centerId;
+  } else if (req.user.role === 'Counselor') {
+    // Own conversations + help tickets of every centre this counselor works on
+    const centres = await counselorCentreIds(req);
+    filter.$or = [{ participants: req.user._id }, { kind: 'ticket', 'ticket.center': { $in: centres } }];
   } else {
     filter.participants = req.user._id;
   }
@@ -211,10 +235,9 @@ exports.createTicket = asyncHandler(async (req, res) => {
     readBy: [req.user._id],
   });
 
-  await notify(counselorUser._id, {
+  await notifyCounselors({ counselorId, centerId: center._id }, {
     message: `New help ticket from ${center.name}${student ? ` for ${student.name}` : ''}: ${subject}`,
     type: 'help_ticket',
-    role: 'Counselor',
   });
   await audit('ticket_created', 'Conversation', conversation._id, req.user, { subject, studentId: student?._id }, `Help ticket created`);
   conversation = await populateConversation(Conversation.findById(conversation._id));
@@ -260,6 +283,7 @@ exports.sendMessage = asyncHandler(async (req, res) => {
     body,
     readBy: [req.user._id],
   });
+  if (req.user.role === 'Counselor' && !isParticipant(conversation, userId(req))) conversation.participants.addToSet(req.user._id);
   conversation.lastMessageAt = new Date();
   conversation.lastMessagePreview = body.slice(0, 120);
   await conversation.save();
@@ -290,7 +314,9 @@ exports.updateTicketStatus = asyncHandler(async (req, res) => {
   }
 
   const wasResolved = conversation.ticket.status === 'Resolved';
-  let systemText = status === 'In_Progress' ? 'Ticket accepted by counselor' : `Ticket marked ${status.replace(/_/g, ' ')}`;
+  let systemText = status === 'In_Progress' ? `Ticket accepted by ${req.user.name || 'counselor'}` : `Ticket marked ${status.replace(/_/g, ' ')}`;
+  // A centre counselor who acts on the ticket joins it, so later replies reach them too
+  if (req.user.role === 'Counselor' && !isParticipant(conversation, userId(req))) conversation.participants.addToSet(req.user._id);
 
   conversation.ticket.status = status;
   if (status === 'In_Progress' && !conversation.ticket.acceptedAt) conversation.ticket.acceptedAt = new Date();

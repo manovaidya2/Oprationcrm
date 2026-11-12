@@ -34,6 +34,9 @@ const transactionSchema = new mongoose.Schema({
   statusBeforeAdjust: { type: String },
   verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   verifiedAt: { type: Date },
+  // Which counselor forwarded (or rejected) this payment at the counselor step — a centre can have several
+  counselorReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  counselorReviewedAt: { type: Date },
   // Which company account was payment made to
   paidToAccount:     { type: mongoose.Schema.Types.ObjectId, ref: 'PaymentAccount' },
   paidToAccountLabel:{ type: String, trim: true }, // denormalized label for quick display
