@@ -36,7 +36,8 @@ const studentSchema = new mongoose.Schema({
 
   // Relationships
   center:     { type: mongoose.Schema.Types.ObjectId, ref: 'Center', required: true },
-  counselor:  { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor', required: true },
+  // Empty only while the centre is held by Admin (its counselor was deleted)
+  counselor:  { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor' },
   // University this student is applying to — set at submit time
   university: { type: mongoose.Schema.Types.ObjectId, ref: 'University' },
 

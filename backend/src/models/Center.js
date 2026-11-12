@@ -50,6 +50,8 @@ const centerSchema = new mongoose.Schema({
   feeStructureType:  { type: String, enum: ['Very Special', 'Special', 'Normal'], default: 'Normal' },
   loginProvisionStatus: { type: String, enum: ['Login Provided', 'Login Not Provided'], default: 'Login Not Provided' },
   assignedCounselor: { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor' },
+  // True when the main counselor was deleted: Admin handles the centre until a new main counselor is assigned
+  heldByAdmin:       { type: Boolean, default: false },
 
   // Universities this center is allowed to apply to (set by counselor)
   allowedUniversities: [{ type: mongoose.Schema.Types.ObjectId, ref: 'University' }],

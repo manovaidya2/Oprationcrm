@@ -126,12 +126,17 @@ async function canUseCenterFlow(req, centerId) {
 // Main counselor of a centre: Center.assignedCounselor, else any active counselor linked to it.
 // A centre can have several counselors; new students are always filed under the main one.
 async function mainCounselorOf(centerId, excludeId) {
-  const center = await Center.findById(centerId).select('assignedCounselor').lean();
+  const center = await Center.findById(centerId).select('assignedCounselor heldByAdmin').lean();
   if (center?.assignedCounselor) return center.assignedCounselor;
+  if (center?.heldByAdmin) return null;   // with Admin: no counselor until Admin assigns one
   const filter = { centers: centerId, isActive: true };
   if (excludeId) filter._id = { $ne: excludeId };
   const linked = await Counselor.findOne(filter).select('_id').lean();
   return linked?._id || null;
+}
+
+async function centreHeldByAdmin(centerId) {
+  return Boolean(await Center.exists({ _id: centerId, heldByAdmin: true }));
 }
 
 async function assertStudentAccess(req, student) {
@@ -306,7 +311,7 @@ exports.create = asyncHandler(async (req, res) => {
       const main = await mainCounselorOf(centerId);
       if (main) {
         body.counselor = main;
-      } else {
+      } else if (!(await centreHeldByAdmin(centerId))) {   // a centre with Admin keeps its students unassigned
         const any = await Counselor.findOne({ isActive: true }).lean();
         if (any) body.counselor = any._id;
         else { const e = new Error('No counselor assigned to this center. Contact admin.'); e.status = 400; throw e; }
@@ -333,7 +338,7 @@ exports.create = asyncHandler(async (req, res) => {
     if (!body.counselor) {
       const main = await mainCounselorOf(body.center);
       if (main) body.counselor = main;
-      else {
+      else if (!(await centreHeldByAdmin(body.center))) {
         const any = await Counselor.findOne({ isActive: true }).lean();
         if (any) body.counselor = any._id;
         else { const e = new Error('No counselor assigned to this center. Contact admin.'); e.status = 400; throw e; }

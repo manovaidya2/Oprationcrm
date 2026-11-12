@@ -5,6 +5,7 @@
 const asyncHandler = require('express-async-handler');
 const mongoose     = require('mongoose');
 const { audit, notify } = require('../utils/helpers');
+const { removeCounselorProfile } = require('../utils/counselorRemoval');
 const Notification = require('../models/Notification');
 const Center       = require('../models/Center');
 const Counselor    = require('../models/Counselor');
@@ -14,6 +15,12 @@ const StudentDoc   = require('../models/StudentDocument');
 const AuditLog     = require('../models/AuditLog');
 const User         = require('../models/User');
 const PaymentAccount = require('../models/PaymentAccount');
+
+// Counselor profiles that still have an active Counselor login. Deleting a user in Settings removes only
+// the login, so the Counselor profile stays behind — it must not show up in pickers or centre lists.
+async function activeCounselorIds() {
+  return (await User.find({ role: 'Counselor', isActive: true }).distinct('counselorId')).filter(Boolean);
+}
 
 async function assertCenterAccess(req, centerId) {
   if (req.user.role === 'Admin') return;
@@ -65,7 +72,8 @@ exports.listCenters = asyncHandler(async (req, res) => {
 
   // BUG FIX: Some centers may have assignedCounselor as null (old data).
   // Do a reverse-lookup from Counselor.centers to fill in missing assignedCounselor.
-  const missingIds = centers.filter(c => !c.assignedCounselor).map(c => String(c._id));
+  // Centres held by Admin (their counselor was deleted) stay without a main counselor on purpose
+  const missingIds = centers.filter(c => !c.assignedCounselor && !c.heldByAdmin).map(c => String(c._id));
   if (missingIds.length > 0) {
     const allCounselors = await Counselor.find({ centers: { $in: missingIds } }).select('_id name centers').lean();
     // Build a map: centerId -> { _id, name }
@@ -88,9 +96,8 @@ exports.listCenters = asyncHandler(async (req, res) => {
     }
   }
 
-  // Extra counselors (besides the main one) who also work on each centre
-  const viewerIds = (await User.find({ role: 'ViewerCounselor' }).distinct('counselorId')).filter(Boolean);
-  const linkedCounselors = await Counselor.find({ centers: { $in: centers.map(c => c._id) }, _id: { $nin: viewerIds } })
+  // Extra counselors (besides the main one) who also work on each centre — active logins only
+  const linkedCounselors = await Counselor.find({ centers: { $in: centers.map(c => c._id) }, _id: { $in: await activeCounselorIds() } })
     .select('name centers').lean();
 
   centers.forEach(c => {
@@ -253,9 +260,10 @@ exports.deleteCenter = asyncHandler(async (req, res) => {
 });
 
 // ── COUNSELORS ───────────────────────────────────────────────
+// Counselors that can be picked: an active Counselor login (viewer counselors and deleted logins are left out)
 exports.listCounselors = asyncHandler(async (_req, res) => {
-  const viewerCounselorIds = await User.find({ role: 'ViewerCounselor' }).distinct('counselorId');
-  res.json(await Counselor.find({ _id: { $nin: viewerCounselorIds.filter(Boolean) } }).populate('centers', 'name city').sort('-createdAt'));
+  res.json(await Counselor.find({ _id: { $in: await activeCounselorIds() }, isActive: { $ne: false } })
+    .populate('centers', 'name city').sort('-createdAt'));
 });
 
 exports.getCounselor = asyncHandler(async (req, res) => {
@@ -275,7 +283,8 @@ exports.updateCounselor = asyncHandler(async (req, res) => {
 });
 
 exports.deleteCounselor = asyncHandler(async (req, res) => {
-  await Counselor.findByIdAndDelete(req.params.id);
+  const { centresToAdmin } = await removeCounselorProfile(req.params.id);
+  await audit('counselor_deleted', 'Counselor', req.params.id, req.user, { centresToAdmin }, `Counselor profile deleted`);
   res.status(204).end();
 });
 
@@ -315,8 +324,8 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
   ).populate('centers', 'name city');
   if (!c) { const e = new Error('Counselor not found'); e.status = 404; throw e; }
 
-  // Update Center.assignedCounselor
-  await Center.findByIdAndUpdate(centerId, { assignedCounselor: req.params.id });
+  // Update Center.assignedCounselor (a centre held by Admin gets its counselor back)
+  await Center.findByIdAndUpdate(centerId, { assignedCounselor: req.params.id, heldByAdmin: false });
   await Student.updateMany({ center: centerId }, { $set: { counselor: req.params.id } });
   await StudentDoc.updateMany({ center: centerId }, { $set: { counselor: req.params.id } });
 
@@ -327,12 +336,13 @@ exports.addCenterToCounselor = asyncHandler(async (req, res) => {
 // A centre can have several counselors. The main one is Center.assignedCounselor (students are filed
 // under them); every counselor whose Counselor.centers holds the centre can work on it and its students.
 async function centerCounselorList(center) {
-  const viewerIds = (await User.find({ role: 'ViewerCounselor' }).distinct('counselorId')).filter(Boolean);
+  const activeIds = (await activeCounselorIds()).map(String);
   const mainId = String(center.assignedCounselor || '');
-  const rows = await Counselor.find({ centers: center._id, _id: { $nin: viewerIds } })
+  // Active counselors on the centre, plus the main one even if their login was removed (so Admin sees it)
+  const rows = await Counselor.find({ centers: center._id, _id: { $in: mainId ? [...activeIds, mainId] : activeIds } })
     .select('name email phone avatarColor isActive').sort('name').lean();
   return rows
-    .map(c => ({ ...c, isPrimary: String(c._id) === mainId }))
+    .map(c => ({ ...c, isPrimary: String(c._id) === mainId, hasLogin: activeIds.includes(String(c._id)) }))
     .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary));
 }
 

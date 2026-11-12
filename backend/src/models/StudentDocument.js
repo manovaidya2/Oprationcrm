@@ -52,7 +52,7 @@ const coordinatorFollowupSchema = new mongoose.Schema({
 const studentDocSchema = new mongoose.Schema({
   student:    { type: mongoose.Schema.Types.ObjectId, ref: 'Student', required: true },
   center:     { type: mongoose.Schema.Types.ObjectId, ref: 'Center',  required: true },
-  counselor:  { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor', required: true },
+  counselor:  { type: mongoose.Schema.Types.ObjectId, ref: 'Counselor' },   // empty while the centre is held by Admin
   university: { type: mongoose.Schema.Types.ObjectId, ref: 'University' }, // isolated per university
 
   // Document info

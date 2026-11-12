@@ -46,10 +46,18 @@ exports.centreCounselorUserIds = async ({ counselorId, centerId } = {}) => {
   return users.map(u => u._id);
 };
 
-// Notify every counselor working on the centre; returns the user ids notified
+// Active Admin logins — they handle a centre that has no counselor (e.g. after its counselor was deleted)
+exports.adminUserIds = async () => {
+  const User = require('../models/User');
+  return (await User.find({ role: 'Admin', isActive: true }).select('_id').lean()).map(u => u._id);
+};
+
+// Notify every counselor working on the centre — or the Admins when nobody does; returns the user ids notified
 exports.notifyCounselors = async (target, payload) => {
-  const ids = await exports.centreCounselorUserIds(target);
-  if (ids.length) await exports.notify(ids, { role: 'Counselor', ...payload });
+  let ids = await exports.centreCounselorUserIds(target);
+  let role = 'Counselor';
+  if (!ids.length) { ids = await exports.adminUserIds(); role = 'Admin'; }
+  if (ids.length) await exports.notify(ids, { ...payload, role });
   return ids;
 };
 

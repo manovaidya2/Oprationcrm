@@ -59,15 +59,23 @@ export function CenterCounselorsPanel({ centerId, onChange }) {
         <div className="flex justify-center py-3"><Loader2 className="h-5 w-5 animate-spin text-slate-300"/></div>
       ) : (
         <div className="space-y-1.5">
-          {rows.length === 0 && <p className="text-xs text-muted-foreground">No counselor on this centre yet.</p>}
+          {!rows.some(r => r.isPrimary) && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              No main counselor — Admin handles this centre until one is assigned.
+            </p>
+          )}
           {rows.map(c => (
             <div key={c._id} className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-800">
                   <span className="truncate">{c.name}</span>
                   {c.isPrimary && <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">Main</span>}
+                  {c.hasLogin === false && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">Login deleted</span>}
                 </div>
                 {c.email && <div className="truncate text-xs text-muted-foreground">{c.email}</div>}
+                {c.isPrimary && c.hasLogin === false && (
+                  <div className="text-xs text-red-600">This main counselor can no longer log in. Admin should make another counselor the main one.</div>
+                )}
               </div>
               {!c.isPrimary && (
                 <Button variant="ghost" size="sm" className="text-red-500 hover:bg-red-50 hover:text-red-700"

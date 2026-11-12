@@ -1562,6 +1562,9 @@ export default function CounselorPage() {
                         <Users className="h-3 w-3"/>Counselor: {c.assignedCounselor.name}
                       </div>
                     )}
+                    {!c.assignedCounselor && c.heldByAdmin && (
+                      <div className="text-xs text-amber-700 font-medium mt-0.5">Main counselor: Admin</div>
+                    )}
                     {c.coCounselors?.length > 0 && (
                       <div className="text-xs text-indigo-500 mt-0.5">Also working: {c.coCounselors.map(co => co.name).join(', ')}</div>
                     )}

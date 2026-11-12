@@ -4,6 +4,8 @@ const Counselor  = require('../models/Counselor');
 const Center     = require('../models/Center');
 const University = require('../models/University');
 const { signToken } = require('../utils/token');
+const { audit } = require('../utils/helpers');
+const { removeCounselorProfile } = require('../utils/counselorRemoval');
 
 function sanitize(u) {
   return {
@@ -178,6 +180,10 @@ exports.toggleUser = asyncHandler(async (req, res) => {
   if (String(user._id) === String(req.user._id)) { const e = new Error('Cannot deactivate yourself'); e.status = 400; throw e; }
   user.isActive = !user.isActive;
   await user.save();
+  // Keep the counselor profile in step with its login
+  if (['Counselor', 'ViewerCounselor'].includes(user.role) && user.counselorId) {
+    await Counselor.updateOne({ _id: user.counselorId }, { isActive: user.isActive });
+  }
   res.json({ ok: true, isActive: user.isActive });
 });
 
@@ -186,6 +192,12 @@ exports.deleteUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) { const e = new Error('User not found'); e.status = 404; throw e; }
   if (String(user._id) === String(req.user._id)) { const e = new Error('Cannot delete yourself'); e.status = 400; throw e; }
+  if (['Counselor', 'ViewerCounselor'].includes(user.role) && user.counselorId) {
+    // Counselor: delete profile + login; their main centres go to Admin
+    const { centresToAdmin } = await removeCounselorProfile(user.counselorId);
+    await audit('counselor_deleted', 'User', user._id, req.user, { counselorId: user.counselorId, centresToAdmin },
+      `${user.name} (${user.role}) deleted${centresToAdmin ? `; ${centresToAdmin} centre(s) moved to Admin` : ''}`);
+  }
   await User.findByIdAndDelete(req.params.id);
   res.status(204).end();
 });

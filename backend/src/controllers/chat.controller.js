@@ -5,7 +5,7 @@ const User = require('../models/User');
 const Center = require('../models/Center');
 const Counselor = require('../models/Counselor');
 const Student = require('../models/Student');
-const { notify, audit, notifyCounselors, centreCounselorUserIds } = require('../utils/helpers');
+const { notify, audit, notifyCounselors, centreCounselorUserIds, adminUserIds } = require('../utils/helpers');
 
 // Centres this counselor works on — a centre's help tickets are shared by all of its counselors
 async function counselorCentreIds(req) {
@@ -64,10 +64,12 @@ async function notifyConversation(conversation, sender, message) {
   if (conversation.kind === 'ticket' && sender.role === 'Center') {
     // The assigned counselor plus every other counselor on the centre who is not already in the chat
     const centreCounselors = (await centreCounselorUserIds({ centerId: conversation.ticket?.center })).map(String);
-    const targets = [...new Set([
+    let targets = [...new Set([
       String(conversation.ticket?.assignedTo || ''),
       ...centreCounselors.filter(id => !ids.includes(id)),
     ])].filter(Boolean);
+    // No counselor on the centre (it is with Admin): the admins hear about the reply
+    if (!targets.length && !centreCounselors.length) targets = (await adminUserIds()).map(String).filter(id => !ids.includes(id));
     if (targets.length) {
       await notify(targets, {
         message: `New help reply in ${label}`,
@@ -184,7 +186,7 @@ exports.createTicket = asyncHandler(async (req, res) => {
     const e = new Error('Subject and message are required'); e.status = 400; throw e;
   }
 
-  const center = await Center.findById(req.user.centerId).select('name assignedCounselor').lean();
+  const center = await Center.findById(req.user.centerId).select('name assignedCounselor heldByAdmin').lean();
   if (!center) { const e = new Error('Center not found'); e.status = 404; throw e; }
 
   let student = null;
@@ -197,24 +199,26 @@ exports.createTicket = asyncHandler(async (req, res) => {
     }
   }
 
+  // A centre held by Admin (its counselor was deleted) raises tickets to Admin, who sees every ticket
   let counselorId = center.assignedCounselor;
-  if (!counselorId) {
+  if (!counselorId && !center.heldByAdmin) {
     const counselor = await Counselor.findOne({ centers: center._id, isActive: true }).select('_id').lean();
     counselorId = counselor?._id;
   }
-  if (!counselorId) {
+  let counselorUser = null;
+  if (counselorId) {
+    counselorUser = await User.findOne({ role: 'Counselor', counselorId, isActive: true }).select('_id name role').lean();
+    if (!counselorUser) {
+      const e = new Error('Assigned counselor login not found'); e.status = 400; throw e;
+    }
+  } else if (!center.heldByAdmin) {
     const e = new Error('No counselor assigned to this center'); e.status = 400; throw e;
-  }
-
-  const counselorUser = await User.findOne({ role: 'Counselor', counselorId, isActive: true }).select('_id name role').lean();
-  if (!counselorUser) {
-    const e = new Error('Assigned counselor login not found'); e.status = 400; throw e;
   }
 
   let conversation = await Conversation.create({
     kind: 'ticket',
     title: subject,
-    participants: [req.user._id, counselorUser._id],
+    participants: [req.user._id, counselorUser?._id].filter(Boolean),
     createdBy: req.user._id,
     ticket: {
       subject,
@@ -222,7 +226,7 @@ exports.createTicket = asyncHandler(async (req, res) => {
       status: 'Open',
       center: center._id,
       student: student?._id,
-      assignedTo: counselorUser._id,
+      assignedTo: counselorUser?._id,
     },
     lastMessagePreview: body.slice(0, 120),
     lastMessageAt: new Date(),

@@ -152,9 +152,12 @@ export default function SettingsPage() {
     catch(e) { toast.error(e.message); }
   }
 
-  async function deleteUser(id) {
-    if (!confirm('Delete user permanently?')) return;
-    try { await authApi.deleteUser(id); toast.success('Deleted'); clearSettingsPageCache(); load(); }
+  async function deleteUser(u) {
+    const counselorNote = ['Counselor', 'ViewerCounselor'].includes(u.role)
+      ? '\n\nTheir counselor profile is deleted too. Centres where they are the main counselor move to Admin.'
+      : '';
+    if (!confirm(`Delete ${u.name || 'this user'} permanently?${counselorNote}`)) return;
+    try { await authApi.deleteUser(u._id); toast.success('Deleted'); clearSettingsPageCache(); load(); }
     catch(e) { toast.error(e.message); }
   }
 
@@ -232,7 +235,7 @@ export default function SettingsPage() {
                       <Button variant="ghost" size="sm" title="Reset Password" onClick={()=>{ setPwdOpen(u); setPwd(''); }}>
                         <Key className="h-3.5 w-3.5"/>
                       </Button>
-                      <Button variant="ghost" size="sm" title="Delete" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={()=>deleteUser(u._id)}>
+                      <Button variant="ghost" size="sm" title="Delete" className="text-red-500 hover:text-red-700 hover:bg-red-50" onClick={()=>deleteUser(u)}>
                         <Trash2 className="h-3.5 w-3.5"/>
                       </Button>
                     </div>

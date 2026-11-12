@@ -362,6 +362,11 @@ function CenterCard({ center, isAdmin, isViewer = false, canViewerManage = false
                 <User className="h-3 w-3"/>Counselor: {center.assignedCounselor.name}
               </div>
             )}
+            {!center.assignedCounselor && center.heldByAdmin && (
+              <div className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+                <User className="h-3 w-3"/>Counselor: Admin (counselor was deleted — assign a new one)
+              </div>
+            )}
             {center.coCounselors?.length > 0 && (
               <div className="text-xs text-indigo-500 mt-0.5 flex items-center gap-1">
                 <Users className="h-3 w-3"/>Also working: {center.coCounselors.map(c => c.name).join(', ')}
