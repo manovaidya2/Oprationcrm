@@ -182,11 +182,10 @@ async function assertStudentAccess(req, student) {
 }
 
 // GET /api/students
-exports.list = asyncHandler(async (req, res) => {
-  const filter = {};
+// Which students each role may see (shared by the student list and the admission timeline)
+async function studentScopeConditions(req) {
   const { role, centerId, counselorId, universityId } = req.user;
   const andConditions = [];
-
   if (role === 'Center') {
     andConditions.push({ center: centerId });
   } else if (['Counselor', 'ViewerCounselor'].includes(role)) {
@@ -205,6 +204,12 @@ exports.list = asyncHandler(async (req, res) => {
     }
     andConditions.push({ applicationStatus: { $in: ['Sent_To_University','Enrolled','Cancelled'] } });
   }
+  return andConditions;
+}
+
+exports.list = asyncHandler(async (req, res) => {
+  const filter = {};
+  const andConditions = await studentScopeConditions(req);
 
   if (req.query.status)       andConditions.push({ applicationStatus: req.query.status });
   if (req.query.centerId)     andConditions.push({ center: req.query.centerId });
@@ -295,6 +300,85 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('statusHistory.changedBy', 'name role')
     .sort('-createdAt');
   res.json(students);
+});
+
+// ── Admission payment timeline ───────────────────────────────
+// Every submitted admission whose course fee is not fully paid yet, by days since its first submission
+// (IST calendar days): 0-14 none, 15-29 yellow, 30-44 orange, 45+ red, and from day 50 "cancel admission".
+// Paid = verified course-fee money (Payment.paidAmount); payments still being verified are reported apart.
+const TIMELINE_DAYS = { yellow: 15, orange: 30, red: 45, cancel: 50 };
+const IST_OFFSET_MS = 330 * 60 * 1000;
+const istDay = d => Math.floor((new Date(d).getTime() + IST_OFFSET_MS) / 86400000);
+
+function timelineStage(days) {
+  if (days >= TIMELINE_DAYS.red) return 'red';
+  if (days >= TIMELINE_DAYS.orange) return 'orange';
+  if (days >= TIMELINE_DAYS.yellow) return 'yellow';
+  return 'none';
+}
+
+function firstSubmittedAt(student) {
+  const times = (student.statusHistory || [])
+    .filter(h => h.status === 'Submitted' && h.at)
+    .map(h => new Date(h.at).getTime());
+  return times.length ? new Date(Math.min(...times)) : null;
+}
+
+// GET /api/admission-timeline?centerId=
+exports.admissionTimeline = asyncHandler(async (req, res) => {
+  const andConditions = await studentScopeConditions(req);
+  if (req.query.centerId) andConditions.push({ center: req.query.centerId });
+  andConditions.push({ 'statusHistory.status': 'Submitted' });
+  // Out of the timeline: not started, closed, or rejected by the university (refund / adjustment path)
+  andConditions.push({ applicationStatus: { $nin: ['Draft', 'Cancelled', 'Rejected', 'University_Rejected'] } });
+  andConditions.push({ $nor: [{ applicationStatus: 'Accountant_Rejected', rejectedVia: 'university' }] });
+
+  const students = await Student.find({ $and: andConditions })
+    .select('name phone courseName courseYear applicationStatus enrollmentNumber center counselor statusHistory')
+    .populate('center', 'name city')
+    .populate('counselor', 'name')
+    .lean();
+  const payments = await Payment.find({ student: { $in: students.map(s => s._id) } })
+    .select('student netFee paidAmount transactions.amount transactions.type transactions.documentRef transactions.verificationStatus')
+    .lean();
+  const paymentOf = new Map(payments.map(p => [String(p.student), p]));
+
+  const today = istDay(Date.now());
+  const rows = [];
+  for (const s of students) {
+    const submittedAt = firstSubmittedAt(s);
+    if (!submittedAt) continue;
+    const p = paymentOf.get(String(s._id));
+    const netFee = Number(p?.netFee || 0);
+    const paid = Number(p?.paidAmount || 0);
+    if (netFee > 0 && paid >= netFee) continue;   // fully paid: off the timeline
+    const pending = (p?.transactions || [])
+      .filter(t => (t.type || 'Fee') === 'Fee' && !t.documentRef && ['pending_counselor', 'pending_accountant'].includes(t.verificationStatus))
+      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const days = Math.max(0, today - istDay(submittedAt));
+    rows.push({
+      _id: s._id,
+      name: s.name,
+      phone: s.phone || '',
+      courseName: s.courseName || '',
+      courseYear: s.courseYear || '',
+      applicationStatus: s.applicationStatus,
+      enrollmentNumber: s.enrollmentNumber || '',
+      center: s.center || null,
+      counselor: s.counselor || null,
+      submittedAt,
+      days,
+      stage: timelineStage(days),
+      cancelDue: days >= TIMELINE_DAYS.cancel,
+      feeSet: netFee > 0,
+      netFee,
+      paid,
+      pending,
+      due: Math.max(0, netFee - paid),
+    });
+  }
+  rows.sort((a, b) => b.days - a.days);
+  res.json({ rows, days: TIMELINE_DAYS });
 });
 
 // GET /api/students/:id

@@ -31,6 +31,7 @@ const NAV_CONFIG = {
     { to: '/settings',          label: 'Settings',          icon: Settings },
   ],
   Counselor: [
+    { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
@@ -41,6 +42,7 @@ const NAV_CONFIG = {
     { to: '/chat',      label: 'Team Chat',    icon: MessageSquare },
   ],
   ViewerCounselor: [
+    { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
@@ -103,6 +105,14 @@ const ROLE_COLORS = {
   PaymentCoordinator: 'bg-cyan-500',
   Payment: 'bg-sky-500',
   AdmissionMarker: 'bg-lime-500',
+};
+
+// Readable role names for the sidebar header
+const ROLE_LABELS = {
+  ViewerCounselor: 'Viewer Counselor',
+  PaymentCoordinator: 'Payment Coordinator',
+  Payment: 'Payment Desk',
+  AdmissionMarker: 'Admission Marker',
 };
 
 export function AppLayout() {
@@ -176,7 +186,7 @@ export function AppLayout() {
                 ? typeof user.universityId === 'object'
                   ? user.universityId.name
                   : user.role
-                : user?.role}
+                : ROLE_LABELS[user?.role] || user?.role}
             </div>
           </div>
           <button className="ml-auto lg:hidden" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button>

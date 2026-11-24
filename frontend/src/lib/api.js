@@ -94,6 +94,8 @@ export const counselorsApi = {
 export const studentsApi = {
   getAll:          (params = {}) => request(`/students?${new URLSearchParams(params)}`), // pass {page, limit} for paginated response
   getOne:          (id)          => request(`/students/${id}`),
+  // Unpaid submitted admissions with their timeline stage; pass { centerId } to limit to one centre
+  admissionTimeline: (params = {}) => request(`/admission-timeline?${new URLSearchParams(params)}`),
   addedDocs: {
     list:       (id, category, asCentre) => request(`/students/${id}/added-docs?category=${category || ''}${asCentre ? '&asCentre=1' : ''}`),
     uploadFile: (id, docId, fd)   => uploadRequest(`/students/${id}/added-docs/${docId}/file`, 'POST', fd),

@@ -1,5 +1,7 @@
 import { MEDIA } from '../lib/api';
 import StudentDocsPanel from '@/components/StudentDocsPanel';
+import { AdmissionTimeline, TimelineBadge } from '@/components/AdmissionTimeline';
+import { stageOf } from '@/lib/admissionTimeline';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -7,6 +9,7 @@ import {
   IndianRupee, FileText, CreditCard, PlusCircle, Trash2,
   History, Download, Send, AlertTriangle, Paperclip, Pencil,
   CheckCircle2, ChevronRight, User, GraduationCap, BookOpen, KeyRound,
+  Users, AlertCircle, Hourglass, XCircle, Ban,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -2591,6 +2594,7 @@ export default function CenterPortalPage() {
   const [pwdSaving, setPwdSaving]     = useState(false);
   const [pwdForm, setPwdForm]         = useState({ current: '', newPwd: '', confirm: '' });
   const [paidStudentIds, setPaidStudentIds] = useState(new Set());
+  const [timeline, setTimeline] = useState([]);   // unpaid submitted admissions with their colour stage
 
   function returnToCounselor() {
     switchBackToCounselor?.();
@@ -2615,8 +2619,14 @@ export default function CenterPortalPage() {
     if (!centerId) { setLoading(false); return; }
     try{
       setLoading(true);
-      const [studs,center,counselors]=await Promise.all([studentsApi.getAll({ centerId }),centerId?centersApi.getOne(centerId):Promise.resolve(null),counselorsApi.getAll()]);
+      const [studs,center,counselors,tl]=await Promise.all([
+        studentsApi.getAll({ centerId }),
+        centerId?centersApi.getOne(centerId):Promise.resolve(null),
+        counselorsApi.getAll(),
+        studentsApi.admissionTimeline({ centerId }).catch(()=>({ rows: [] })),
+      ]);
       setStudents(studs.filter(s => String(s.center?._id || s.center) === String(centerId)));setCenterInfo(center);
+      setTimeline(tl?.rows || []);
       const linked=counselors.find(c=>c.centers?.some(cx=>String(cx._id||cx)===String(centerId)));
       setDef(linked?._id||counselors[0]?._id);
       // Check which students have payments
@@ -2676,6 +2686,8 @@ export default function CenterPortalPage() {
   />;
 
   const statusCounts=students.reduce((acc,s)=>{acc[s.applicationStatus]=(acc[s.applicationStatus]||0)+1;return acc;},{});
+  const timelineById=new Map(timeline.map(r=>[String(r._id),r]));
+  const openTimelineStudent=row=>{ const st=students.find(x=>String(x._id)===String(row._id)); if(st) setSelected(st); };
 
   return (
     <div className="space-y-5">
@@ -2684,7 +2696,7 @@ export default function CenterPortalPage() {
         <div>
           {isCounselorSwitch && (
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-              {user?.role === 'PaymentCoordinator' ? 'Payment coordinator center view' : user?.role === 'ViewerCounselor' ? 'Viewer counselor center view' : 'Counselor center view'}
+              {({ PaymentCoordinator: 'Payment coordinator', ViewerCounselor: 'Viewer counselor', AdmissionMarker: 'Admission marker' })[user?.role] || 'Counselor'} center view
             </div>
           )}
           <h1 className="text-2xl font-bold text-slate-800">{centerInfo?.name||'Center Portal'}</h1>
@@ -2712,26 +2724,28 @@ export default function CenterPortalPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {[
-          { label:'Total Students', value: students.length, color:'text-slate-800', bg:'bg-white border-slate-200', dot:'' },
-          { label:'Action Needed',  value: (statusCounts['Submitted']||0)+(statusCounts['Changes_Requested']||0), color:'text-amber-600', bg:'bg-amber-50 border-amber-200', dot:'bg-amber-400' },
-          { label:'In Process',     value: (statusCounts['Counselor_Approved']||0)+(statusCounts['Accountant_Pending']||0)+(statusCounts['Accountant_Rejected']||0)+(statusCounts['Sent_To_University']||0)+(statusCounts['University_Rejected']||0), color:'text-slate-600', bg:'bg-slate-50 border-slate-200', dot:'bg-slate-400' },
-          { label:'Enrolled',       value: statusCounts['Enrolled']||0, color:'text-emerald-600', bg:'bg-emerald-50 border-emerald-200', dot:'bg-emerald-400' },
-          { label:'Rejected',       value: statusCounts['Rejected']||0, color:'text-red-500', bg:'bg-red-50 border-red-200', dot:'bg-red-400' },
-          { label:'Cancelled',      value: statusCounts['Cancelled']||0, color:'text-slate-500', bg:'bg-slate-100 border-slate-300', dot:'bg-slate-400' },
-        ].map(({ label, value, color, bg, dot })=>(
-          <div key={label} className={`rounded-xl border p-4 ${bg}`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <div className={`text-2xl font-bold ${color}`}>{value}</div>
-                <div className="text-xs text-slate-400 font-medium mt-0.5">{label}</div>
-              </div>
-              {dot && <div className={`h-2 w-2 rounded-full ${dot} mt-1`}/>}
+          { label:'Total Students', caption:'All admissions',                   icon: Users,         tone:'bg-slate-100 text-slate-600',     value: students.length },
+          { label:'Action Needed',  caption:'Submitted or changes requested',   icon: AlertCircle,   tone:'bg-amber-50 text-amber-600',      value: (statusCounts['Submitted']||0)+(statusCounts['Changes_Requested']||0) },
+          { label:'In Process',     caption:'With counselor, accounts or university', icon: Hourglass, tone:'bg-indigo-50 text-indigo-600', value: (statusCounts['Counselor_Approved']||0)+(statusCounts['Accountant_Pending']||0)+(statusCounts['Accountant_Rejected']||0)+(statusCounts['Sent_To_University']||0)+(statusCounts['University_Rejected']||0) },
+          { label:'Enrolled',       caption:'Enrollment number received',       icon: GraduationCap, tone:'bg-emerald-50 text-emerald-600',  value: statusCounts['Enrolled']||0 },
+          { label:'Rejected',       caption:'Applications rejected',            icon: XCircle,       tone:'bg-red-50 text-red-600',          value: statusCounts['Rejected']||0 },
+          { label:'Cancelled',      caption:'Admissions cancelled',             icon: Ban,           tone:'bg-slate-100 text-slate-500',     value: statusCounts['Cancelled']||0 },
+        ].map(card=>{ const { label, caption, icon: Icon, tone, value } = card; return (
+          <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-xs font-medium text-slate-500">{label}</span>
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone}`}><Icon className="h-4 w-4"/></span>
             </div>
+            <div className="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-slate-900">{value}</div>
+            <div className="mt-0.5 truncate text-[11px] text-slate-400" title={caption}>{caption}</div>
           </div>
-        ))}
+        ); })}
       </div>
+
+      {/* Payment timeline: unpaid admissions by days since submission */}
+      <AdmissionTimeline rows={timeline} onOpen={openTimelineStudent}/>
 
       {/* Search */}
       <div className="relative">
@@ -2764,13 +2778,15 @@ export default function CenterPortalPage() {
             const st=APP_STATUS[s.applicationStatus]||{label:s.applicationStatus,color:'bg-slate-100 text-slate-600'};
             const isChanges = s.applicationStatus === 'Changes_Requested';
             const isEnrolled = s.applicationStatus === 'Enrolled';
+            const tl = timelineById.get(String(s._id));
+            const tlStage = tl && tl.stage !== 'none' ? stageOf(tl.stage) : null;
             return (
               <div key={s._id}
                 className={`bg-white rounded-xl border cursor-pointer hover:shadow-md transition-all group ${
                   isChanges ? 'border-amber-300 hover:border-amber-400' :
                   isEnrolled ? 'border-emerald-200 hover:border-emerald-300' :
                   'border-slate-200 hover:border-indigo-300'
-                }`}
+                } ${tlStage ? `border-l-4 ${tlStage.bar}` : ''} ${tl?.cancelDue ? 'ring-2 ring-red-300' : ''}`}
                 onClick={()=>setSelected(s)}>
                 <div className="p-4 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -2809,6 +2825,7 @@ export default function CenterPortalPage() {
                         {s.tenth_percent&&<span>10th: {s.tenth_percent}%</span>}
                         {s.twelfth_percent&&<span>12th: {s.twelfth_percent}%</span>}
                       </div>
+                      <TimelineBadge row={tl}/>
                       {isPaymentPending(s) && !paidStudentIds.has(s._id) && (
                         <div className="mt-2 flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-amber-700">
                           <span>⚡</span>

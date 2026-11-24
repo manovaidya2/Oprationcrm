@@ -91,6 +91,8 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 
 // ── STUDENTS ─────────────────────────────────────────────────
 router.get   ('/students',     protect, studentC.list);
+// Unpaid submitted admissions coloured by days since submission (centre panel + counselor timeline page)
+router.get   ('/admission-timeline', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), studentC.admissionTimeline);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
 router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator','Center','AdmissionMarker'), addedDocsC.list);
