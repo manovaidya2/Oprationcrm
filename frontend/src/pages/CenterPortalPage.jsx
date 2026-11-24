@@ -2595,6 +2595,7 @@ export default function CenterPortalPage() {
   const [pwdForm, setPwdForm]         = useState({ current: '', newPwd: '', confirm: '' });
   const [paidStudentIds, setPaidStudentIds] = useState(new Set());
   const [timeline, setTimeline] = useState([]);   // unpaid submitted admissions with their colour stage
+  const [timelineFrom, setTimelineFrom] = useState(null);   // admissions submitted from this date are auto-cancelled at day 50
 
   function returnToCounselor() {
     switchBackToCounselor?.();
@@ -2627,6 +2628,7 @@ export default function CenterPortalPage() {
       ]);
       setStudents(studs.filter(s => String(s.center?._id || s.center) === String(centerId)));setCenterInfo(center);
       setTimeline(tl?.rows || []);
+      setTimelineFrom(tl?.autoCancelFrom || null);
       const linked=counselors.find(c=>c.centers?.some(cx=>String(cx._id||cx)===String(centerId)));
       setDef(linked?._id||counselors[0]?._id);
       // Check which students have payments
@@ -2745,7 +2747,7 @@ export default function CenterPortalPage() {
       </div>
 
       {/* Payment timeline: unpaid admissions by days since submission */}
-      <AdmissionTimeline rows={timeline} onOpen={openTimelineStudent}/>
+      <AdmissionTimeline rows={timeline} onOpen={openTimelineStudent} autoCancelFrom={timelineFrom}/>
 
       {/* Search */}
       <div className="relative">

@@ -55,7 +55,7 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/accountant', '/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
+  Accountant: ['/admission-timeline', '/accountant','/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
   University: ['/university', '/students/', '/chat'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],

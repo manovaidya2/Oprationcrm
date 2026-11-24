@@ -1,6 +1,7 @@
-// Admission payment timeline: days since the admission was submitted, while its course fee is not fully paid.
-// The stage of each student comes from the server (GET /admission-timeline): 0-14 none, 15-29 yellow,
-// 30-44 orange, 45+ red, and from day 50 the student is flagged "cancel admission".
+// Admission payment timeline: days since the admission was submitted (or since its first unpaid instalment
+// was due), while its course fee is not fully paid. The server (GET /admission-timeline) gives each student
+// its stage: 0-14 none, 15-29 yellow, 30-44 orange, 45+ red. At day 50 the admission is cancelled
+// automatically; a counselor can restore it with the late payment, which gives 20 more days.
 //   dot  - small status dot      top  - column accent bar     pill - count / day chip
 //   fill - paid progress bar     bar  - left accent on a student card elsewhere
 export const TIMELINE_STAGES = [
@@ -10,7 +11,7 @@ export const TIMELINE_STAGES = [
     dot: 'bg-yellow-400', top: 'border-t-yellow-400', pill: 'bg-yellow-100 text-yellow-800', fill: 'bg-yellow-400', bar: 'border-l-yellow-400' },
   { key: 'orange', label: '30–44 days', hint: 'Payment overdue',
     dot: 'bg-orange-500', top: 'border-t-orange-500', pill: 'bg-orange-100 text-orange-800', fill: 'bg-orange-500', bar: 'border-l-orange-500' },
-  { key: 'red',    label: '45+ days',   hint: 'Critical — cancel from day 50',
+  { key: 'red',    label: '45+ days',   hint: 'Auto-cancel at day 50',
     dot: 'bg-red-600',    top: 'border-t-red-600',    pill: 'bg-red-100 text-red-700',       fill: 'bg-red-600',    bar: 'border-l-red-600' },
 ];
 

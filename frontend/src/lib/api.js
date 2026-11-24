@@ -96,6 +96,14 @@ export const studentsApi = {
   getOne:          (id)          => request(`/students/${id}`),
   // Unpaid submitted admissions with their timeline stage; pass { centerId } to limit to one centre
   admissionTimeline: (params = {}) => request(`/admission-timeline?${new URLSearchParams(params)}`),
+  // Who cancelled / restored admissions and when; pass { centerId } to limit to one centre
+  admissionHistory: (params = {}) => request(`/admission-timeline/history?${new URLSearchParams(params)}`),
+  // Restore an auto-cancelled admission with the payment that came in late
+  restore: (id, data) => request(`/students/${id}/restore`, { method: 'POST', body: JSON.stringify(data) }),
+  // Mark a cancelled admission as cancelled at the university too (permanent)
+  confirmUniversityCancel: (id, note) => request(`/students/${id}/university-cancelled`, { method: 'POST', body: JSON.stringify({ note }) }),
+  // Remove that mark when the university starts the admission again
+  undoUniversityCancel: (id, reason) => request(`/students/${id}/university-cancelled/undo`, { method: 'POST', body: JSON.stringify({ reason }) }),
   addedDocs: {
     list:       (id, category, asCentre) => request(`/students/${id}/added-docs?category=${category || ''}${asCentre ? '&asCentre=1' : ''}`),
     uploadFile: (id, docId, fd)   => uploadRequest(`/students/${id}/added-docs/${docId}/file`, 'POST', fd),

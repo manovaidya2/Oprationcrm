@@ -56,9 +56,26 @@ const studentSchema = new mongoose.Schema({
       'University_Rejected',// university rejected → back to accountant
       'Accountant_Rejected',// accountant rejected (fee issue) → back to counselor
       'Enrolled',           // university assigned enrollment number
+      'Cancelled',          // cancelled by Admin, or automatically when the fee was not paid in time
     ],
     default: 'Draft',
   },
+
+  // Auto-cancel: course fee not fully paid in time (utils/admissionTimeline.js).
+  // A counselor can restore it with the late payment; it then gets a short grace period to complete the fee.
+  autoCancelled:      { type: Boolean, default: false },
+  cancelledAt:        { type: Date },
+  statusBeforeCancel: { type: String },
+  reasonBeforeCancel: { type: String, trim: true },
+  restoredAt:         { type: Date },
+  restoredBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  restoreCount:       { type: Number, default: 0 },
+  // Confirmed (by counselor / accountant / admin) that the admission was also cancelled at the university.
+  // Permanent: such an admission can no longer be restored.
+  universityCancelled:   { type: Boolean, default: false },
+  universityCancelledAt: { type: Date },
+  universityCancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  universityCancelNote:  { type: String, trim: true },
 
   // Notes for rejection / changes
   rejectionReason:    { type: String, trim: true },

@@ -17,6 +17,7 @@ import { clearStudentListFilters } from '@/lib/studentListState';
 const NAV_CONFIG = {
   Admin: [
     { to: '/',             label: 'Dashboard',    icon: LayoutDashboard },
+    { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
@@ -57,6 +58,7 @@ const NAV_CONFIG = {
     { to: '/help',   label: 'Help',        icon: LifeBuoy },
   ],
   Accountant: [
+    { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
     { to: '/document-inventory', label: 'Doc Inventory', icon: Package },

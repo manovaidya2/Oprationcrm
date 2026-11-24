@@ -7,6 +7,8 @@ const Counselor  = require('../models/Counselor');
 const Center     = require('../models/Center');
 const University = require('../models/University');
 const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
+const { TIMELINE_DAYS, buildTimeline, feeSummary, firstSubmittedAt, autoCancelFrom } = require('../utils/admissionTimeline');
+const { findDuplicateUtrMatches } = require('../utils/utrDuplicate');
 
 const SUBMISSION_DOC_NAME = 'Upload All Documents (Single PDF)';
 const MAX_SUBMISSION_PDF_BYTES = 10 * 1024 * 1024;
@@ -227,7 +229,7 @@ exports.list = asyncHandler(async (req, res) => {
     if (submittedFrom) range.push({ $gte: ['$$at', submittedFrom] });
     if (submittedTo)   range.push({ $lte: ['$$at', submittedTo] });
     // Earliest 'Submitted' date, or null when the student was never submitted
-    const firstSubmittedAt = { $reduce: {
+    const firstSubmittedAtExpr = { $reduce: {
       input: { $ifNull: ['$statusHistory', []] },
       initialValue: null,
       in: { $cond: [
@@ -239,7 +241,7 @@ exports.list = asyncHandler(async (req, res) => {
         '$$value',
       ] },
     } };
-    andConditions.push({ $expr: { $let: { vars: { at: firstSubmittedAt }, in: { $and: range } } } });
+    andConditions.push({ $expr: { $let: { vars: { at: firstSubmittedAtExpr }, in: { $and: range } } } });
   }
 
   if (req.query.search) {
@@ -303,82 +305,224 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 // ── Admission payment timeline ───────────────────────────────
-// Every submitted admission whose course fee is not fully paid yet, by days since its first submission
-// (IST calendar days): 0-14 none, 15-29 yellow, 30-44 orange, 45+ red, and from day 50 "cancel admission".
-// Paid = verified course-fee money (Payment.paidAmount); payments still being verified are reported apart.
-const TIMELINE_DAYS = { yellow: 15, orange: 30, red: 45, cancel: 50 };
-const IST_OFFSET_MS = 330 * 60 * 1000;
-const istDay = d => Math.floor((new Date(d).getTime() + IST_OFFSET_MS) / 86400000);
-
-function timelineStage(days) {
-  if (days >= TIMELINE_DAYS.red) return 'red';
-  if (days >= TIMELINE_DAYS.orange) return 'orange';
-  if (days >= TIMELINE_DAYS.yellow) return 'yellow';
-  return 'none';
-}
-
-function firstSubmittedAt(student) {
-  const times = (student.statusHistory || [])
-    .filter(h => h.status === 'Submitted' && h.at)
-    .map(h => new Date(h.at).getTime());
-  return times.length ? new Date(Math.min(...times)) : null;
-}
+// Rules live in utils/admissionTimeline.js (shared with the hourly auto-cancel job in jobs/autoCancelAdmissions.js).
 
 // GET /api/admission-timeline?centerId=
+// rows: admissions not fully paid, with their stage; cancelled: admissions auto-cancelled for late payment
 exports.admissionTimeline = asyncHandler(async (req, res) => {
-  const andConditions = await studentScopeConditions(req);
-  if (req.query.centerId) andConditions.push({ center: req.query.centerId });
-  andConditions.push({ 'statusHistory.status': 'Submitted' });
-  // Out of the timeline: not started, closed, or rejected by the university (refund / adjustment path)
-  andConditions.push({ applicationStatus: { $nin: ['Draft', 'Cancelled', 'Rejected', 'University_Rejected'] } });
-  andConditions.push({ $nor: [{ applicationStatus: 'Accountant_Rejected', rejectedVia: 'university' }] });
+  // Accountant follows every centre here (their usual student scope only covers later stages)
+  const scope = req.user.role === 'Accountant' ? [] : await studentScopeConditions(req);
+  if (req.query.centerId) scope.push({ center: req.query.centerId });
+  const rows = await buildTimeline(scope);
 
-  const students = await Student.find({ $and: andConditions })
-    .select('name phone courseName courseYear applicationStatus enrollmentNumber center counselor statusHistory')
+  const cancelledStudents = await Student.find({ $and: [...scope, { applicationStatus: 'Cancelled', autoCancelled: true }] })
+    .select('name phone courseName courseYear center counselor cancelledAt statusBeforeCancel rejectionReason restoreCount amountSettled settlementRequested statusHistory universityCancelled universityCancelledAt universityCancelledBy universityCancelNote')
     .populate('center', 'name city')
     .populate('counselor', 'name')
+    .populate('universityCancelledBy', 'name role')
+    .sort({ universityCancelled: 1, cancelledAt: -1 })   // still to be cancelled at the university first
     .lean();
-  const payments = await Payment.find({ student: { $in: students.map(s => s._id) } })
+  const payments = await Payment.find({ student: { $in: cancelledStudents.map(s => s._id) } })
     .select('student netFee paidAmount transactions.amount transactions.type transactions.documentRef transactions.verificationStatus')
     .lean();
   const paymentOf = new Map(payments.map(p => [String(p.student), p]));
+  const cancelled = cancelledStudents.map(s => ({
+    _id: s._id,
+    name: s.name,
+    phone: s.phone || '',
+    courseName: s.courseName || '',
+    courseYear: s.courseYear || '',
+    center: s.center || null,
+    counselor: s.counselor || null,
+    submittedAt: firstSubmittedAt(s),
+    cancelledAt: s.cancelledAt,
+    statusBeforeCancel: s.statusBeforeCancel || '',
+    reason: s.rejectionReason || '',
+    restoreCount: s.restoreCount || 0,
+    universityCancelled: !!s.universityCancelled,
+    universityCancelledAt: s.universityCancelledAt || null,
+    universityCancelledBy: s.universityCancelledBy || null,
+    universityCancelNote: s.universityCancelNote || '',
+    amountSettled: !!s.amountSettled,
+    settlementRequested: !!s.settlementRequested,
+    ...feeSummary(paymentOf.get(String(s._id))),
+  }));
 
-  const today = istDay(Date.now());
-  const rows = [];
+  res.json({ rows, cancelled, days: TIMELINE_DAYS, autoCancelFrom: autoCancelFrom() });
+});
+
+// GET /api/admission-timeline/history?centerId=
+// Who cancelled / restored admissions and when: every Cancelled (auto by System, or by Admin), Restored,
+// cancelled-at-university and undo entry from the students' history, newest first.
+const CANCEL_HISTORY_EVENTS = ['Cancelled', 'Restored', 'Auto_Cancel_Reverted', 'University_Cancel_Confirmed', 'University_Cancel_Undone'];
+const CANCEL_HISTORY_LIMIT = 500;
+exports.admissionHistory = asyncHandler(async (req, res) => {
+  const scope = req.user.role === 'Accountant' ? [] : await studentScopeConditions(req);
+  if (req.query.centerId) scope.push({ center: req.query.centerId });
+  const students = await Student.find({ $and: [...scope, { 'statusHistory.status': { $in: CANCEL_HISTORY_EVENTS } }] })
+    .select('name courseName courseYear center applicationStatus statusHistory')
+    .populate('center', 'name')
+    .populate('statusHistory.changedBy', 'name role')
+    .lean();
+
+  const events = [];
   for (const s of students) {
-    const submittedAt = firstSubmittedAt(s);
-    if (!submittedAt) continue;
-    const p = paymentOf.get(String(s._id));
-    const netFee = Number(p?.netFee || 0);
-    const paid = Number(p?.paidAmount || 0);
-    if (netFee > 0 && paid >= netFee) continue;   // fully paid: off the timeline
-    const pending = (p?.transactions || [])
-      .filter(t => (t.type || 'Fee') === 'Fee' && !t.documentRef && ['pending_counselor', 'pending_accountant'].includes(t.verificationStatus))
-      .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-    const days = Math.max(0, today - istDay(submittedAt));
-    rows.push({
-      _id: s._id,
-      name: s.name,
-      phone: s.phone || '',
-      courseName: s.courseName || '',
-      courseYear: s.courseYear || '',
-      applicationStatus: s.applicationStatus,
-      enrollmentNumber: s.enrollmentNumber || '',
-      center: s.center || null,
-      counselor: s.counselor || null,
-      submittedAt,
-      days,
-      stage: timelineStage(days),
-      cancelDue: days >= TIMELINE_DAYS.cancel,
-      feeSet: netFee > 0,
-      netFee,
-      paid,
-      pending,
-      due: Math.max(0, netFee - paid),
+    for (const h of s.statusHistory || []) {
+      if (!CANCEL_HISTORY_EVENTS.includes(h.status)) continue;
+      events.push({
+        at: h.at,
+        type: h.status,
+        auto: h.status === 'Cancelled' && h.role === 'System',
+        by: h.changedBy ? { name: h.changedBy.name, role: h.changedBy.role } : { name: h.role === 'System' ? 'System' : '—', role: h.role || '' },
+        note: h.note || '',
+        student: { _id: s._id, name: s.name, courseName: s.courseName || '', courseYear: s.courseYear || '', status: s.applicationStatus },
+        center: s.center || null,
+      });
+    }
+  }
+  events.sort((a, b) => new Date(b.at) - new Date(a.at));
+  res.json({ events: events.slice(0, CANCEL_HISTORY_LIMIT), total: events.length, limit: CANCEL_HISTORY_LIMIT });
+});
+
+// POST /api/students/:id/restore — bring back an admission that was auto-cancelled for late payment,
+// recording the payment that came in. It returns to its earlier status and gets
+// TIMELINE_DAYS.restoreGrace days to complete the course fee, or it is cancelled again.
+exports.restoreAdmission = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).populate('center', 'name');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  if (s.applicationStatus !== 'Cancelled' || !s.autoCancelled) {
+    const e = new Error('Only an admission cancelled automatically for late payment can be restored'); e.status = 400; throw e;
+  }
+  if (s.amountSettled) { const e = new Error('The amount for this admission is already settled; it cannot be restored'); e.status = 400; throw e; }
+  if (s.universityCancelled) { const e = new Error('This admission is cancelled at the university too; it cannot be restored'); e.status = 400; throw e; }
+  if (req.user.role === 'Counselor') {
+    const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const mine = String(s.counselor || '') === String(req.user.counselorId || '')
+      || (me?.centers || []).some(id => String(id) === String(s.center?._id || s.center));
+    if (!mine) { const e = new Error('You can restore admissions only for your centres'); e.status = 403; throw e; }
+  }
+
+  const amount = Number(req.body.amount);
+  const utrRef = String(req.body.utrRef || '').trim();
+  if (!(amount > 0)) { const e = new Error('Payment amount is required'); e.status = 400; throw e; }
+  if (!utrRef) { const e = new Error('UTR / reference number is required'); e.status = 400; throw e; }
+  const paidAt = req.body.paidAt ? new Date(req.body.paidAt) : new Date();
+  if (Number.isNaN(paidAt.getTime())) { const e = new Error('Valid payment date is required'); e.status = 400; throw e; }
+  const payment = await Payment.findOne({ student: s._id });
+  if (!payment || !(payment.netFee > 0)) { const e = new Error('Set the course fee for this student before restoring'); e.status = 400; throw e; }
+  if ((await findDuplicateUtrMatches(utrRef)).length) { const e = new Error('This UTR is already recorded on another payment'); e.status = 409; throw e; }
+
+  // Admin's or accountant's payment is verified at once (the accountant is the verifier). A counselor's payment has
+  // passed the counselor step (they entered it), so it goes to the accountant and counts only once verified.
+  const verifiedAtOnce = ['Admin', 'Accountant'].includes(req.user.role);
+  payment.transactions.push({
+    amount,
+    mode: req.body.mode === 'Bank Transfer' ? 'Bank Transfer' : 'UPI',
+    utrRef,
+    upiId: req.body.upiId || '',
+    bankName: req.body.bankName || '',
+    accountHolder: req.body.accountHolder || '',
+    accountNumber: req.body.accountNumber || '',
+    ifscCode: req.body.ifscCode || '',
+    paidAt,
+    note: ['Payment received after auto-cancel', String(req.body.note || '').trim()].filter(Boolean).join(' - '),
+    paymentScreenshot: req.file ? `/uploads/${req.file.filename}` : '',
+    paidToAccount: req.body.paidToAccount || undefined,
+    paidToAccountLabel: req.body.paidToAccountLabel || '',
+    recordedBy: req.user._id,
+    type: 'Fee',
+    verificationStatus: verifiedAtOnce ? 'verified' : 'pending_accountant',
+    ...(verifiedAtOnce
+      ? { verifiedBy: req.user._id, verifiedAt: new Date() }
+      : { counselorReviewedBy: req.user._id, counselorReviewedAt: new Date() }),
+  });
+  await payment.save();
+
+  const backTo = s.statusBeforeCancel || 'Submitted';
+  const now = new Date();
+  await Student.updateOne({ _id: s._id, applicationStatus: 'Cancelled' }, {
+    $set: {
+      applicationStatus: backTo, autoCancelled: false, restoredAt: now, restoredBy: req.user._id,
+      rejectionReason: s.reasonBeforeCancel || '', settlementRequested: false, settlementForwardedToAccountant: false,
+    },
+    $inc: { restoreCount: 1 },
+    $unset: { cancelledAt: 1, statusBeforeCancel: 1, reasonBeforeCancel: 1 },
+  });
+  const fullyPaid = payment.paidAmount >= payment.netFee;
+  const awaitingVerification = !verifiedAtOnce;
+  const grace = TIMELINE_DAYS.restoreGrace;
+  const verifyNote = awaitingVerification ? ' — sent to the accountant for verification' : '';
+  await pushHistory(s._id, 'Restored', req.user,
+    `Restored with a payment of ₹${amount} (UTR ${utrRef})${verifyNote}${fullyPaid ? ' — course fee fully paid' : `; ${grace} days to complete the course fee`}`);
+  await audit('admission_restored', 'Student', s._id, req.user, { amount, utrRef, backTo, fullyPaid, awaitingVerification }, `${s.name} restored after late payment`);
+
+  if (awaitingVerification) {
+    await notifyRole('Accountant', {
+      message: `Fee payment of ₹${amount} for ${s.name} (restored admission) forwarded by counselor ${req.user.name}. Please verify.`,
+      type: 'payment_verified', role: 'Accountant', studentId: s._id,
     });
   }
-  rows.sort((a, b) => b.days - a.days);
-  res.json({ rows, days: TIMELINE_DAYS });
+  const message = `${s.name}'s admission was restored by ${req.user.name} after a payment of ₹${amount}.`
+    + (awaitingVerification ? ' The payment is with the accountant for verification.' : '')
+    + (fullyPaid ? '' : ` ${grace} days left to complete the course fee.`);
+  const centreUsers = await User.find({ role: 'Center', centerId: s.center?._id || s.center, isActive: true }).select('_id').lean();
+  if (centreUsers.length) await notify(centreUsers.map(u => u._id), { message, type: 'general', role: 'Center', studentId: s._id });
+  await notifyCounselors({ counselorId: s.counselor, centerId: s.center }, { message, type: 'general', studentId: s._id });
+
+  res.json({ ok: true, status: backTo, fullyPaid, awaitingVerification, graceDays: fullyPaid ? 0 : grace });
+});
+
+// POST /api/students/:id/university-cancelled  { note }
+// Counselor / accountant / admin confirm the cancelled admission was also cancelled at the university.
+// Permanent: after this the admission can no longer be restored.
+exports.confirmUniversityCancel = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).select('name center counselor applicationStatus universityCancelled');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  if (s.applicationStatus !== 'Cancelled') { const e = new Error('Only a cancelled admission can be marked as cancelled at the university'); e.status = 400; throw e; }
+  if (s.universityCancelled) { const e = new Error('Already marked as cancelled at the university'); e.status = 400; throw e; }
+  if (req.user.role === 'Counselor') {
+    const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const mine = String(s.counselor || '') === String(req.user.counselorId || '')
+      || (me?.centers || []).some(id => String(id) === String(s.center));
+    if (!mine) { const e = new Error('You can confirm this only for your centres'); e.status = 403; throw e; }
+  }
+
+  const note = String(req.body.note || '').trim();
+  const now = new Date();
+  const result = await Student.updateOne({ _id: s._id, applicationStatus: 'Cancelled', universityCancelled: { $ne: true } }, {
+    $set: { universityCancelled: true, universityCancelledAt: now, universityCancelledBy: req.user._id, universityCancelNote: note },
+  });
+  if (!result.modifiedCount) { const e = new Error('Already marked as cancelled at the university'); e.status = 400; throw e; }
+  await pushHistory(s._id, 'University_Cancel_Confirmed', req.user, note ? `Cancelled at the university — ${note}` : 'Cancelled at the university');
+  await audit('university_cancel_confirmed', 'Student', s._id, req.user, { note }, `${s.name} confirmed cancelled at the university`);
+  res.json({ ok: true, universityCancelledAt: now });
+});
+
+// POST /api/students/:id/university-cancelled/undo  { reason }
+// The university started the admission again: remove the mark so the admission can be restored with its payment.
+// It stays cancelled in the CRM until a counselor / admin restores it.
+exports.undoUniversityCancel = asyncHandler(async (req, res) => {
+  const s = await Student.findById(req.params.id).select('name center counselor universityCancelled universityCancelNote');
+  if (!s) { const e = new Error('Student not found'); e.status = 404; throw e; }
+  if (!s.universityCancelled) { const e = new Error('This admission is not marked as cancelled at the university'); e.status = 400; throw e; }
+  if (req.user.role === 'Counselor') {
+    const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    const mine = String(s.counselor || '') === String(req.user.counselorId || '')
+      || (me?.centers || []).some(id => String(id) === String(s.center));
+    if (!mine) { const e = new Error('You can change this only for your centres'); e.status = 403; throw e; }
+  }
+  const reason = String(req.body.reason || '').trim();
+  if (reason.length < 3) { const e = new Error('Please write why the university cancellation is being undone'); e.status = 400; throw e; }
+
+  const result = await Student.updateOne({ _id: s._id, universityCancelled: true }, {
+    $set: { universityCancelled: false },
+    $unset: { universityCancelledAt: 1, universityCancelledBy: 1, universityCancelNote: 1 },
+  });
+  if (!result.modifiedCount) { const e = new Error('This admission is not marked as cancelled at the university'); e.status = 400; throw e; }
+  await pushHistory(s._id, 'University_Cancel_Undone', req.user,
+    `University cancellation undone — ${reason}${s.universityCancelNote ? ` (earlier note: ${s.universityCancelNote})` : ''}`);
+  await audit('university_cancel_undone', 'Student', s._id, req.user, { reason, earlierNote: s.universityCancelNote || '' }, `${s.name}: university cancellation undone`);
+  res.json({ ok: true });
 });
 
 // GET /api/students/:id

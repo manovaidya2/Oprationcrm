@@ -92,7 +92,9 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 // ── STUDENTS ─────────────────────────────────────────────────
 router.get   ('/students',     protect, studentC.list);
 // Unpaid submitted admissions coloured by days since submission (centre panel + counselor timeline page)
-router.get   ('/admission-timeline', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), studentC.admissionTimeline);
+router.get   ('/admission-timeline', protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), studentC.admissionTimeline);
+// Who cancelled / restored admissions (History tab on the Admission Timeline page)
+router.get   ('/admission-timeline/history', protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), studentC.admissionHistory);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
 router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator','Center','AdmissionMarker'), addedDocsC.list);
@@ -118,6 +120,12 @@ router.post('/students/:id/enrollment-check',  protect, requireRole('Admin','Cen
 router.post('/students/:id/university-reject', protect, requireRole('Admin','University'), studentC.universityReject);
 router.post('/students/:id/accountant-forward-to-counselor', protect, requireRole('Admin','Accountant'), studentC.accountantForwardToCounselor);
 router.post('/students/:id/cancel',                          protect, requireRole('Admin'),               studentC.cancelApplication);
+// Restore an admission auto-cancelled for late payment, recording the payment that came in
+router.post('/students/:id/restore',                         protect, requireRole('Admin','Counselor','Accountant'), upload.single('paymentScreenshot'), studentC.restoreAdmission);
+// Confirm a cancelled admission was also cancelled at the university (permanent — no restore after this)
+router.post('/students/:id/university-cancelled',            protect, requireRole('Admin','Counselor','Accountant'), studentC.confirmUniversityCancel);
+// Undo it when the university starts the admission again (then it can be restored with its payment)
+router.post('/students/:id/university-cancelled/undo',       protect, requireRole('Admin','Counselor','Accountant'), studentC.undoUniversityCancel);
 router.post('/students/:id/transfer-center',                 protect, requireRole('Admin'),               studentC.transferCenter);
 router.post('/students/:id/amount-settle',                   protect, requireRole('Admin','Accountant'),  studentC.amountSettle);
 router.post('/students/:id/request-settlement',             protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'),            studentC.requestSettlement);
