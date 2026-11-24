@@ -85,6 +85,11 @@ const NAV_CONFIG = {
     { to: '/document-inventory', label: 'Doc Inventory', icon: BookOpen },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
+  AdmissionMarker: [
+    { to: '/admissions', label: 'Admissions', icon: LayoutDashboard },
+    { to: '/students',   label: 'Students',   icon: GraduationCap },
+    { to: '/centers',    label: 'Centers',    icon: Building2 },
+  ],
 };
 
 const ROLE_COLORS = {
@@ -97,6 +102,7 @@ const ROLE_COLORS = {
   Dispatch:   'bg-teal-500',
   PaymentCoordinator: 'bg-cyan-500',
   Payment: 'bg-sky-500',
+  AdmissionMarker: 'bg-lime-500',
 };
 
 export function AppLayout() {

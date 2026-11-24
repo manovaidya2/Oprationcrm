@@ -22,7 +22,7 @@ const accountLedgerC = require('../controllers/accountLedger.controller');
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
 const userCreateSchema= z.object({
   name: z.string().min(1), email: z.string().email(), password: z.string().min(6),
-  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','PaymentCoordinator','Payment']),
+  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','PaymentCoordinator','Payment','AdmissionMarker']),
   centerId:     z.string().optional(),
   centerIds:    z.array(z.string()).optional(),
   universityId: z.string().optional(),
@@ -93,7 +93,7 @@ router.post  ('/counselors/:id/centers', protect, requireRole('Admin','Counselor
 router.get   ('/students',     protect, studentC.list);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
-router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator','Center'), addedDocsC.list);
+router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator','Center','AdmissionMarker'), addedDocsC.list);
 router.post  ('/students/:id/added-docs/:docId/file',       protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), upload.single('file'), addedDocsC.uploadFile);
 router.patch ('/students/:id/added-docs/:docId/visibility', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.setVisibility);
 router.post  ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.add);
@@ -101,12 +101,12 @@ router.patch ('/students/:id/added-docs/:docId',          protect, requireRole('
 router.delete('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.remove);
 router.delete('/students/:id/added-docs/:docId/payments/:payId', protect, requireRole('Admin'), addedDocsC.removePayment);
 router.post  ('/students/:id/added-docs/:docId/payments', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), upload.single('paymentScreenshot'), addedDocsC.addPayment);
-router.post  ('/students',     protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.create);
-router.put   ('/students/:id', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.any(), studentC.update);
+router.post  ('/students',     protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), upload.array('submissionFiles', 10), studentC.create);
+router.put   ('/students/:id', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), upload.any(), studentC.update);
 router.delete('/students/:id', protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), studentC.remove);
 
 // Application flow
-router.post('/students/:id/submit',            protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), upload.array('submissionFiles', 10), studentC.submit);
+router.post('/students/:id/submit',            protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator','AdmissionMarker'), upload.array('submissionFiles', 10), studentC.submit);
 router.post('/students/:id/approve',           protect, requireRole('Admin','Counselor'), studentC.counselorApprove);
 router.post('/students/:id/reject',            protect, requireRole('Admin','Counselor','Accountant'), studentC.reject);
 router.post('/students/:id/request-changes',   protect, requireRole('Admin','Counselor'), studentC.requestChanges);
@@ -134,8 +134,8 @@ router.get   ('/document-payment-followups',                    protect, require
 router.post  ('/documents/:id/payment-followup',                protect, requireRole('Admin','PaymentCoordinator'), docC.documentPaymentFollowup);
 router.get   ('/payments/:studentId',                          protect, payC.get);
 router.post  ('/payments-bulk',                                protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), payC.bulkGet);
-router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Center','PaymentCoordinator'), payC.upsertFee);
-router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.addTransaction);
+router.put   ('/payments/:studentId',                          protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), payC.upsertFee);
+router.post  ('/payments/:studentId/transactions',             protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator','AdmissionMarker'), upload.single('paymentScreenshot'), payC.addTransaction);
 router.patch ('/payments/:studentId/transactions/:txId',       protect, requireRole('Admin','Counselor','ViewerCounselor','Center','Accountant','PaymentCoordinator'), upload.single('paymentScreenshot'), payC.updateTransaction);
 router.patch ('/payments/:studentId/transactions/:txId/counsel-verify',  protect, requireRole('Admin','Counselor'), payC.counselorForwardFeePayment);
 router.patch ('/payments/:studentId/transactions/:txId/counsel-reject',  protect, requireRole('Admin','Counselor'), payC.counselorRejectFeePayment);

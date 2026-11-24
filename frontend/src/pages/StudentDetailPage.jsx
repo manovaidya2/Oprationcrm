@@ -487,11 +487,13 @@ export default function StudentDetailPage() {
 
   const isCenter = user?.role === 'Center';
   const isViewerCounselor = user?.role === 'ViewerCounselor';
-  const canEdit = !isViewerCounselor && (!student.coreLocked || user?.role === 'Admin');
+  // Admission Marker only views students here; it adds admissions from a centre's panel
+  const isReadOnly = isViewerCounselor || user?.role === 'AdmissionMarker';
+  const canEdit = !isReadOnly && (!student.coreLocked || user?.role === 'Admin');
   const isCounselor = user?.role === 'Counselor';
   const isAdmin = user?.role === 'Admin';
   const canManageDocs = isCounselor || isAdmin;
-  const canManageFees = !isViewerCounselor && ['Admin', 'Counselor', 'Center', 'PaymentCoordinator'].includes(user?.role);
+  const canManageFees = !isReadOnly && ['Admin', 'Counselor', 'Center', 'PaymentCoordinator'].includes(user?.role);
   const st = STATUS_COLORS[student.applicationStatus] || 'bg-gray-100 text-gray-700';
 
   const allPayments = [];

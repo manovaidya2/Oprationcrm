@@ -27,6 +27,7 @@ const CentreBillingPage    = lazy(() => import('@/pages/CentreBillingPage'));
 const AccountLedgerPage    = lazy(() => import('@/pages/AccountLedgerPage'));
 const InvoicePage          = lazy(() => import('@/pages/InvoicePage'));
 const PaymentDeskPage       = lazy(() => import('@/pages/PaymentDeskPage'));
+const AdmissionMarkerPage   = lazy(() => import('@/pages/AdmissionMarkerPage'));
 const NotFoundPage        = lazy(() => import('@/pages/NotFoundPage'));
 
 const Spin = () => (
@@ -47,6 +48,7 @@ const ROLE_HOME = {
   Dispatch:   '/dispatch',
   PaymentCoordinator: '/payment-coordinator',
   Payment:    '/payment-desk',
+  AdmissionMarker: '/admissions',
 };
 
 // Routes each role can access
@@ -57,6 +59,8 @@ const ROLE_ALLOWED = {
   Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
   Payment:    ['/payment-desk', '/chat'],
+  // Adds admissions inside a centre's panel (/center); students and centres are view-only
+  AdmissionMarker: ['/admissions', '/center', '/students', '/students/', '/centers', '/chat'],
   Counselor:  ['/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
   ViewerCounselor: ['/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
 };
@@ -113,6 +117,7 @@ export default function App() {
           <Route path="invoice"                  element={<W><InvoicePage /></W>} />
           <Route path="invoice/:centerId"        element={<W><InvoicePage /></W>} />
           <Route path="payment-desk"        element={<W><PaymentDeskPage /></W>} />
+          <Route path="admissions"          element={<W><AdmissionMarkerPage /></W>} />
           <Route path="help"               element={<W><ChatPage /></W>} />
           <Route path="rejected-payments"   element={<W><RejectedPaymentsPage /></W>} />
           <Route path="activity"            element={<W><ActivityLogPage /></W>} />

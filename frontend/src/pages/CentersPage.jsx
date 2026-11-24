@@ -809,8 +809,9 @@ function CenterCard({ center, isAdmin, isViewer = false, canViewerManage = false
 export default function CentersPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'Admin';
-  const isViewer = user?.role === 'ViewerCounselor';
-  const canViewerManage = isViewer;
+  // Admission Marker sees centres read-only (no assign / edit / login / university / payment-account actions)
+  const isViewer = ['ViewerCounselor', 'AdmissionMarker'].includes(user?.role);
+  const canViewerManage = user?.role === 'ViewerCounselor';
   const canCreateCenters = ['Admin', 'Counselor', 'ViewerCounselor'].includes(user?.role);
 
   const [centers,    setCenters]    = useState([]);

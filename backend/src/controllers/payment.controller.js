@@ -41,7 +41,7 @@ function wantsCenterFlow(req) {
 }
 
 async function canActForStudentCenter(req, student) {
-  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
+  if (['PaymentCoordinator', 'AdmissionMarker'].includes(req.user.role) && wantsCenterFlow(req)) return true;
   if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(centerId => String(centerId) === String(student.center));
@@ -155,6 +155,12 @@ exports.upsertFee = asyncHandler(async (req, res) => {
   const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
   if (req.user.role === 'ViewerCounselor' && !userActingAsCenter) {
     const e = new Error('Viewer counselors can update fees only from center view'); e.status = 403; throw e;
+  }
+  if (req.user.role === 'AdmissionMarker') {
+    if (!userActingAsCenter) { const e = new Error('Admission Marker can set fees only from a centre panel'); e.status = 403; throw e; }
+    if (!['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
+      const e = new Error('Admission Marker can set fees only on Draft or Changes Requested admissions'); e.status = 403; throw e;
+    }
   }
 
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
@@ -631,6 +637,14 @@ exports.addTransaction = asyncHandler(async (req, res) => {
   const centerOriginated = req.user.role === 'Center' || userActingAsCenter;
   if (req.user.role === 'ViewerCounselor' && !userActingAsCenter) {
     const e = new Error('Viewer counselors can add payments only from center view'); e.status = 403; throw e;
+  }
+  // Admission Marker: course-fee payments, from a centre panel, while the admission is still being made
+  if (req.user.role === 'AdmissionMarker') {
+    if (!userActingAsCenter) { const e = new Error('Admission Marker can add payments only from a centre panel'); e.status = 403; throw e; }
+    if ((type || 'Fee') !== 'Fee') { const e = new Error('Admission Marker can add only course fee payments'); e.status = 403; throw e; }
+    if (!['Draft', 'Changes_Requested'].includes(student.applicationStatus)) {
+      const e = new Error('Admission Marker can add payments only to Draft or Changes Requested admissions'); e.status = 403; throw e;
+    }
   }
   if (req.user.role === 'Center' && String(student.center) !== String(req.user.centerId)) {
     const e = new Error('Forbidden'); e.status = 403; throw e;

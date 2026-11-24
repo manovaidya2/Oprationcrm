@@ -117,7 +117,7 @@ function wantsCenterFlow(req) {
 
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
-  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
+  if (['PaymentCoordinator', 'AdmissionMarker'].includes(req.user.role) && wantsCenterFlow(req)) return true;
   if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
@@ -137,6 +137,16 @@ async function mainCounselorOf(centerId, excludeId) {
 
 async function centreHeldByAdmin(centerId) {
   return Boolean(await Center.exists({ _id: centerId, heldByAdmin: true }));
+}
+
+// Admission Marker works only from inside a centre's panel, and only on admissions not yet with the counselor
+const ADMISSION_MARKER_EDITABLE = ['Draft', 'Changes_Requested'];
+function assertAdmissionMarker(req, centerOriginated, student) {
+  if (req.user.role !== 'AdmissionMarker') return;
+  if (!centerOriginated) { const e = new Error('Admission Marker can work only from a centre panel'); e.status = 403; throw e; }
+  if (student && !ADMISSION_MARKER_EDITABLE.includes(student.applicationStatus)) {
+    const e = new Error('Admission Marker can change only Draft or Changes Requested admissions'); e.status = 403; throw e;
+  }
 }
 
 async function assertStudentAccess(req, student) {
@@ -333,7 +343,12 @@ exports.create = asyncHandler(async (req, res) => {
     if (!allowed) { const e = new Error('You can add students only for your assigned centers'); e.status = 403; throw e; }
     body.counselor = (await mainCounselorOf(body.center, req.user.counselorId)) || req.user.counselorId;
     body.applicationStatus = 'Draft';
-  } else if (role === 'PaymentCoordinator') {
+  } else if (role === 'PaymentCoordinator' || role === 'AdmissionMarker') {
+    if (role === 'AdmissionMarker') {
+      assertAdmissionMarker(req, wantsCenterFlow(req));
+      if (body.center && !(await Center.exists({ _id: body.center }))) { const e = new Error('Center not found'); e.status = 404; throw e; }
+      delete body.counselor;   // always filed under the centre's main counselor
+    }
     if (!body.center) { const e = new Error('Center required'); e.status = 400; throw e; }
     if (!body.counselor) {
       const main = await mainCounselorOf(body.center);
@@ -570,6 +585,7 @@ exports.update = asyncHandler(async (req, res) => {
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
+  assertAdmissionMarker(req, centerOriginated, student);
 
   // Admin can edit all fields even if core is locked; others cannot touch locked fields
   if (student.coreLocked && req.user.role !== 'Admin') {
@@ -784,6 +800,7 @@ exports.submit = asyncHandler(async (req, res) => {
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
   }
+  assertAdmissionMarker(req, centerOriginated);
   if (!['Draft','Changes_Requested'].includes(s.applicationStatus)) {
     const e = new Error('Application can only be submitted from Draft or Changes_Requested state'); e.status = 400; throw e;
   }

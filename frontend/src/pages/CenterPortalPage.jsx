@@ -25,6 +25,9 @@ import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const MODES = ['UPI', 'Bank Transfer'];
+// Roles that can open a centre's panel and work as that centre ("switch to centre").
+// AdmissionMarker may only add admissions there: student, fee, payment and submit.
+const CENTRE_SWITCH_ROLES = ['Counselor', 'ViewerCounselor', 'PaymentCoordinator', 'AdmissionMarker'];
 
 const blankInstallment = (n = 1) => ({ installmentNumber: n, paymentDate: '', amount: '', reasonOrRequirement: '' });
 
@@ -411,7 +414,7 @@ const SBadge = ({status,map}) => {
 // ── Cancelled Application Banner with Settlement Request ──────
 function CancelledBanner({ student, onSettlementRequested }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
+  const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
   const [requesting, setRequesting] = useState(false);
   const [note,       setNote]       = useState('');
   const [noteOpen,   setNoteOpen]   = useState(false);
@@ -511,7 +514,7 @@ function CancelledBanner({ student, onSettlementRequested }) {
                 </button>
               </div>
             </div>
-          ) : (
+          ) : user?.role === 'AdmissionMarker' ? null : (
             <button
               onClick={() => setNoteOpen(true)}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors"
@@ -991,9 +994,10 @@ function AddStudentWizard({ onClose, onSaved, defCounselor, centerId, actingAsCe
 
 // ── FEE SECTION ──────────────────────────────────────────────
 function FeeSection({ studentId, appStatus, student }) {
-  
+
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
+  const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
+  const admissionOnly = user?.role === 'AdmissionMarker';   // can add payments, not edit/resend/delete them
   const isCancelled = appStatus === 'Cancelled';
   const studentForExpiry = student || {};
   const [data,setData]=useState(null); const [loading,setLoading]=useState(true);
@@ -1271,7 +1275,7 @@ function FeeSection({ studentId, appStatus, student }) {
                   {tx.verificationStatus==='rejected'&&<span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200 font-medium">✗ Rejected{tx.verificationNote?`: ${tx.verificationNote}`:''}</span>}
                 </div>
                 <div className="flex items-center gap-2 ml-3 flex-shrink-0">
-                  {isCancelled || tx.verificationStatus === 'verified' ? (
+                  {admissionOnly ? null : isCancelled || tx.verificationStatus === 'verified' ? (
                     <span className="text-slate-300" title={isCancelled ? 'Application cancelled' : 'Verified — cannot edit'}>🔒</span>
                   ) : (
                     <>
@@ -1354,7 +1358,7 @@ function FeeSection({ studentId, appStatus, student }) {
 // ── DOCS SECTION ─────────────────────────────────────────────
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
+  const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
@@ -1976,12 +1980,14 @@ function PaymentsSection({ studentId }) {
 // ── STUDENT DETAIL ───────────────────────────────────────────
 function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
   const { user, switchedCenter } = useAuth();
-  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
+  const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
+  const admissionOnly = user?.role === 'AdmissionMarker';   // admission, fee, payment and submit only
   const [s,setS]         = useState(student);
   // Marksheets / Other Documents the counsellor chose to show to this centre. Each tab exists only while it has something shown.
   const [shownDocs,setShownDocs] = useState({ Marksheet:[], Other:[] });
   useEffect(()=>{
     if (user?.role!=='Center' && !isCounselorSwitch) return;       // a counsellor switched into the centre sees exactly what the centre sees
+    if (user?.role==='AdmissionMarker') return;                     // marksheets / other documents are not part of admission work
     let off=false;
     Promise.all([studentsApi.addedDocs.list(student._id,'Marksheet',true),studentsApi.addedDocs.list(student._id,'Other',true)])
       .then(([m,o])=>{ if(!off) setShownDocs({ Marksheet:m, Other:o }); }).catch(()=>{});
@@ -2161,7 +2167,7 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
         <div className="flex gap-2">
           {canEdit&&<Button variant="outline" size="sm" onClick={()=>startEdit('details')} className="border-slate-200 text-slate-600 h-8 text-xs"><Edit2 className="h-3.5 w-3.5 mr-1.5"/>Edit</Button>}
           {canSubmit&&<Button size="sm" onClick={()=>setSubmitOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs"><Send className="h-3.5 w-3.5 mr-1.5"/>Submit</Button>}
-          {s.applicationStatus === 'Enrolled' && s.enrollmentNumber && !s.enrollmentNumberChecked && (
+          {!admissionOnly && s.applicationStatus === 'Enrolled' && s.enrollmentNumber && !s.enrollmentNumberChecked && (
             <Button size="sm" onClick={checkEnrollmentNumber} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 h-8 text-xs">
               {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin"/> : <CheckCircle2 className="h-3.5 w-3.5 mr-1.5"/>}
               Enrollment Checked
@@ -2342,7 +2348,9 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
               </div>
             </div>
           )}
-          <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'} isCancelled={isCancelled}/>
+          {admissionOnly
+            ? <p className="text-xs text-slate-400 italic">Document requests are handled by the centre and counselor.</p>
+            : <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'} isCancelled={isCancelled}/>}
         </TabsContent>
         <TabsContent value="payments" className="mt-4"><PaymentsSection studentId={s._id}/></TabsContent>
       </Tabs>
@@ -2571,7 +2579,7 @@ function isPaymentPending(student) {
 export default function CenterPortalPage() {
   const {user, switchedCenter, switchBackToCounselor}=useAuth();
   const navigate = useNavigate();
-  const isCounselorSwitch = !!(['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && switchedCenter?._id);
+  const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
   const centerId = isCounselorSwitch ? switchedCenter._id : user?.centerId;
   const [students,setStudents]=useState([]); const [centerInfo,setCenterInfo]=useState(null);
   const [defCounselor,setDef]=useState(null); const [loading,setLoading]=useState(true);
@@ -2586,7 +2594,7 @@ export default function CenterPortalPage() {
 
   function returnToCounselor() {
     switchBackToCounselor?.();
-    navigate(user?.role === 'PaymentCoordinator' ? '/payment-coordinator' : '/counselor');
+    navigate(user?.role === 'PaymentCoordinator' ? '/payment-coordinator' : user?.role === 'AdmissionMarker' ? '/admissions' : '/counselor');
   }
 
   async function handleChangePassword() {
@@ -2637,12 +2645,12 @@ export default function CenterPortalPage() {
     }
   }
 
-  if (['Counselor','ViewerCounselor','PaymentCoordinator'].includes(user?.role) && !centerId) {
+  if (CENTRE_SWITCH_ROLES.includes(user?.role) && !centerId) {
     return (
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-800">
         <h2 className="text-lg font-semibold">No center selected</h2>
         <p className="mt-1 text-sm">Please switch from your dashboard to open a center dashboard.</p>
-        <Button className="mt-4" onClick={() => navigate(user?.role === 'PaymentCoordinator' ? '/payment-coordinator' : '/counselor')}>Back to Dashboard</Button>
+        <Button className="mt-4" onClick={returnToCounselor}>Back to Dashboard</Button>
       </div>
     );
   }
@@ -2813,7 +2821,7 @@ export default function CenterPortalPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {s.applicationStatus === 'Draft' && (
+                    {s.applicationStatus === 'Draft' && user?.role !== 'AdmissionMarker' && (
                       <button
                         type="button"
                         onClick={(e) => {
