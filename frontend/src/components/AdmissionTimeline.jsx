@@ -136,7 +136,7 @@ export function AdmissionTimeline({ rows = [], loading = false, showCentre = fal
           {TIMELINE_STAGES.map(stage => {
             const list = rows.filter(r => r.stage === stage.key);
             return (
-              <div key={stage.key} className={`flex min-w-0 flex-col rounded-lg border border-t-[3px] border-slate-200 bg-slate-50/70 ${stage.top}`}>
+              <div key={stage.key} className={`flex min-w-0 flex-col rounded-lg border border-t-[3px] ${stage.col} ${stage.top}`}>
                 <div className="flex items-start justify-between gap-2 px-3 pb-2 pt-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
@@ -148,7 +148,7 @@ export function AdmissionTimeline({ rows = [], loading = false, showCentre = fal
                 </div>
                 <div className="max-h-96 flex-1 space-y-2 overflow-y-auto px-3 pb-3">
                   {list.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-slate-200 py-6 text-xs text-slate-400">
+                    <div className={`flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed py-6 text-xs ${stage.empty}`}>
                       <CheckCircle2 className="h-4 w-4"/>All clear
                     </div>
                   ) : list.map(r => <TimelineCard key={r._id} row={r} stage={stage} showCentre={showCentre} onOpen={onOpen}/>)}
