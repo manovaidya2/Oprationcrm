@@ -20,7 +20,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
  *   already in flight, but a tab that has never been enabled never starts one.
  *
  * @param {(page:number, limit:number) => Promise<any>} fetchFn
- *        Must return { <arrayKey>: [...], total, pages } (array key auto-detected).
+ *        Must return { <arrayKey>: [...], total, pages, summary? } (array key auto-detected; summary comes back as meta).
  * @param {object} opts
  * @param {number}  [opts.limit=20]
  * @param {boolean} [opts.enabled=true]
@@ -36,6 +36,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
   const [items, setItems]       = useState([]);
   const [total, setTotal]       = useState(0);
   const [pages, setPages]       = useState(1);
+  const [meta, setMeta]         = useState(null);   // anything else the endpoint returns, e.g. a summary
   const [loading, setLoading]   = useState(true);
   const [bgLoading, setBgLoading] = useState(false);
 
@@ -54,7 +55,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
 
   const fetchOnePage = useCallback(async (targetPage) => {
     const res = await fetchFn(targetPage, limit);
-    return { items: extractArray(res), total: res?.total ?? 0, pages: res?.pages ?? 1 };
+    return { items: extractArray(res), total: res?.total ?? 0, pages: res?.pages ?? 1, meta: res?.summary ?? null };
   }, [fetchFn, limit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filters changed → old cached pages belong to a different result set
@@ -69,7 +70,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
     if (!enabled) return;
     const cached = cacheRef.current.get(targetPage);
     if (cached && !force) {
-      setItems(cached.items); setTotal(cached.total); setPages(cached.pages);
+      setItems(cached.items); setTotal(cached.total); setPages(cached.pages); setMeta(cached.meta);
       setLoading(false);
       return;
     }
@@ -77,7 +78,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
     try {
       const result = await fetchOnePage(targetPage);
       cacheRef.current.set(targetPage, result);
-      setItems(result.items); setTotal(result.total); setPages(result.pages);
+      setItems(result.items); setTotal(result.total); setPages(result.pages); setMeta(result.meta);
     } catch {
       setItems([]);
     } finally {
@@ -97,7 +98,7 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
         if (myGen !== genRef.current) break;
         cacheRef.current.set(p, result);
         if (pageRef.current === p) {                  // user is currently sitting on this page
-          setItems(result.items); setTotal(result.total); setPages(result.pages);
+          setItems(result.items); setTotal(result.total); setPages(result.pages); setMeta(result.meta);
           setLoading(false);
         }
       } catch { /* skip this page, keep going */ }
@@ -122,5 +123,5 @@ export function usePagedFetch(fetchFn, { limit = 20, enabled = true, prefetch = 
 
   const reload = useCallback(() => loadPage(page, { force: true }), [loadPage, page]);
 
-  return { items, setItems, total, page, setPage, pages, loading, bgLoading, reload };
+  return { items, setItems, total, page, setPage, pages, meta, loading, bgLoading, reload };
 }

@@ -1437,10 +1437,29 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
     setAddOpen(true);
   }
 
+  // Other documents are requested only together with their payment (marksheets can be paid later)
+  const paymentRequired = tab === 'Other';
+  const hasPayAccounts = Object.values(accMap).some(a => a.isActive !== false);
+  function paymentProblem(){
+    const charge = Number(df.chargeFee) || 0, amount = Number(df.payAmount) || 0;
+    if(!(charge > 0)) return 'Enter the document charge';
+    if(!(amount > 0)) return 'Enter the amount paid';
+    if(amount > charge) return 'Amount paid is more than the charge';
+    if(!dfPay.mode) return 'Select payment mode';
+    if(dfPay.mode==='UPI' && !dfPay.upiId.trim()) return 'UPI ID is required';
+    if(dfPay.mode==='Bank Transfer' && !dfPay.bankName.trim()) return 'Bank name is required';
+    if(dfPay.mode==='Bank Transfer' && !dfPay.accountHolder.trim()) return 'Account holder name is required';
+    if(!dfPay.utrRef.trim()) return 'UTR number is required';
+    if(hasPayAccounts && !dfPay.paidToAccount) return 'Select the account the payment was made to';
+    if(!(dfPay.paymentScreenshot instanceof File)) return 'Payment screenshot is required';
+    return '';
+  }
+
   async function addDoc(){
     const name = requestNameOf(df);
     if(!name) return toast.error(df.pick === OTHER_NAME ? `Type the ${activeTab.noun} name` : `Choose a ${activeTab.noun}`);
     if(Number(df.chargeFee) < 0) return toast.error('Charge cannot be negative');
+    if(paymentRequired){ const problem = paymentProblem(); if(problem) return toast.error(problem); }
     setSaving(true);
     try{
       const fd=new FormData();
@@ -1461,6 +1480,8 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         fd.append('paymentDate',dfPay.paidAt||'');
         fd.append('paymentPaidToAccount',dfPay.paidToAccount||'');
         fd.append('paymentPaidToAccountLabel',dfPay.paidToAccountLabel||'');
+        fd.append('paymentNote',dfPay.note||'');
+        if(dfPay.paymentScreenshot instanceof File) fd.append('paymentScreenshot',dfPay.paymentScreenshot);
       }
       if(docFile) fd.append('file',docFile);
       await docsApi.create(fd);
@@ -1811,10 +1832,29 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                 </Select>
               </div>
               <div>
-                <Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label>
-                <Input type="number" min="0" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} placeholder="0" className="mt-1 border-slate-200 h-10"/>
+                <Label className="text-xs font-semibold text-slate-600">Charge (₹){paymentRequired && ' *'}</Label>
+                {/* the amount paid follows the charge until it is changed by hand */}
+                <Input type="number" min="0" value={df.chargeFee} placeholder="0" className="mt-1 border-slate-200 h-10"
+                  onChange={e=>{ const v=e.target.value; setDf(p=>({...p,chargeFee:v,payAmount:(p.payAmount===''||p.payAmount===p.chargeFee)?v:p.payAmount})); }}/>
               </div>
             </div>
+            {paymentRequired && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 space-y-3">
+                <div className="flex items-start gap-2">
+                  <CreditCard className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600"/>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Payment *</p>
+                    <p className="text-xs text-slate-500">Other documents are requested together with their payment. Fill the payment details and attach the screenshot.</p>
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Amount Paid (₹) *</Label>
+                  <Input type="number" min="0" value={df.payAmount} onChange={e=>setDf(p=>({...p,payAmount:e.target.value}))} placeholder="0" className="mt-1 h-10 border-slate-200 bg-white"/>
+                  {Number(df.chargeFee) > 0 && Number(df.payAmount) > Number(df.chargeFee) && <p className="mt-1 text-xs text-red-600">More than the charge of {fmt(df.chargeFee)}</p>}
+                </div>
+                <PaymentFields form={dfPay} setForm={setDfPay} showAmount={false} showDate={true}/>
+              </div>
+            )}
             {/* <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={df.note} onChange={e=>setDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div> */}
             {/* <div><Label className="text-xs font-semibold text-slate-600">Upload File (optional)</Label><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setDocFile(e.target.files[0])} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-600 file:font-medium"/></div> */}
             {/* <div className="border-t border-slate-200 pt-3">
@@ -1827,7 +1867,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
               </div>
             </div> */}
           </div>
-          <DialogFooter><Button variant="outline" onClick={()=>setAddOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={addDoc} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Submit Request</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={()=>setAddOpen(false)} className="border-slate-200">Cancel</Button><Button onClick={addDoc} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700">{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}{paymentRequired ? 'Submit Request with Payment' : 'Submit Request'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

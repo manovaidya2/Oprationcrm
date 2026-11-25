@@ -163,11 +163,12 @@ router.patch ('/document-inventory/docs/:id/delivered',  protect, requireRole('A
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);
-router.post  ('/documents',                       protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), upload.single('file'), docC.create);
+router.post  ('/documents',                       protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), upload.fields([{ name: 'file', maxCount: 1 }, { name: 'paymentScreenshot', maxCount: 1 }]), docC.create);
 router.patch ('/documents/:id',                   protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.single('file'), docC.update);
 router.delete('/documents/:id',                   protect, requireRole('Admin','Counselor'), docC.remove);
 
 // Document flow
+router.patch('/documents/:id/urgent',             protect, requireRole('Admin','Counselor'), docC.setUrgent);
 router.patch('/documents/:id/forward',            protect, requireRole('Admin','Counselor'), docC.forward);
 router.patch('/documents/:id/request-changes',    protect, requireRole('Admin','Counselor','Accountant'), docC.requestChanges);
 router.patch('/documents/:id/accountant-action',  protect, requireRole('Admin','Accountant'), docC.accountantAction);

@@ -19,6 +19,9 @@ import { pageCache } from '@/lib/pageCache';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 import { CenterCounselorsPanel } from '@/components/CenterCounselorsPanel';
+import { requestSection } from '@/lib/documentOptions';
+import { docPaid, paymentForwarded } from '@/lib/docRequests';
+import { DocRequestCard } from '@/components/DocRequestCard';
 
 const fmt = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -205,7 +208,8 @@ function StudentModal({ student, onClose }) {
   const s = fullStudent;
 
   if (!student) return null;
-  const st = STATUS_COLORS[student.applicationStatus] || 'bg-slate-100 text-slate-600';
+  // header reads the full record once loaded (a document card passes only the student's name and number)
+  const st = STATUS_COLORS[s.applicationStatus] || 'bg-slate-100 text-slate-600';
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -213,13 +217,14 @@ function StudentModal({ student, onClose }) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2.5 flex-wrap">
             <div className="h-8 w-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-              <span className="text-sm font-bold text-indigo-700">{student.name?.charAt(0)?.toUpperCase()}</span>
+              <span className="text-sm font-bold text-indigo-700">{s.name?.charAt(0)?.toUpperCase()}</span>
             </div>
-            <span className="font-bold text-slate-800">{student.name}</span>
-            <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${st}`}>{student.applicationStatus?.replace(/_/g,' ')}</span>
-            {student.enrollmentNumber && (
-              <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">{student.enrollmentNumber}</span>
+            <span className="font-bold text-slate-800">{s.name}</span>
+            {s.applicationStatus && <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${st}`}>{s.applicationStatus.replace(/_/g,' ')}</span>}
+            {s.enrollmentNumber && (
+              <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">{s.enrollmentNumber}</span>
             )}
+            {s.center?.name && <span className="text-xs font-medium text-slate-500">{s.center.name}</span>}
           </DialogTitle>
         </DialogHeader>
 
@@ -530,7 +535,7 @@ function DocModal({ doc, onClose, onForward, onForwardToCenter, onForwardPayment
               <Send className="h-4 w-4 mr-1.5"/>Forward to Center
             </Button>
           )}
-          {!readOnly && doc.status==='Payment_Submitted'&&(
+          {!readOnly && doc.status==='Payment_Submitted' && !paymentForwarded(doc) &&(
             <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={()=>{onForwardPayment(doc);onClose();}}>
               <Send className="h-4 w-4 mr-1.5"/>Forward to Accountant
             </Button>
@@ -688,6 +693,12 @@ function DocCard({ d, accent, badge, badgeColor, onClick, children, paySummary, 
   );
 }
 
+// ── Document requests (Marksheet Requests / Other Doc Requests tabs) ──
+// Waiting for the counselor: a new request (with or without its payment), or a payment the centre made
+// after the scan that the counselor has not forwarded yet.
+const needsCounselor = d => d.status === 'Requested' || (d.status === 'Payment_Submitted' && !paymentForwarded(d));
+const docRequestKey = d => `doc:${d._id}:${d.status === 'Requested' ? 'request' : 'payment'}`;   // "remove from my list" key
+
 // ── Empty State ───────────────────────────────────────────────
 function SettlementRequestCard({ student: s, saving, onForward, readOnly=false }) {
   const [noteOpen, setNoteOpen] = useState(false);
@@ -843,6 +854,8 @@ export default function CounselorPage() {
   const [docPayments, setDocPayments] = useState({});
   const [studentFeeMap, setStudentFeeMap] = useState({});
   const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [reqSearch, setReqSearch] = useState('');   // search in the Marksheet / Other Doc Requests tabs
+  const [urgentOnly, setUrgentOnly] = useState(false);   // Other Doc Requests: show only the urgent ones
   const [centerSwitchOpen, setCenterSwitchOpen] = useState(false);
   const [centerSwitchSearch, setCenterSwitchSearch] = useState('');
 
@@ -995,17 +1008,32 @@ export default function CounselorPage() {
     catch(e) { toast.error(e.message); }
   }
 
-  // A doc that still sits in "Requested" carries the payment inside the request itself —
-  // forwarding the request sends both. Once it's a standalone "Payment_Submitted" (post-scan
-  // payment) we use the dedicated payment-forward endpoint.
+  // One approval for a document request and its payment: a doc still in "Requested" carries its payment
+  // inside the request, so forwarding the request sends both. A standalone "Payment_Submitted" (the centre
+  // paid after the scan) uses the payment-forward endpoint.
+  const approveDocCall = d => (d.status === 'Requested' ? docsApi.forward(d._id) : docsApi.forwardPayment(d._id));
   async function forwardPaymentToAccountant(d) {
     if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
+    setSaving(true);
     try {
-      await (d.status === 'Requested' ? docsApi.forward(d._id) : docsApi.forwardPayment(d._id));
-      toast.success('Forwarded to accountant');
+      await approveDocCall(d);
+      toast.success(`${d.name} approved — sent to the accountant`);
+      setSelectedDocIds(prev => prev.filter(id => id !== String(d._id)));
       load();
     }
     catch(e) { toast.error(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function markDocUrgent(d, urgent) {
+    if (isViewerCounselor) return toast.error('Viewer counselor has read-only access');
+    setSaving(true);
+    try {
+      await docsApi.setUrgent(d._id, urgent);
+      toast.success(urgent ? `${d.name} marked urgent` : `${d.name} is a normal request again`);
+      load();
+    } catch (e) { toast.error(e.message); }
+    finally { setSaving(false); }
   }
 
   async function forwardFeePaymentToAccountant(studentId, txId) {
@@ -1047,13 +1075,12 @@ export default function CounselorPage() {
 
   const pending           = allStudents.filter(s => s.applicationStatus === 'Submitted' && !isDismissed(`student:${s._id}:review`));
   const acctRejected      = allStudents.filter(s => s.applicationStatus === 'Accountant_Rejected' && !isDismissed(`student:${s._id}:acctreject`));
-  const newDocs           = docs.filter(d => d.status === 'Requested' && !isDismissed(`doc:${d._id}:request`));
+  // Document requests and their payments wait for the counselor in one place, split by tab
+  const docRequestQueue   = docs.filter(d => needsCounselor(d) && !isDismissed(docRequestKey(d)));
+  const marksheetRequests = docRequestQueue.filter(d => requestSection(d) === 'Marksheet');
+  const otherDocRequests  = docRequestQueue.filter(d => requestSection(d) !== 'Marksheet');
   const fromDisp          = docs.filter(d => d.status === 'Counselor_Received' && !isDismissed(`doc:${d._id}:dispatch`));
   const deliveryPending   = docs.filter(d => d.status === 'Dispatched' && !isDismissed(`doc:${d._id}:delivery`));
-  const paymentPending    = docs.filter(d => (
-    d.status === 'Payment_Submitted' ||
-    (d.status === 'Requested' && (d.payments?.length > 0))
-  ) && !isDismissed(`doc:${d._id}:payment`));
   const visibleSettlementQueue = settlementQueue.filter(s => !isDismissed(`student:${s._id}:settlement`));
   const visibleFeePayments = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
   const switchCenters = centers.filter(c => {
@@ -1090,6 +1117,91 @@ export default function CounselorPage() {
       )}
     </span>
   );
+
+  // Marksheet Requests / Other Doc Requests tab: each request card carries its payments; one approval
+  const reqQ = reqSearch.trim().toLowerCase();
+  const renderDocRequests = (isMarksheet, list) => {
+    const urgentCount = isMarksheet ? 0 : list.filter(d => d.urgent).length;
+    const onlyUrgent = !isMarksheet && urgentOnly;
+    const shown = list
+      .filter(d => !onlyUrgent || d.urgent)
+      .filter(d => !reqQ || [d.name, d.student?.name, d.student?.enrollmentNumber, d.center?.name]
+        .some(v => String(v || '').toLowerCase().includes(reqQ)))
+      .sort((a, b) => (isMarksheet ? 0 : Number(!!b.urgent) - Number(!!a.urgent)));   // urgent first, then newest (server order)
+    const newCount = list.filter(d => d.status === 'Requested').length;
+    const received = list.reduce((s, d) => s + docPaid(d), 0);
+    const allSelected = shown.length > 0 && shown.every(d => selectedDocIds.includes(String(d._id)));
+    const anySelected = shown.some(d => selectedDocIds.includes(String(d._id)));
+    const noun = isMarksheet ? 'marksheet' : 'document';
+    return (
+      <>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{newCount} new request{newCount === 1 ? '' : 's'}</span>
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">{list.length - newCount} payment{list.length - newCount === 1 ? '' : 's'} after scan</span>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700">{fmt(received)} received</span>
+            {!isMarksheet && (
+              <button type="button" onClick={() => setUrgentOnly(v => !v)} aria-pressed={urgentOnly}
+                title={urgentOnly ? 'Show all requests' : 'Show only urgent requests'}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-semibold transition-colors ${urgentOnly ? 'border-red-600 bg-red-600 text-white' : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'}`}>
+                <AlertTriangle className="h-3 w-3"/>{urgentCount} urgent{urgentOnly ? ' · showing only these' : ''}
+              </button>
+            )}
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"/>
+            <Input value={reqSearch} onChange={e => setReqSearch(e.target.value)} placeholder="Search student, centre, document" className="h-8 border-slate-200 pl-8 text-xs"/>
+          </div>
+        </div>
+        {!isViewerCounselor && shown.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={allSelected} className="h-4 w-4 accent-indigo-600"
+                onChange={e => setSelectedDocIds(e.target.checked ? shown.map(d => String(d._id)) : [])}/>
+              Select all ({shown.length})
+            </label>
+            <Button size="sm" className="h-8 bg-indigo-600 text-xs hover:bg-indigo-700" disabled={saving || !anySelected}
+              onClick={() => batchForwardDocs(shown, approveDocCall, 'approved and sent to the accountant')}>
+              {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin"/> : <CheckCircle2 className="mr-1 h-3.5 w-3.5"/>}Approve selected
+            </Button>
+          </div>
+        )}
+        {shown.length === 0
+          ? <EmptyState icon={isMarksheet ? GraduationCap : FileText} message={reqQ ? 'No request matches the search' : onlyUrgent ? 'No urgent requests' : `No ${noun} requests waiting for you`}/>
+          : shown.map(d => (
+            <DocRequestCard key={d._id} d={d} accMap={payAccounts} selectable={!isViewerCounselor}
+              selected={selectedDocIds.includes(String(d._id))}
+              onToggle={() => toggleDocSelection(d._id)}
+              onOpen={() => setDocModal(d)}
+              onOpenStudent={() => d.student?._id && setStudentModal(allStudents.find(x => String(x._id) === String(d.student._id)) || d.student)}>
+              {!isViewerCounselor && (
+                <>
+                  <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove from my list (the request itself is not deleted)" onClick={() => dismiss(docRequestKey(d))}>
+                    <Trash2 className="h-4 w-4"/>
+                  </Button>
+                  {!isMarksheet && (d.urgent
+                    ? <Button size="sm" variant="outline" className="h-8 border-slate-200 text-xs text-slate-600" disabled={saving} onClick={() => markDocUrgent(d, false)} title="Back to a normal request">
+                        Mark normal
+                      </Button>
+                    : <Button size="sm" variant="outline" className="h-8 border-red-300 text-xs text-red-600 hover:bg-red-50" disabled={saving} onClick={() => markDocUrgent(d, true)} title="Mark this request urgent">
+                        <AlertTriangle className="mr-1 h-3.5 w-3.5"/>Mark urgent
+                      </Button>)}
+                  {d.status === 'Requested' && (
+                    <Button size="sm" variant="outline" className="h-8 border-amber-300 text-xs text-amber-700 hover:bg-amber-50" onClick={() => { setDocChangeDialog(d); setDocChangeNote(''); }}>
+                      <RotateCcw className="mr-1 h-3.5 w-3.5"/>Send back
+                    </Button>
+                  )}
+                  <Button size="sm" className="h-8 bg-indigo-600 text-xs hover:bg-indigo-700" disabled={saving} onClick={() => forwardPaymentToAccountant(d)}
+                    title={d.status === 'Requested' ? 'Sends the request (and its payment) to the accountant' : 'Sends this payment to the accountant for verification'}>
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5"/>Approve &amp; forward
+                  </Button>
+                </>
+              )}
+            </DocRequestCard>
+          ))}
+      </>
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -1139,9 +1251,9 @@ export default function CounselorPage() {
           {[
             { val:'review',    label:'Review',           count: pending.length,          dot:'bg-blue-500' },
             { val:'acctreject',label:'Acct Rejected',     count: acctRejected.length,     dot:'bg-red-500'  },
-            { val:'docs',      label:'Doc Requests',      count: newDocs.length,          dot:'bg-indigo-500'},
+            { val:'marksheetreq', label:'Marksheet Requests', count: marksheetRequests.length, dot:'bg-violet-500'},
+            { val:'docreq',    label:'Other Doc Requests', count: otherDocRequests.length, dot: otherDocRequests.some(d => d.urgent) ? 'bg-red-500' : 'bg-indigo-500'},
             { val:'feepay',    label:'Fee Payments',      count: visibleFeePayments.length,      dot:'bg-orange-500'},
-            { val:'payment',   label:'Doc Payments',      count: paymentPending.length,   dot:'bg-emerald-500'},
             { val:'dispatch',  label:'From Dispatch',     count: fromDisp.length,         dot:'bg-violet-500'},
             { val:'delipend',  label:'Delivery Pending',  count: deliveryPending.length,  dot:'bg-rose-500'},
             { val:'settlement',label:'Settlement',        count: visibleSettlementQueue.length,  dot:'bg-amber-500'},
@@ -1218,57 +1330,16 @@ export default function CounselorPage() {
           ))}
         </TabsContent>
 
-        {/* ── Doc Requests Tab ───────────────────────────── */}
-        <TabsContent value="docs" className="space-y-2 mt-4">
-          <TabHint>New document requests from centers — forward to accountant for fee approval.</TabHint>
-          {!isViewerCounselor && newDocs.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={newDocs.length > 0 && newDocs.every(d => selectedDocIds.includes(String(d._id)))}
-                  onChange={e => setSelectedDocIds(e.target.checked ? newDocs.map(d => String(d._id)) : [])}
-                  className="h-4 w-4 accent-indigo-600"
-                />
-                Select all document requests
-              </label>
-              <Button size="sm" onClick={() => batchForwardDocs(newDocs, d => docsApi.forward(d._id), 'forwarded to accountant')} disabled={saving || !newDocs.some(d => selectedDocIds.includes(String(d._id)))}>
-                <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
-              </Button>
-            </div>
-          )}
-          {newDocs.length===0 ? <EmptyState message="No new document requests"/> :
-          newDocs.map(d=>(
-            <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
-              accent="border-indigo-200"
-              badge={d.status?.replace(/_/g,' ')}
-              badgeColor={DOC_COLORS[d.status]||'bg-slate-100 text-slate-600'}
-              onClick={()=>setDocModal(d)}>
-              {!isViewerCounselor && d.status==='Requested'&&(
-                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDocIds.includes(String(d._id))}
-                    onChange={() => toggleDocSelection(d._id)}
-                    className="h-4 w-4 accent-indigo-600"
-                    aria-label={`Select ${d.name}`}
-                  />
-                  <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-xs h-8"
-                    onClick={e=>{e.stopPropagation();forwardDoc(d);}}>
-                    <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
-                  </Button>
-                  <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50 text-xs h-8"
-                    onClick={e=>{e.stopPropagation(); setDocChangeDialog(d); setDocChangeNote('');}}>
-                    Changes
-                  </Button>
-                  <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
-                    onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:request`);}}>
-                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-                  </Button>
-                </div>
-              )}
-            </DocCard>
-          ))}
+        {/* ── Marksheet Requests Tab ─────────────────────── */}
+        <TabsContent value="marksheetreq" className="space-y-3 mt-4">
+          <TabHint>Marksheet requests from centres with their payments. Check the marksheet fee and the course fee, then approve — it goes to the accountant.</TabHint>
+          {renderDocRequests(true, marksheetRequests)}
+        </TabsContent>
+
+        {/* ── Other Doc Requests Tab ─────────────────────── */}
+        <TabsContent value="docreq" className="space-y-3 mt-4">
+          <TabHint>Degree, migration and other document requests from centres with their payments. Approve to send them to the accountant.</TabHint>
+          {renderDocRequests(false, otherDocRequests)}
         </TabsContent>
 
         {/* ── Fee Payments Tab ───────────────────────────── */}
@@ -1350,53 +1421,6 @@ export default function CounselorPage() {
               <CardRequestDate date={getPaymentSubmittedAt(tx)} label="Payment submitted" actor={tx.recordedBy} actorLabel="Added" updatedActor={tx.lastUpdatedBy}/>
               </div>
             </div>
-          ))}
-        </TabsContent>
-
-        {/* ── Doc Payments Tab ───────────────────────────── */}
-        <TabsContent value="payment" className="space-y-2 mt-4">
-          <TabHint>Center has submitted payment — review and forward to accountant for verification.</TabHint>
-          {!isViewerCounselor && paymentPending.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={paymentPending.length > 0 && paymentPending.every(d => selectedDocIds.includes(String(d._id)))}
-                  onChange={e => setSelectedDocIds(e.target.checked ? paymentPending.map(d => String(d._id)) : [])}
-                  className="h-4 w-4 accent-indigo-600"
-                />
-                Select all payment requests
-              </label>
-              <Button size="sm" onClick={() => batchForwardDocs(paymentPending, d => (d.status === 'Requested' ? docsApi.forward(d._id) : docsApi.forwardPayment(d._id)), 'payment requests forwarded to accountant')} disabled={saving || !paymentPending.some(d => selectedDocIds.includes(String(d._id)))}>
-                <Send className="h-3.5 w-3.5 mr-1"/>Forward Selected
-              </Button>
-            </div>
-          )}
-          {paymentPending.length===0 ? <EmptyState icon={IndianRupee} message="No payments pending review"/> :
-          paymentPending.map(d=>(
-            <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
-              accent="border-emerald-200"
-              badge={d.status === 'Requested' ? 'Request + Payment' : 'Payment Submitted'}
-              badgeColor="bg-emerald-50 text-emerald-700 border border-emerald-200"
-              onClick={()=>setDocModal(d)}>
-              {!isViewerCounselor && <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                <input
-                  type="checkbox"
-                  checked={selectedDocIds.includes(String(d._id))}
-                  onChange={() => toggleDocSelection(d._id)}
-                  className="h-4 w-4 accent-indigo-600"
-                  aria-label={`Select ${d.name}`}
-                />
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8"
-                  onClick={e=>{e.stopPropagation();forwardPaymentToAccountant(d);}}>
-                  <Send className="h-3.5 w-3.5 mr-1.5"/>Forward
-                </Button>
-                <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 text-xs h-8"
-                  onClick={e=>{e.stopPropagation(); dismiss(`doc:${d._id}:payment`);}}>
-                  <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-                </Button>
-              </div>}
-            </DocCard>
           ))}
         </TabsContent>
 

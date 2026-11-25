@@ -808,15 +808,22 @@ async function buildLedger(q) {
   const ids = students.map(s => s._id);
   const [payments, docs] = await Promise.all([
     Payment.find({ student: { $in: ids } }).select('student totalFee discount transactions').lean(),
-    StudentDocument.find({ student: { $in: ids }, origin: { $ne: 'Inventory' } }).select('student status').lean(),
+    StudentDocument.find({ student: { $in: ids }, origin: { $ne: 'Inventory' } }).select('student name status chargeFee payments.amount payments.verified createdAt').sort('createdAt').lean(),
   ]);
   const payBy = new Map(payments.map(p => [String(p.student), p]));
+  // Documents (requests and the ones added on the student page) are kept apart from the course fee:
+  // their charge, what is verified as paid, what is paid but not verified yet, and each document by name.
   const docBy = new Map();
   docs.forEach(d => {
-    const e = docBy.get(String(d.student)) || { total: 0, delivered: 0 };
+    const e = docBy.get(String(d.student)) || { total: 0, delivered: 0, charge: 0, paid: 0, pending: 0, items: [] };
+    const paid = r2((d.payments || []).filter(p => p.verified).reduce((a, p) => a + (p.amount || 0), 0));
+    const pending = r2((d.payments || []).filter(p => !p.verified).reduce((a, p) => a + (p.amount || 0), 0));
     e.total += 1; if (d.status === 'Delivered') e.delivered += 1;
+    e.charge = r2(e.charge + (d.chargeFee || 0)); e.paid = r2(e.paid + paid); e.pending = r2(e.pending + pending);
+    e.items.push({ name: d.name, status: d.status, charge: d.chargeFee || 0, paid });
     docBy.set(String(d.student), e);
   });
+  const NO_DOCS = { total: 0, delivered: 0, charge: 0, paid: 0, pending: 0, items: [] };
 
   const rows = students.map(s => {
     const p = payBy.get(String(s._id));
@@ -824,31 +831,36 @@ async function buildLedger(q) {
     const paid = r2((p?.transactions || [])
       .filter(t => (t.type || 'Fee') === 'Fee' && COUNTED.includes(t.verificationStatus || 'not_required'))
       .reduce((a, t) => a + (t.amount || 0), 0));
-    const d = docBy.get(String(s._id)) || { total: 0, delivered: 0 };
+    const d = docBy.get(String(s._id)) || NO_DOCS;
     return {
       studentId: s._id, centerId: s.center?._id, center: centerName(s.center), name: s.name, enrollmentNumber: s.enrollmentNumber || '',
       course: `${s.courseName || ''} ${s.courseYear || ''}`.trim(), status: s.applicationStatus, reason: reasonText(s),
       total: net, paid, balance: Math.max(0, r2(net - paid)), docsTotal: d.total, docsDelivered: d.delivered,
+      docCharge: d.charge, docPaid: d.paid, docPending: d.pending, docBalance: Math.max(0, r2(d.charge - d.paid)), docItems: d.items,
     };
   });
 
   const range = { from: from.toISOString().slice(0, 10), to: new Date(toExcl.getTime() - 86400000).toISOString().slice(0, 10) };
   if (view === 'student') {
-    return { view, ...range, rows, totals: { students: rows.length, total: r2(rows.reduce((a, r) => a + r.total, 0)), paid: r2(rows.reduce((a, r) => a + r.paid, 0)), balance: r2(rows.reduce((a, r) => a + r.balance, 0)) } };
+    const add = k => r2(rows.reduce((a, r) => a + r[k], 0));
+    return { view, ...range, rows, totals: { students: rows.length, total: add('total'), paid: add('paid'), balance: add('balance'),
+      docCharge: add('docCharge'), docPaid: add('docPaid'), docPending: add('docPending'), docBalance: add('docBalance') } };
   }
   const byCenter = new Map();
   rows.forEach(r => {
-    const e = byCenter.get(String(r.centerId)) || { centerId: r.centerId, center: r.center, students: 0, enrolled: 0, rejected: 0, total: 0, paid: 0, balance: 0, docsTotal: 0, docsDelivered: 0 };
+    const e = byCenter.get(String(r.centerId)) || { centerId: r.centerId, center: r.center, students: 0, enrolled: 0, rejected: 0, total: 0, paid: 0, balance: 0, docsTotal: 0, docsDelivered: 0, docCharge: 0, docPaid: 0, docPending: 0, docBalance: 0 };
     e.students += 1;
     if (r.status === 'Enrolled') e.enrolled += 1;
     if (['Rejected', 'Cancelled'].includes(r.status)) e.rejected += 1;
     e.total = r2(e.total + r.total); e.paid = r2(e.paid + r.paid); e.balance = r2(e.balance + r.balance);
     e.docsTotal += r.docsTotal; e.docsDelivered += r.docsDelivered;
+    e.docCharge = r2(e.docCharge + r.docCharge); e.docPaid = r2(e.docPaid + r.docPaid); e.docPending = r2(e.docPending + r.docPending); e.docBalance = r2(e.docBalance + r.docBalance);
     byCenter.set(String(r.centerId), e);
   });
   const list = [...byCenter.values()].sort((a, b) => a.center.localeCompare(b.center));
   const sum = k => r2(list.reduce((a, r) => a + r[k], 0));
-  return { view, ...range, rows: list, totals: { students: sum('students'), enrolled: sum('enrolled'), rejected: sum('rejected'), total: sum('total'), paid: sum('paid'), balance: sum('balance') } };
+  return { view, ...range, rows: list, totals: { students: sum('students'), enrolled: sum('enrolled'), rejected: sum('rejected'), total: sum('total'), paid: sum('paid'), balance: sum('balance'),
+    docCharge: sum('docCharge'), docPaid: sum('docPaid'), docPending: sum('docPending'), docBalance: sum('docBalance') } };
 }
 
 exports.ledger = asyncHandler(async (req, res) => res.json(await buildLedger(req.query)));
@@ -858,17 +870,23 @@ exports.exportLedger = asyncHandler(async (req, res) => {
   const rangeText = `${data.from} to ${data.to}`;
   if (data.view === 'student') {
     sendCsv(res, `ledger-student-wise-${stamp()}.csv`, [
-      ['NAME OF CENTRE', 'DATE RANGE', 'STUDENT NAME', 'ENROLLMENT', 'COURSE', 'STATUS', 'TOTAL AMOUNT', 'PAID', 'BALANCE', 'STATUS OF DOCUMENT', 'REASON'],
+      ['NAME OF CENTRE', 'DATE RANGE', 'STUDENT NAME', 'ENROLLMENT', 'COURSE', 'STATUS', 'TOTAL AMOUNT', 'PAID', 'BALANCE',
+        'DOCUMENT CHARGES', 'DOCUMENT PAID', 'DOCUMENT PAID - NOT VERIFIED', 'DOCUMENT BALANCE', 'DOCUMENTS', 'STATUS OF DOCUMENT', 'REASON'],
       ...data.rows.map(r => [r.center, rangeText, r.name, r.enrollmentNumber, r.course, r.status.replace(/_/g, ' '), r.total, r.paid, r.balance,
+        r.docCharge, r.docPaid, r.docPending, r.docBalance, r.docItems.map(x => `${x.name} (${x.status.replace(/_/g, ' ')})`).join('; '),
         r.docsTotal ? `${r.docsDelivered} of ${r.docsTotal} delivered` : '', r.reason]),
-      ['TOTAL', '', `${data.totals.students} students`, '', '', '', data.totals.total, data.totals.paid, data.totals.balance, '', ''],
+      ['TOTAL', '', `${data.totals.students} students`, '', '', '', data.totals.total, data.totals.paid, data.totals.balance,
+        data.totals.docCharge, data.totals.docPaid, data.totals.docPending, data.totals.docBalance, '', '', ''],
     ]);
     return;
   }
   sendCsv(res, `ledger-center-wise-${stamp()}.csv`, [
-    ['NAME OF CENTRE', 'DATE RANGE', 'TOTAL STUDENTS', 'ENROLLED', 'REJECTED / CANCELLED', 'TOTAL AMOUNT', 'PAID', 'BALANCE', 'STATUS OF DOCUMENT'],
-    ...data.rows.map(r => [r.center, rangeText, r.students, r.enrolled, r.rejected, r.total, r.paid, r.balance, r.docsTotal ? `${r.docsDelivered} of ${r.docsTotal} delivered` : '']),
-    ['TOTAL', rangeText, data.totals.students, data.totals.enrolled, data.totals.rejected, data.totals.total, data.totals.paid, data.totals.balance, ''],
+    ['NAME OF CENTRE', 'DATE RANGE', 'TOTAL STUDENTS', 'ENROLLED', 'REJECTED / CANCELLED', 'TOTAL AMOUNT', 'PAID', 'BALANCE',
+      'DOCUMENT CHARGES', 'DOCUMENT PAID', 'DOCUMENT PAID - NOT VERIFIED', 'DOCUMENT BALANCE', 'STATUS OF DOCUMENT'],
+    ...data.rows.map(r => [r.center, rangeText, r.students, r.enrolled, r.rejected, r.total, r.paid, r.balance,
+      r.docCharge, r.docPaid, r.docPending, r.docBalance, r.docsTotal ? `${r.docsDelivered} of ${r.docsTotal} delivered` : '']),
+    ['TOTAL', rangeText, data.totals.students, data.totals.enrolled, data.totals.rejected, data.totals.total, data.totals.paid, data.totals.balance,
+      data.totals.docCharge, data.totals.docPaid, data.totals.docPending, data.totals.docBalance, ''],
   ]);
 });
 

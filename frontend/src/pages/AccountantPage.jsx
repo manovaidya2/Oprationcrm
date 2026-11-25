@@ -3,10 +3,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLazyList } from '@/lib/useLazyList';
 import { usePagedFetch } from '@/lib/usePagedFetch';
 import { PagerBar } from '@/components/PagerBar';
+import { DocRequestCard } from '@/components/DocRequestCard';
 import { accountantQueueApi } from '@/lib/api';
 import {
   Loader2, IndianRupee, CheckCircle2, XCircle, Clock, Eye,
-  Paperclip, History, User, Calendar, Hash, Search, X, Send, Download, Trash2
+  Paperclip, History, User, Calendar, Hash, Search, X, Send, Download, Trash2,
+  AlertTriangle, FileText, GraduationCap,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -182,11 +184,14 @@ function StudentDetailModal({ student, onClose }) {
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {student.name}
-            <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_C[student.applicationStatus]||'bg-gray-100 text-gray-700'}`}>
-              {student.applicationStatus?.replace(/_/g,' ')}
-            </span>
-            {student.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">{student.enrollmentNumber}</span>}
+            {s.name}
+            {/* full record once loaded (a document card passes only the student's name and number) */}
+            {s.applicationStatus && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_C[s.applicationStatus]||'bg-gray-100 text-gray-700'}`}>
+                {s.applicationStatus.replace(/_/g,' ')}
+              </span>
+            )}
+            {s.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">{s.enrollmentNumber}</span>}
           </DialogTitle>
         </DialogHeader>
         <Tabs defaultValue="info">
@@ -440,7 +445,7 @@ export default function AccountantPage() {
   // background (one request every ~600ms) so the server never sees a burst
   // of parallel requests, and by the time the user clicks a tab its data
   // is usually already there.
-  const TAB_ORDER = ['admissions', 'unireject', 'amountsettle', 'scans', 'docs', 'payments', 'history'];
+  const TAB_ORDER = ['admissions', 'unireject', 'amountsettle', 'scans', 'marksheetreq', 'docreq', 'history'];
   const [readyTabs, setReadyTabs] = useState(() => new Set(['feepay']));
 
   useEffect(() => {
@@ -455,7 +460,7 @@ export default function AccountantPage() {
   const [note,   setNote]   = useState('');
   const [saving, setSaving] = useState(false);
   const [selectedDocIds, setSelectedDocIds] = useState([]);
-  const studentPayMap = {};    // TODO: restore per-student fee summary in Doc Request tab if needed
+  const [urgentOnly, setUrgentOnly] = useState(false);   // Other Doc Requests: show only the urgent ones
   const admissionFeeMap = {};  // TODO: restore per-student fee panel in Admissions tab if needed
 
   useEffect(() => {
@@ -495,17 +500,23 @@ export default function AccountantPage() {
     useCallback((page, limit) => accountantQueueApi.docsQueue('scanreview', { page, limit, ...searchParam }), [search]),
     { limit: 20, enabled: readyTabs.has('scans'), deps: [search] }
   );
-  const docRequestList = usePagedFetch(
-    useCallback((page, limit) => accountantQueueApi.docsQueue('docrequest', { page, limit, ...searchParam }), [search]),
-    { limit: 20, enabled: readyTabs.has('docs'), deps: [search] }
+  // Marksheet Requests / Other Doc Requests: what the counselor approved, each request with its payments
+  const marksheetReqList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('requests', { section: 'Marksheet', page, limit, ...(search ? { search } : {}) }), [search]),
+    { limit: 20, enabled: readyTabs.has('marksheetreq'), deps: [search] }
   );
-  const docPaymentsList = usePagedFetch(
-    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments', { page, limit, ...searchParam }), [search]),
-    { limit: 20, enabled: readyTabs.has('payments'), deps: [search] }
+  const otherReqList = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('requests', { section: 'Other', page, limit, ...(search ? { search } : {}), ...(urgentOnly ? { urgent: '1' } : {}) }), [search, urgentOnly]),
+    { limit: 20, enabled: readyTabs.has('docreq'), deps: [search, urgentOnly] }
   );
-  const docPaymentsAllList = usePagedFetch(
-    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments_all', { page, limit, ...searchParam }), [search]),
-    { limit: 20, enabled: readyTabs.has('payments'), deps: [search] }
+  // the payment records under each tab (every request of that tab with a payment, in any state)
+  const marksheetPayRecords = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments_all', { section: 'Marksheet', page, limit, ...(search ? { search } : {}) }), [search]),
+    { limit: 20, enabled: readyTabs.has('marksheetreq'), deps: [search] }
+  );
+  const otherPayRecords = usePagedFetch(
+    useCallback((page, limit) => accountantQueueApi.docsQueue('docpayments_all', { section: 'Other', page, limit, ...(search ? { search } : {}) }), [search]),
+    { limit: 20, enabled: readyTabs.has('docreq'), deps: [search] }
   );
   const historyList = usePagedFetch(
     useCallback((page, limit) => accountantQueueApi.history({ page, limit, ...searchParam }), [search]),
@@ -516,12 +527,9 @@ export default function AccountantPage() {
   const students          = admissionsList.items;
   const uniRejected        = uniRejectedList.items;
   const amountSettleQueue  = amountSettleList.items;
-  const docs               = docRequestList.items;
   const scanDocs           = scanReviewList.items;
-  const payDocs            = docPaymentsList.items;
   const feePayments        = feePayPending.items;
   const allFeePayments     = feePayHistory.items;
-  const allPayDocs         = docPaymentsAllList.items;
   const history            = historyList.items;
 
   
@@ -789,8 +797,8 @@ export default function AccountantPage() {
     else if (activeTab === 'unireject')    uniRejectedList.reload();
     else if (activeTab === 'amountsettle') amountSettleList.reload();
     else if (activeTab === 'scans')        scanReviewList.reload();
-    else if (activeTab === 'docs')         docRequestList.reload();
-    else if (activeTab === 'payments')     docPaymentsList.reload();
+    else if (activeTab === 'marksheetreq') { marksheetReqList.reload(); marksheetPayRecords.reload(); }
+    else if (activeTab === 'docreq')       { otherReqList.reload(); otherPayRecords.reload(); }
     else if (activeTab === 'history')      historyList.reload();
   }
 
@@ -836,19 +844,6 @@ export default function AccountantPage() {
 
   function toggleDocSelection(id) {
     setSelectedDocIds(prev => prev.includes(String(id)) ? prev.filter(x => x !== String(id)) : [...prev, String(id)]);
-  }
-
-  async function batchDocApprove(list) {
-    const selected = list.filter(d => selectedDocIds.includes(String(d._id)));
-    if (!selected.length) return toast.error('Select documents first');
-    setSaving(true);
-    try {
-      for (const doc of selected) await docsApi.accountantAction(doc._id, 'approve', '');
-      toast.success(`${selected.length} documents approved`);
-      setSelectedDocIds([]);
-      refreshCurrentTab();
-    } catch (e) { toast.error(e.message); }
-    finally { setSaving(false); }
   }
 
   // A doc still in "Forwarded"/"Fee_Pending" carries its payment inside the request —
@@ -904,15 +899,221 @@ export default function AccountantPage() {
   const filtStudents       = students.filter(s => !isDismissed(`student:${s._id}:admission`));
   const filtUniRejected    = uniRejected;
   const filtAmountSettle   = amountSettleQueue;
-  const filtDocs           = docs.filter(d => !isDismissed(`doc:${d._id}:fee`));
-  const filtPayDocs     = payDocs.filter(d => !isDismissed(`doc:${d._id}:payment`));
   const filtFeePayments    = feePayments.filter(({ student, tx }) => !isDismissed(`fee-payment:${student._id}:${tx._id}`));
   const filtAllFeePayments = allFeePayments;
-  const filtAllPayDocs     = allPayDocs;
   const filtHistory     = history;
 
   const pendingSettleCount = amountSettleList.total ? amountSettleQueue.filter(s => !s.amountSettled).length : 0;
-  const totalPending = admissionsList.total + uniRejectedList.total + pendingSettleCount + feePayPending.total + docRequestList.total + docPaymentsList.total;
+  const reqCount = list => list.meta?.all ?? list.total;   // waiting in a request tab, before search / urgent filter
+  const docRequestCount = reqCount(marksheetReqList) + reqCount(otherReqList);
+  const totalPending = admissionsList.total + uniRejectedList.total + pendingSettleCount + feePayPending.total + docRequestCount;
+
+  // ── Marksheet Requests / Other Doc Requests ──
+  // A request at the fee check ("Forwarded" / "Fee_Pending") carries its payment and is approved from the
+  // Review dialog; a "Payment_Submitted" one is a payment after the scan and is verified. The "remove from my
+  // list" keys are the ones the old Doc Request / Doc Payments tabs used.
+  const accountantDocKey = d => `doc:${d._id}:${d.status === 'Payment_Submitted' ? 'payment' : 'fee'}`;
+  const renderPayRecords = records => (
+    <>
+            {/* every request of this tab that carries a payment, in any state */}
+            {records.items.length > 0 && (
+              <div className="mt-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-px flex-1 bg-border"/>
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
+                    Payment records ({records.total})
+                  </span>
+                  <div className="h-px flex-1 bg-border"/>
+                </div>
+                <div className="space-y-2">
+                  {records.items.map((d, idx) => {
+                    const isPending  = d.status === 'Payment_Submitted';
+                    const isVerified = d.status === 'Payment_Verified';
+                    const isRejected = d.status === 'Center_Notified' || d.status === 'Fee_Rejected';
+                    const lastPay    = d.payments?.slice(-1)[0];
+                    return (
+                      <div
+                        key={`doclist-${d._id}`}
+                        className={`rounded-xl border transition-colors ${
+                          isPending  ? 'bg-blue-50   border-blue-200'   :
+                          isVerified ? 'bg-emerald-50 border-emerald-200' :
+                          isRejected ? 'bg-red-50    border-red-200'    :
+                                       'bg-slate-50  border-slate-200'
+                        }`}
+                      >
+                        {/* Header row */}
+                        <div
+                          className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                          onClick={() => setDetailStudent(d.student)}
+                        >
+                          <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${
+                            isPending  ? 'bg-blue-200   text-blue-800'   :
+                            isVerified ? 'bg-emerald-200 text-emerald-800' :
+                            isRejected ? 'bg-red-200    text-red-800'    :
+                                         'bg-slate-200  text-slate-700'
+                          }`}>
+                            {(records.page - 1) * 20 + idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-800 text-sm">{d.student?.name || '—'}</span>
+                              {d.student?.enrollmentNumber && (
+                                <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                                  {d.student.enrollmentNumber}
+                                </span>
+                              )}
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                isPending  ? 'bg-blue-200   text-blue-800'   :
+                                isVerified ? 'bg-emerald-200 text-emerald-800' :
+                                isRejected ? 'bg-red-200    text-red-800'    :
+                                             'bg-slate-200  text-slate-700'
+                              }`}>
+                                {isPending ? '⏳ Pending' : isVerified ? '✓ Verified' : isRejected ? '✗ Rejected' : d.status?.replace(/_/g,' ')}
+                              </span>
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-0.5 truncate">
+                              {d.name}{d.center?.name ? ` · ${d.center.name}` : ''}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-sm font-bold text-emerald-700">{fmt(lastPay?.amount)}</div>
+                            <div className="text-xs text-muted-foreground">{lastPay?.mode || '—'}</div>
+                          </div>
+                        </div>
+
+                        {/* Payment details for each payment */}
+                        {d.payments?.length > 0 && (
+                          <div className="px-4 pb-3 space-y-2">
+                            {d.payments.map((p, pi) => (
+                              <div key={p._id || pi} className="bg-white/70 border border-white rounded-lg px-3 py-2 space-y-1.5">
+                                {/* Amount + mode + date */}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-emerald-700 text-sm">{fmt(p.amount)}</span>
+                                  {p.mode && <span className="text-xs bg-muted border border-border px-1.5 py-0.5 rounded font-medium">via {p.mode}</span>}
+                                  {p.paidAt && <span className="text-xs text-muted-foreground">📅 {fmtD(p.paidAt)}</span>}
+                                </div>
+                                {/* UPI details */}
+                                {p.mode === 'UPI' && p.upiId && (
+                                  <div className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-semibold text-foreground">{p.upiId}</span></div>
+                                )}
+                                {p.utrRef && (
+                                  <div className="text-xs text-muted-foreground">UTR: <span className="font-mono font-semibold text-foreground">{p.utrRef}</span></div>
+                                )}
+                                {/* Bank details */}
+                                {p.mode === 'Bank Transfer' && p.bankName && (
+                                  <div className="text-xs text-muted-foreground">Bank: <span className="font-semibold text-foreground">{p.bankName}</span></div>
+                                )}
+                                {p.mode === 'Bank Transfer' && p.accountHolder && (
+                                  <div className="text-xs text-muted-foreground">A/C Holder: <span className="font-semibold text-foreground">{p.accountHolder}</span></div>
+                                )}
+                                {p.mode === 'Bank Transfer' && p.accountNumber && (
+                                  <div className="text-xs text-muted-foreground">A/C No: <span className="font-mono font-semibold text-foreground">{p.accountNumber}</span></div>
+                                )}
+                                {p.mode === 'Bank Transfer' && p.ifscCode && (
+                                  <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{p.ifscCode}</span></div>
+                                )}
+                                {p.note && (
+                                  <div className="text-xs text-muted-foreground italic">Note: "{p.note}"</div>
+                                )}
+                                {/* Screenshot */}
+                                {p.paymentScreenshot && (
+                                  <a
+                                    href={`${MEDIA}${p.paymentScreenshot}`}
+                                    target="_blank" rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
+                                  >
+                                    <Download className="h-3 w-3"/>View Payment Screenshot
+                                  </a>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+      {records.items.length > 0 && <PagerBar page={records.page} pages={records.pages} total={records.total} loading={records.loading} onPage={records.setPage}/>}
+    </>
+  );
+  const renderAccountantRequests = (isMarksheet, list, records) => {
+    const sum = list.meta || {};
+    const rows = list.items.filter(d => !isDismissed(accountantDocKey(d)));
+    const allSelected = rows.length > 0 && rows.every(d => selectedDocIds.includes(String(d._id)));
+    const anySelected = rows.some(d => selectedDocIds.includes(String(d._id)));
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs shadow-sm">
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-semibold text-indigo-700">{sum.requests ?? 0} request{sum.requests === 1 ? '' : 's'} from counselor</span>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-semibold text-emerald-700">{sum.payments ?? 0} payment{sum.payments === 1 ? '' : 's'} after scan</span>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700">{fmt(sum.received)} received</span>
+          {!isMarksheet && (
+            <button type="button" onClick={() => setUrgentOnly(v => !v)} aria-pressed={urgentOnly}
+              title={urgentOnly ? 'Show all requests' : 'Show only urgent requests'}
+              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-semibold transition-colors ${urgentOnly ? 'border-red-600 bg-red-600 text-white' : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'}`}>
+              <AlertTriangle className="h-3 w-3"/>{sum.urgent ?? 0} urgent{urgentOnly ? ' · showing only these' : ''}
+            </button>
+          )}
+        </div>
+        {rows.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={allSelected} className="h-4 w-4 accent-indigo-600"
+                onChange={e => setSelectedDocIds(e.target.checked ? rows.map(d => String(d._id)) : [])}/>
+              Select all on this page ({rows.length})
+            </label>
+            <Button size="sm" className="h-8 bg-green-600 text-xs hover:bg-green-700" disabled={saving || !anySelected} onClick={() => batchPayVerify(rows)}
+              title="Approves the selected requests (with their payments) and verifies the selected payments">
+              {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin"/> : <CheckCircle2 className="mr-1 h-3.5 w-3.5"/>}Approve selected
+            </Button>
+          </div>
+        )}
+        <div className={`space-y-3 transition-opacity duration-200 ${list.loading && rows.length > 0 ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+          {list.loading && rows.length === 0 ? <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground"/></div>
+          : rows.length === 0 ? (
+            <div className="rounded-2xl border-2 border-dashed border-slate-200 py-12 text-center">
+              {isMarksheet ? <GraduationCap className="mx-auto mb-2 h-7 w-7 text-slate-300"/> : <FileText className="mx-auto mb-2 h-7 w-7 text-slate-300"/>}
+              <p className="text-sm font-medium text-slate-500">
+                {search ? `No requests matching "${search}"` : !isMarksheet && urgentOnly ? 'No urgent requests' : `No ${isMarksheet ? 'marksheet' : 'document'} requests waiting for you`}
+              </p>
+            </div>
+          ) : rows.map(d => (
+            <DocRequestCard key={d._id} d={d} accMap={payAccounts} selectable
+              selected={selectedDocIds.includes(String(d._id))}
+              onToggle={() => toggleDocSelection(d._id)}
+              onOpenStudent={() => d.student && setDetailStudent(d.student)}>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove from my list (the request itself is not deleted)" onClick={() => dismiss(accountantDocKey(d))}>
+                <Trash2 className="h-4 w-4"/>
+              </Button>
+              {d.status === 'Payment_Submitted' ? (
+                <>
+                  <Button size="sm" variant="outline" className="h-8 border-red-300 text-xs text-red-600 hover:bg-red-50" onClick={() => { setDialog({ type: 'pay', item: d, approved: false }); setNote(''); }}>
+                    <XCircle className="mr-1 h-3.5 w-3.5"/>Reject
+                  </Button>
+                  <Button size="sm" className="h-8 bg-green-600 text-xs hover:bg-green-700" onClick={() => { setDialog({ type: 'pay', item: d, approved: true }); setNote(''); }}>
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5"/>Verify payment
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button size="sm" variant="outline" className="h-8 border-amber-300 text-xs text-amber-700 hover:bg-amber-50" onClick={() => { setDialog({ type: 'docChanges', item: d }); setNote(''); }}>
+                    Send back
+                  </Button>
+                  <Button size="sm" className="h-8 bg-indigo-600 text-xs hover:bg-indigo-700" onClick={() => { setDialog({ type: 'doc', item: d }); setNote(''); }}>
+                    <CheckCircle2 className="mr-1 h-3.5 w-3.5"/>Review &amp; approve
+                  </Button>
+                </>
+              )}
+            </DocRequestCard>
+          ))}
+        </div>
+        <PagerBar page={list.page} pages={list.pages} total={list.total} loading={list.loading} onPage={list.setPage}/>
+        {renderPayRecords(records)}
+      </>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -935,7 +1136,7 @@ export default function AccountantPage() {
       </div>
       {search && (
         <p className="text-xs text-muted-foreground">
-          Showing results for "<b>{search}</b>" — {filtStudents.length + filtFeePayments.length + filtDocs.length + filtPayDocs.length + filtHistory.length} records found
+          Showing results for "<b>{search}</b>" — {filtStudents.length + filtFeePayments.length + marksheetReqList.items.length + otherReqList.items.length + filtHistory.length} records found
         </p>
       )}
 
@@ -945,7 +1146,7 @@ export default function AccountantPage() {
         {[
           ['Pending Actions', totalPending, 'text-amber-600'],
           ['Fee Payments', feePayPending.total, 'text-orange-600'],
-          ['Doc Payments', docPaymentsList.total, 'text-purple-600'],
+          ['Doc Requests', docRequestCount, 'text-purple-600'],
           ['Verified Records', historyList.total, 'text-emerald-600'],
         ].map(([l,v,c]) => (
           <Card key={l}><CardContent className="pt-4 pb-3 text-center">
@@ -969,8 +1170,8 @@ export default function AccountantPage() {
             { val:'unireject',   label:'Uni Rejected',   count: uniRejectedList.total,    dot:'bg-orange-500' },
             { val:'amountsettle',label:'Amount Settle',  count: amountSettleList.total, dot:'bg-emerald-500', badge: pendingSettleCount },
             { val:'feepay',      label:'Fee Payments',   count: feePayPending.total,    dot:'bg-amber-500'  },
-            { val:'docs',        label:'Doc Request',    count: docRequestList.total,                  dot:'bg-indigo-500' },
-            { val:'payments',    label:'Doc Payments',   count: docPaymentsList.total,            dot:'bg-teal-500'   },
+            { val:'marksheetreq',label:'Marksheet Requests', count: reqCount(marksheetReqList), dot:'bg-violet-500' },
+            { val:'docreq',      label:'Other Doc Requests', count: reqCount(otherReqList),     dot: otherReqList.meta?.urgent ? 'bg-red-500' : 'bg-indigo-500' },
             { val:'history',     label:'History',        count: historyList.total,            dot:''              },
           ].map(({ val, label, count, dot, badge }) => (
             <TabsTrigger key={val} value={val}
@@ -1353,306 +1554,16 @@ export default function AccountantPage() {
           </div>
         </TabsContent>
 
-        {/* Doc Fees Tab */}
-
-        {/* Doc Fees Tab */}
-        <TabsContent value="docs" className="space-y-2 mt-3">
-          {filtDocs.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={filtDocs.length > 0 && filtDocs.every(d => selectedDocIds.includes(String(d._id)))}
-                  onChange={e => setSelectedDocIds(e.target.checked ? filtDocs.map(d => String(d._id)) : [])}
-                  className="h-4 w-4 accent-indigo-600"
-                />
-                Select all visible doc fee checks
-              </label>
-              <Button size="sm" onClick={() => batchDocApprove(filtDocs)} disabled={saving || !filtDocs.some(d => selectedDocIds.includes(String(d._id)))}>
-                Approve Selected
-              </Button>
-            </div>
-          )}
-          {filtDocs.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No doc fees matching "${search}"` : 'No doc fee checks'}</div>
-          : filtDocs.map(d => (
-            <Card key={d._id}>
-              <CardContent className="p-4 flex justify-between items-start gap-3">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedDocIds.includes(String(d._id))}
-                      onChange={() => toggleDocSelection(d._id)}
-                      className="h-4 w-4 accent-indigo-600"
-                      aria-label={`Select ${d.name}`}
-                    />
-                    <span className="font-medium">{d.name}</span>
-                    <span className="text-xs bg-muted px-1.5 py-0.5 rounded">{d.status?.replace(/_/g,' ')}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${d.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{d.requestType || 'Soft Copy'}</span>
-                  </div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-  Student: {d.student?.name}
-  {d.student?.enrollmentNumber && (
-    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-      {d.student.enrollmentNumber}
-    </span>
-  )}
-</div>
-                  <div className="text-xs mt-0.5">
-                    Charge: <b>{fmt(d.chargeFee)}</b> ·
-                    Paid: <span className="text-emerald-600"><b>{fmt(d.totalPaid)}</b></span> ·
-                    Due: <span className="text-amber-600"><b>{fmt(d.chargeFee-d.totalPaid)}</b></span>
-                  </div>
-
-                  {studentPayMap[d.student?._id] && (
-                    <div className="flex gap-2 flex-wrap mt-1.5">
-                      <span className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5">
-                        Total Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].totalFee ?? studentPayMap[d.student._id].netFee)}</span>
-                      </span>
-                      <span className="text-xs bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
-                        Paid: <span className="font-bold text-emerald-700">{fmt(studentPayMap[d.student._id].paidAmount)}</span>
-                      </span>
-                      {studentPayMap[d.student._id].dueAmount > 0 && (
-                        <span className="text-xs bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">
-                          Due: <span className="font-bold text-amber-700">{fmt(studentPayMap[d.student._id].dueAmount)}</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-
-                  {d.payments?.length>0 && d.payments.map(p => (
-                    <div key={p._id} className="mt-1 space-y-1">
-                      <PaymentInfo tx={p}/>
-                      {p.paymentScreenshot && (
-                        <a href={`${MEDIA}${p.paymentScreenshot}`}
-                          target="_blank" rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
-                          <Download className="h-3 w-3"/>View Payment Screenshot
-                        </a>
-                      )}
-                    </div>
-                  ))}
-                  
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}:fee`)} className="text-red-600 hover:text-red-700">
-                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-                  </Button>
-                  <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                    onClick={() => { setDialog({type:'docChanges', item:d}); setNote(''); }}>
-                    Send Back
-                  </Button>
-                  <Button size="sm" onClick={() => { setDialog({type:'doc',item:d}); setNote(''); }}>Review</Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+        {/* Marksheet Requests Tab */}
+        <TabsContent value="marksheetreq" className="space-y-3 mt-3">
+          <p className="text-sm text-muted-foreground">Marksheet requests approved by the counselor, with their payments and the student's course fee. Review and approve, or verify the payment.</p>
+          {renderAccountantRequests(true, marksheetReqList, marksheetPayRecords)}
         </TabsContent>
 
-        {/* Doc Payments Tab */}
-        <TabsContent value="payments" className="space-y-2 mt-3">
-          {filtPayDocs.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={filtPayDocs.length > 0 && filtPayDocs.every(d => selectedDocIds.includes(String(d._id)))}
-                  onChange={e => setSelectedDocIds(e.target.checked ? filtPayDocs.map(d => String(d._id)) : [])}
-                  className="h-4 w-4 accent-indigo-600"
-                />
-                Select all visible payments
-              </label>
-              <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => batchPayVerify(filtPayDocs)} disabled={saving || !filtPayDocs.some(d => selectedDocIds.includes(String(d._id)))}>
-                Verify Selected
-              </Button>
-            </div>
-          )}
-          {filtPayDocs.length===0 ? <div className="text-center py-10 text-muted-foreground">{search ? `No payments matching "${search}"` : 'No payments to verify'}</div>
-          : filtPayDocs.map(d => (
-            <Card key={d._id}>
-              <CardContent className="p-4 flex justify-between items-start gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedDocIds.includes(String(d._id))}
-                      onChange={() => toggleDocSelection(d._id)}
-                      className="h-4 w-4 accent-indigo-600"
-                      aria-label={`Select ${d.name}`}
-                    />
-                    <span className="font-medium">{d.name}</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">{['Forwarded','Fee_Pending'].includes(d.status) ? 'Request + Payment' : 'Payment Submitted'}</span>
-                  </div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-  Student: {d.student?.name}
-  {d.student?.enrollmentNumber && (
-    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-      {d.student.enrollmentNumber}
-    </span>
-  )}
-</div>
-                  {d.payments?.map(p => (
-                    <div key={p._id} className="text-xs mt-1 space-y-0.5 border border-slate-100 rounded-lg p-2 bg-slate-50/50">
-                      <PaymentInfo tx={p}/>
-                      {p.paymentScreenshot && (
-                        <div className="mt-1.5">
-                          <a href={`${MEDIA}${p.paymentScreenshot}`}
-                            target="_blank" rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors">
-                            <Download className="h-3 w-3"/>View Payment Screenshot
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {studentPayMap[d.student?._id] && (
-                    <div className="flex gap-2 flex-wrap mt-1.5">
-                      <span className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5">
-                        Total Fee: <span className="font-bold text-slate-700">{fmt(studentPayMap[d.student._id].totalFee ?? studentPayMap[d.student._id].netFee)}</span>
-                      </span>
-                      <span className="text-xs bg-emerald-50 border border-emerald-200 rounded-md px-2 py-0.5">
-                        Paid: <span className="font-bold text-emerald-700">{fmt(studentPayMap[d.student._id].paidAmount)}</span>
-                      </span>
-                      {studentPayMap[d.student._id].dueAmount > 0 && (
-                        <span className="text-xs bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">
-                          Due: <span className="font-bold text-amber-700">{fmt(studentPayMap[d.student._id].dueAmount)}</span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}:payment`)} className="text-red-600 hover:text-red-700">
-                    <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => { setDialog({type:'pay',item:d,approved:false}); setNote(''); }}>Reject</Button>
-                  <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => { setDialog({type:'pay',item:d,approved:true}); setNote(''); }}>Verify</Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-
-          {/* ── Permanent list: ALL doc payment students ─────── */}
-          {allPayDocs.length > 0 && (
-            <div className="mt-6">
-              <div className="flex items-center gap-2 mb-3">
-                <div className="h-px flex-1 bg-border"/>
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2">
-                  All Doc Payment Students ({allPayDocs.length})
-                </span>
-                <div className="h-px flex-1 bg-border"/>
-              </div>
-              <div className="space-y-2">
-                {allPayDocs.map((d, idx) => {
-                  const isPending  = d.status === 'Payment_Submitted';
-                  const isVerified = d.status === 'Payment_Verified';
-                  const isRejected = d.status === 'Center_Notified' || d.status === 'Fee_Rejected';
-                  const lastPay    = d.payments?.slice(-1)[0];
-                  return (
-                    <div
-                      key={`doclist-${d._id}`}
-                      className={`rounded-xl border transition-colors ${
-                        isPending  ? 'bg-blue-50   border-blue-200'   :
-                        isVerified ? 'bg-emerald-50 border-emerald-200' :
-                        isRejected ? 'bg-red-50    border-red-200'    :
-                                     'bg-slate-50  border-slate-200'
-                      }`}
-                    >
-                      {/* Header row */}
-                      <div
-                        className="flex items-center gap-3 px-4 py-3 cursor-pointer"
-                        onClick={() => setDetailStudent(d.student)}
-                      >
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-sm ${
-                          isPending  ? 'bg-blue-200   text-blue-800'   :
-                          isVerified ? 'bg-emerald-200 text-emerald-800' :
-                          isRejected ? 'bg-red-200    text-red-800'    :
-                                       'bg-slate-200  text-slate-700'
-                        }`}>
-                          {idx + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-slate-800 text-sm">{d.student?.name || '—'}</span>
-                            {d.student?.enrollmentNumber && (
-                              <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                {d.student.enrollmentNumber}
-                              </span>
-                            )}
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                              isPending  ? 'bg-blue-200   text-blue-800'   :
-                              isVerified ? 'bg-emerald-200 text-emerald-800' :
-                              isRejected ? 'bg-red-200    text-red-800'    :
-                                           'bg-slate-200  text-slate-700'
-                            }`}>
-                              {isPending ? '⏳ Pending' : isVerified ? '✓ Verified' : isRejected ? '✗ Rejected' : d.status?.replace(/_/g,' ')}
-                            </span>
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {d.name}{d.center?.name ? ` · ${d.center.name}` : ''}
-                          </div>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <div className="text-sm font-bold text-emerald-700">{fmt(lastPay?.amount)}</div>
-                          <div className="text-xs text-muted-foreground">{lastPay?.mode || '—'}</div>
-                        </div>
-                      </div>
-
-                      {/* Payment details for each payment */}
-                      {d.payments?.length > 0 && (
-                        <div className="px-4 pb-3 space-y-2">
-                          {d.payments.map((p, pi) => (
-                            <div key={p._id || pi} className="bg-white/70 border border-white rounded-lg px-3 py-2 space-y-1.5">
-                              {/* Amount + mode + date */}
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-emerald-700 text-sm">{fmt(p.amount)}</span>
-                                {p.mode && <span className="text-xs bg-muted border border-border px-1.5 py-0.5 rounded font-medium">via {p.mode}</span>}
-                                {p.paidAt && <span className="text-xs text-muted-foreground">📅 {fmtD(p.paidAt)}</span>}
-                              </div>
-                              {/* UPI details */}
-                              {p.mode === 'UPI' && p.upiId && (
-                                <div className="text-xs text-muted-foreground">UPI ID: <span className="font-mono font-semibold text-foreground">{p.upiId}</span></div>
-                              )}
-                              {p.utrRef && (
-                                <div className="text-xs text-muted-foreground">UTR: <span className="font-mono font-semibold text-foreground">{p.utrRef}</span></div>
-                              )}
-                              {/* Bank details */}
-                              {p.mode === 'Bank Transfer' && p.bankName && (
-                                <div className="text-xs text-muted-foreground">Bank: <span className="font-semibold text-foreground">{p.bankName}</span></div>
-                              )}
-                              {p.mode === 'Bank Transfer' && p.accountHolder && (
-                                <div className="text-xs text-muted-foreground">A/C Holder: <span className="font-semibold text-foreground">{p.accountHolder}</span></div>
-                              )}
-                              {p.mode === 'Bank Transfer' && p.accountNumber && (
-                                <div className="text-xs text-muted-foreground">A/C No: <span className="font-mono font-semibold text-foreground">{p.accountNumber}</span></div>
-                              )}
-                              {p.mode === 'Bank Transfer' && p.ifscCode && (
-                                <div className="text-xs text-muted-foreground">IFSC: <span className="font-mono font-semibold text-foreground">{p.ifscCode}</span></div>
-                              )}
-                              {p.note && (
-                                <div className="text-xs text-muted-foreground italic">Note: "{p.note}"</div>
-                              )}
-                              {/* Screenshot */}
-                              {p.paymentScreenshot && (
-                                <a
-                                  href={`${MEDIA}${p.paymentScreenshot}`}
-                                  target="_blank" rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-1.5 hover:bg-indigo-100 transition-colors mt-0.5"
-                                >
-                                  <Download className="h-3 w-3"/>View Payment Screenshot
-                                </a>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+        {/* Other Doc Requests Tab */}
+        <TabsContent value="docreq" className="space-y-3 mt-3">
+          <p className="text-sm text-muted-foreground">Degree, migration and other document requests approved by the counselor, with their payments. Urgent ones come first.</p>
+          {renderAccountantRequests(false, otherReqList, otherPayRecords)}
         </TabsContent>
 
         {/* History Tab */}

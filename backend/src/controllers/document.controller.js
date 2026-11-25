@@ -4,11 +4,24 @@ const Student       = require('../models/Student');
 const Payment       = require('../models/Payment');
 const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
+const PaymentAccount = require('../models/PaymentAccount');
 const mongoose      = require('mongoose');
+const fs            = require('fs');
 const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
+const { findDuplicateUtrMatches } = require('../utils/utrDuplicate');
 
 // Centre Documents tab a request is raised from
 const DOC_SECTIONS = ['Marksheet', 'Other'];
+// The tab a request belongs to; older requests without one go by their name (same rule as the frontend)
+const sectionOf = (section, name) => (DOC_SECTIONS.includes(section) ? section : (/marksheet|transcript/i.test(name || '') ? 'Marksheet' : 'Other'));
+
+// A payment the centre made after the scan stays "Payment_Submitted" after the counselor forwards it; the
+// forward is the latest Payment_Submitted history entry (same rule as the frontend's paymentForwarded).
+const COUNSELOR_PAYMENT_FORWARD_NOTE = 'Counselor reviewed - forwarded to accountant for verification';
+const paymentForwardedToAccountant = doc => {
+  const last = [...(doc?.statusHistory || [])].reverse().find(h => h.status === 'Payment_Submitted');
+  return /^Counselor reviewed/i.test(last?.note || '');
+};
 
 async function loadDoc(id) {
   const doc = await StudentDoc.findById(id)
@@ -19,7 +32,8 @@ async function loadDoc(id) {
     .populate('payments.lastUpdatedBy', 'name role')
     .populate('uploadedBy', 'name role')
     .populate('lastUpdatedBy', 'name role')
-    .populate('statusHistory.changedBy', 'name role');
+    .populate('statusHistory.changedBy', 'name role')
+    .populate('urgentMarkedBy', 'name role');
   if (!doc) { const e = new Error('Document not found'); e.status = 404; throw e; }
   return doc;
 }
@@ -242,6 +256,7 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('uploadedBy', 'name role')
     .populate('lastUpdatedBy', 'name role')
     .populate('statusHistory.changedBy', 'name role')
+    .populate('urgentMarkedBy', 'name role')
     .sort('-createdAt')
     .lean();
 
@@ -270,11 +285,52 @@ exports.get = asyncHandler(async (req, res) => {
   res.json(await loadDoc(req.params.id));
 });
 
-// POST /api/documents - Center creates doc request with optional payment
+// A centre's "Other Documents" request must carry its full payment: amount, mode, UTR, UPI / bank details,
+// the account it was paid into (when accounts are set up) and the screenshot. Returns the account label.
+async function assertOtherDocPayment(body, screenshot) {
+  const bad = msg => { const e = new Error(msg); e.status = 400; throw e; };
+  const charge = Number(body.chargeFee) || 0;
+  const amount = Number(body.paymentAmount) || 0;
+  const utr = String(body.paymentUtrRef || '').trim();
+  if (!(charge > 0)) bad('Enter the document charge');
+  if (!(amount > 0)) bad('Other documents can be requested only with their payment — enter the amount paid');
+  if (amount > charge + 0.01) bad('Amount paid is more than the document charge');
+  if (!['UPI', 'Bank Transfer'].includes(body.paymentMode)) bad('Choose the payment mode');
+  if (!utr) bad('UTR / reference number is required');
+  if (body.paymentMode === 'UPI' && !String(body.paymentUpiId || '').trim()) bad('UPI ID is required');
+  if (body.paymentMode === 'Bank Transfer' && (!String(body.paymentBankName || '').trim() || !String(body.paymentAccountHolder || '').trim())) {
+    bad('Bank name and account holder are required');
+  }
+  let accountLabel = '';
+  if (isValidObjectId(body.paymentPaidToAccount)) {
+    const acc = await PaymentAccount.findById(body.paymentPaidToAccount).select('label').lean();
+    if (!acc) bad('The account the payment was made to was not found');
+    accountLabel = acc.label;
+  } else if (await PaymentAccount.exists({ isActive: { $ne: false } })) {
+    bad('Choose the account the payment was made to');
+  }
+  if (!screenshot) bad('Payment screenshot is required');
+  if ((await findDuplicateUtrMatches(utr)).length) { const e = new Error('This UTR is already recorded on another payment'); e.status = 409; throw e; }
+  return accountLabel;
+}
+
+// POST /api/documents - Center creates doc request; a centre's Other Documents request needs its payment
 exports.create = asyncHandler(async (req, res) => {
+  const docFile = req.files?.file?.[0];
+  const screenshot = req.files?.paymentScreenshot?.[0];
+  try {
+    await createDocRequest(req, res, docFile, screenshot);
+  } catch (e) {
+    // the request was refused: drop the files multer already saved
+    for (const f of [docFile, screenshot]) if (f) fs.unlink(f.path, () => {});
+    throw e;
+  }
+});
+
+async function createDocRequest(req, res, docFile, screenshot) {
   const {
     studentId, type, note, chargeFee, requestType, section,
-    paymentAmount, paymentMode, paymentUtrRef, paymentDate,
+    paymentAmount, paymentMode, paymentUtrRef, paymentDate, paymentNote,
     paymentUpiId, paymentBankName, paymentAccountHolder, paymentAccountNumber, paymentIfscCode,
     paymentPaidToAccount, paymentPaidToAccountLabel,
   } = req.body;
@@ -296,6 +352,8 @@ exports.create = asyncHandler(async (req, res) => {
   if (centerOriginated && student.applicationStatus !== 'Enrolled') {
     const e = new Error('Document requests only after enrollment'); e.status = 400; throw e;
   }
+  const paymentRequired = centerOriginated && sectionOf(section, name) === 'Other';
+  const accountLabel = paymentRequired ? await assertOtherDocPayment(req.body, screenshot) : '';
 
   const doc = new StudentDoc({
     student: studentId, center: student.center, counselor: student.counselor,
@@ -309,32 +367,32 @@ exports.create = asyncHandler(async (req, res) => {
     statusHistory: [{ status: 'Requested', changedBy: req.user._id, at: new Date() }],
   });
 
-  if (req.file) { doc.fileUrl = `/uploads/${req.file.filename}`; doc.sizeKb = Math.round(req.file.size/1024); }
+  if (docFile) { doc.fileUrl = `/uploads/${docFile.filename}`; doc.sizeKb = Math.round(docFile.size/1024); }
 
   const paidAmount = Number(paymentAmount) || 0;
   if (paidAmount > 0) {
     const validMode = ['UPI','Bank Transfer'].includes(paymentMode) ? paymentMode : 'UPI';
     doc.payments.push({
       amount: paidAmount, mode: validMode,
-      upiId: paymentUpiId||'', utrRef: paymentUtrRef||'',
+      upiId: String(paymentUpiId||'').trim(), utrRef: String(paymentUtrRef||'').trim(),
       bankName: paymentBankName||'', accountHolder: paymentAccountHolder||'',
       accountNumber: paymentAccountNumber||'', ifscCode: paymentIfscCode||'',
+      note: paymentNote||'',
       paidAt: paymentDate ? new Date(paymentDate) : new Date(),
       recordedBy: req.user._id,
       lastUpdatedBy: req.user.role === 'ViewerCounselor' ? req.user._id : undefined,
       lastUpdatedAt: req.user.role === 'ViewerCounselor' ? new Date() : undefined,
-      paidToAccount: paymentPaidToAccount || undefined,
-      paidToAccountLabel: paymentPaidToAccountLabel || '',
+      paidToAccount: isValidObjectId(paymentPaidToAccount) ? paymentPaidToAccount : undefined,
+      paidToAccountLabel: accountLabel || paymentPaidToAccountLabel || '',
+      paymentScreenshot: screenshot ? `/uploads/${screenshot.filename}` : '',
     });
     doc.statusHistory.push({ status: 'Requested', changedBy: req.user._id, at: new Date(), note: `Payment of ₹${paidAmount} attached at request time` });
   }
 
   // Request + payment submitted together (soft OR hard copy) travel as one document.
-  // The doc stays in "Requested" so it shows in the counselor's Document Request tab,
-  // AND — because it carries a payment — it also surfaces in the Doc Payments tab.
-  // Forwarding / approving it from either tab moves the whole thing (see the
-  // `payments.0 exists` clauses in the counselor list + accountant docpayments queue,
-  // and markDocPaymentsVerified inside accountantAction).
+  // The doc stays in "Requested" and shows, with its payment, on one card in the counselor's
+  // Marksheet / Other Doc Requests tab; approving it forwards both (see the `payments.0 exists`
+  // clauses in the accountant docpayments queue, and markDocPaymentsVerified inside accountantAction).
 
   await doc.save();
 
@@ -347,6 +405,29 @@ exports.create = asyncHandler(async (req, res) => {
   });
   await audit('doc_requested', 'StudentDocument', doc._id, req.user, { name }, `Doc request: ${name}`);
   res.status(201).json(doc);
+}
+
+// PATCH /api/documents/:id/urgent { urgent } — the counselor marks an Other Documents request urgent, or back to normal
+exports.setUrgent = asyncHandler(async (req, res) => {
+  const urgent = req.body.urgent === true || req.body.urgent === 'true';
+  const doc = await StudentDoc.findById(req.params.id);
+  if (!doc || doc.origin !== 'Request') { const e = new Error('Document request not found'); e.status = 404; throw e; }
+  if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId)) {
+    // any counselor working on the document's centre
+    const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
+    if (!(me?.centers || []).some(id => String(id) === String(doc.center))) { const e = new Error('Forbidden'); e.status = 403; throw e; }
+  }
+  if (sectionOf(doc.section, doc.name) !== 'Other') { const e = new Error('Only other document requests can be marked urgent'); e.status = 400; throw e; }
+  if (doc.status === 'Delivered') { const e = new Error('This document is already delivered'); e.status = 400; throw e; }
+  if (!!doc.urgent === urgent) return res.json(await loadDoc(doc._id));
+
+  doc.urgent = urgent;
+  doc.urgentMarkedBy = req.user._id;
+  doc.urgentMarkedAt = new Date();
+  addHistoryOnly(doc, urgent ? 'Marked_Urgent' : 'Marked_Normal', req.user, urgent ? 'Marked as an urgent request' : 'Urgent mark removed');
+  await doc.save();
+  await audit(urgent ? 'doc_marked_urgent' : 'doc_marked_normal', 'StudentDocument', doc._id, req.user, { urgent }, `${doc.name}: ${urgent ? 'marked urgent' : 'urgent mark removed'}`);
+  res.json(await loadDoc(doc._id));
 });
 
 exports.update = asyncHandler(async (req, res) => {
@@ -773,7 +854,7 @@ exports.requestDispatch = asyncHandler(async (req, res) => {
 exports.counselorForwardPayment = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   if (doc.status !== 'Payment_Submitted') { const e = new Error('Must be Payment_Submitted status'); e.status = 400; throw e; }
-  pushHistory(doc, 'Payment_Submitted', req.user, 'Counselor reviewed - forwarded to accountant for verification');
+  pushHistory(doc, 'Payment_Submitted', req.user, COUNSELOR_PAYMENT_FORWARD_NOTE);
   await doc.save();
   // Now notify accountant
   await notifyRole('Accountant', { message: `Doc payment ready for verification: "${doc.name}" - ${doc.student?.name}`, type: 'doc_payment_received', documentId: doc._id, role: 'Accountant' });
@@ -979,9 +1060,65 @@ async function assertInventoryStudentAccess(req, student) {
 }
 
 // GET /api/accountant/docs-queue?queue=scanreview|docrequest|docpayments|docpayments_all
+// Accountant "Marksheet Requests" / "Other Doc Requests" tab (?queue=requests&section=Marksheet|Other):
+// requests the counselor approved ("Forwarded" / "Fee_Pending", payment attached or not) and payments the
+// centre made after the scan once the counselor has forwarded them. Urgent first, then most recently updated.
+// Small set (only what waits for the accountant), so it is filtered and paged in memory.
+async function accountantRequestsQueue(req, res) {
+  const section = req.query.section === 'Marksheet' ? 'Marksheet' : 'Other';
+  const docs = await StudentDoc.find({ origin: { $nin: ['Inventory', 'Added'] }, status: { $in: ['Forwarded', 'Fee_Pending', 'Payment_Submitted'] } })
+    .populate('student', 'name enrollmentNumber courseName')
+    .populate('center', 'name')
+    .populate('payments.recordedBy', 'name role')
+    .populate('uploadedBy', 'name role')
+    .populate('statusHistory.changedBy', 'name role')
+    .populate('urgentMarkedBy', 'name role')
+    .sort('-updatedAt')
+    .lean();
+  let rows = docs.filter(d => sectionOf(d.section, d.name) === section && (d.status !== 'Payment_Submitted' || paymentForwardedToAccountant(d)));
+  const paid = d => (d.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const summary = {
+    all: rows.length,
+    requests: rows.filter(d => d.status !== 'Payment_Submitted').length,
+    payments: rows.filter(d => d.status === 'Payment_Submitted').length,
+    urgent: section === 'Other' ? rows.filter(d => d.urgent).length : 0,
+    received: rows.reduce((s, d) => s + paid(d), 0),
+  };
+
+  const q = String(req.query.search || '').trim().toLowerCase();
+  if (q) {
+    rows = rows.filter(d => [d.name, d.student?.name, d.student?.enrollmentNumber, d.center?.name, ...(d.payments || []).map(p => p.utrRef)]
+      .some(v => String(v || '').toLowerCase().includes(q)));
+  }
+  if (section === 'Other' && req.query.urgent === '1') rows = rows.filter(d => d.urgent);
+  if (section === 'Other') rows.sort((a, b) => Number(!!b.urgent) - Number(!!a.urgent));   // stable: keeps newest first within each
+
+  const page  = Math.max(1, parseInt(req.query.page, 10)  || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const documents = rows.slice((page - 1) * limit, page * limit);
+
+  // the student's course fee, shown on marksheet cards
+  const studentIds = [...new Set(documents.map(docStudentId).filter(Boolean))];
+  const fees = await Payment.find({ student: { $in: studentIds } }).select('student totalFee discount netFee paidAmount dueAmount').lean();
+  const feeOf = new Map(fees.map(p => [String(p.student), { totalFee: p.totalFee || 0, discount: p.discount || 0, netFee: p.netFee || 0, paidAmount: p.paidAmount || 0, dueAmount: p.dueAmount || 0 }]));
+  res.json({
+    documents: documents.map(d => ({ ...d, courseFeeSummary: feeOf.get(docStudentId(d)) || null })),
+    total: rows.length, page, pages: Math.ceil(rows.length / limit) || 1, summary,
+  });
+}
+
+// Mongo filter for one request tab; older requests without a tab go by their name
+const MARKSHEET_NAME = /marksheet|transcript/i;
+const sectionQuery = section => (section === 'Marksheet'
+  ? { $or: [{ section: 'Marksheet' }, { section: null, name: MARKSHEET_NAME }] }
+  : { $or: [{ section: 'Other' }, { section: null, name: { $not: MARKSHEET_NAME } }] });
+
 exports.accountantDocsQueue = asyncHandler(async (req, res) => {
   const { queue } = req.query;
+  if (queue === 'requests') return accountantRequestsQueue(req, res);
   const filter = { origin: { $ne: 'Inventory' } };
+  // docpayments_all can be narrowed to one request tab (the payment records under each tab)
+  if (DOC_SECTIONS.includes(req.query.section)) filter.$and = [sectionQuery(req.query.section)];
   if (queue === 'scanreview') {
     filter.status = 'Accountant_Received';
   } else if (queue === 'docrequest') {

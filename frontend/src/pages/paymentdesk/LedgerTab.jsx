@@ -12,6 +12,22 @@ import {
 } from './helpers';
 
 const docText = r => (r.docsTotal ? `${r.docsDelivered} of ${r.docsTotal} delivered` : '—');
+const DOC = 'bg-violet-50/40';   // document columns: kept apart from the course fee, like the Account Ledger
+
+// Document charge / paid (verified) / balance cells; "not verified" money is shown under Paid
+function DocMoney({ r }) {
+  const none = !r.docsTotal;
+  return (
+    <>
+      <td className={cn(TD, DOC, 'text-right tabular-nums', none && 'text-slate-300')}>{none ? '—' : fmt(r.docCharge)}</td>
+      <td className={cn(TD, DOC, 'text-right tabular-nums text-emerald-700', none && 'text-slate-300')}>
+        {none ? '—' : fmt(r.docPaid)}
+        {r.docPending > 0 && <div className="text-[11px] font-medium text-amber-700">{fmt(r.docPending)} not verified</div>}
+      </td>
+      <td className={cn(TD, DOC, 'text-right font-semibold tabular-nums', r.docBalance > 0 ? 'text-red-600' : none && 'text-slate-300')}>{none ? '—' : fmt(r.docBalance)}</td>
+    </>
+  );
+}
 
 export default function LedgerTab() {
   const meta = useMeta();
@@ -47,7 +63,7 @@ export default function LedgerTab() {
           {f.view === 'student' && f.centerId && (
             <Button size="sm" variant="ghost" onClick={() => set({ view: 'center', centerId: '' })}><ArrowLeft className="mr-1 h-4 w-4" />All centres</Button>
           )}
-          <div className="pb-2 text-xs text-slate-500">Students are counted by the date they were added. Paid = verified payments only.</div>
+          <div className="pb-2 text-xs text-slate-500">Students are counted by the date they were added. Paid = verified payments only. Document charges (requests and documents added on the student page) are kept apart from the course fee.</div>
         </div>
         {data && (
           <div className={SUMMARY}>
@@ -57,18 +73,21 @@ export default function LedgerTab() {
             <Stat label="Total amount" value={fmt(data.totals.total)} />
             <Stat label="Paid" value={fmt(data.totals.paid)} tone="text-emerald-700" />
             <Stat label="Balance" value={fmt(data.totals.balance)} tone="text-red-600" />
+            <Stat label="Document charges" value={fmt(data.totals.docCharge)} />
+            <Stat label="Document paid" value={fmt(data.totals.docPaid)} tone="text-emerald-700" />
+            <Stat label="Document balance" value={fmt(data.totals.docBalance)} tone="text-red-600" />
           </div>
         )}
       </CardContent></Card>
 
       <div className={TABLE_WRAP}>
         {loading && !data ? <Spinner /> : data?.view === 'center' ? (
-          <table className="w-full min-w-[1000px] text-sm">
+          <table className="w-full min-w-[1300px] text-sm">
             <thead className="bg-slate-50"><tr>
-              {['Name of centre', 'Total students', 'Enrolled', 'Rejected / cancelled', 'Total amount', 'Paid', 'Balance', 'Status of document'].map((h, i) => <th key={h} className={cn(TH, i >= 1 && i <= 6 && 'text-right')}>{h}</th>)}
+              {['Name of centre', 'Total students', 'Enrolled', 'Rejected / cancelled', 'Total amount', 'Paid', 'Balance', 'Doc charges', 'Doc paid', 'Doc balance', 'Status of document'].map((h, i) => <th key={h} className={cn(TH, i >= 1 && i <= 9 && 'text-right', i >= 7 && i <= 9 && 'bg-violet-50 text-violet-700')}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {data.rows.length === 0 && <tr><td colSpan={8} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
+              {data.rows.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
               {data.rows.map(r => (
                 <tr key={r.centerId} className={ROW_CLICK} onClick={() => openCenter(r.centerId)} title="Open student-wise ledger">
                   <td className={cn(TD, 'font-medium')}>{r.center}</td>
@@ -76,18 +95,19 @@ export default function LedgerTab() {
                   <td className={cn(TD, 'text-right tabular-nums')}>{fmt(r.total)}</td>
                   <td className={cn(TD, 'text-right tabular-nums text-emerald-700')}>{fmt(r.paid)}</td>
                   <td className={cn(TD, 'text-right font-semibold tabular-nums', r.balance > 0 && 'text-red-600')}>{fmt(r.balance)}</td>
+                  <DocMoney r={r} />
                   <td className={TD}>{docText(r)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : (
-          <table className="w-full min-w-[1200px] text-sm">
+          <table className="w-full min-w-[1500px] text-sm">
             <thead className="bg-slate-50"><tr>
-              {['Centre', 'Student', 'Enrollment', 'Course', 'Status', 'Total amount', 'Paid', 'Balance', 'Status of document', 'Adjust'].map((h, i) => <th key={h} className={cn(TH, i >= 5 && i <= 7 && 'text-right')}>{h}</th>)}
+              {['Centre', 'Student', 'Enrollment', 'Course', 'Status', 'Total amount', 'Paid', 'Balance', 'Doc charges', 'Doc paid', 'Doc balance', 'Documents', 'Adjust'].map((h, i) => <th key={h} className={cn(TH, i >= 5 && i <= 10 && 'text-right', i >= 8 && i <= 10 && 'bg-violet-50 text-violet-700')}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {data?.rows.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
+              {data?.rows.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400">No students in this period</td></tr>}
               {data?.rows.map(r => (
                 <tr key={r.studentId} className={ROW}>
                   <td className={TD}>{r.center}</td><td className={cn(TD, 'font-medium')}>{r.name}</td><td className={TD}>{r.enrollmentNumber}</td><td className={TD}>{r.course}</td>
@@ -95,7 +115,15 @@ export default function LedgerTab() {
                   <td className={cn(TD, 'text-right tabular-nums')}>{fmt(r.total)}</td>
                   <td className={cn(TD, 'text-right tabular-nums text-emerald-700')}>{fmt(r.paid)}</td>
                   <td className={cn(TD, 'text-right font-semibold tabular-nums', r.balance > 0 && 'text-red-600')}>{fmt(r.balance)}</td>
-                  <td className={TD}>{docText(r)}</td>
+                  <DocMoney r={r} />
+                  <td className={cn(TD, 'min-w-56')}>
+                    <div>{docText(r)}</div>
+                    {(r.docItems || []).map((x, i) => (
+                      <div key={i} className="text-[11px] text-slate-500">
+                        {x.name} · <span className="text-slate-600">{statusText(x.status)}</span>{x.charge > 0 && <> · {fmt(x.paid)} of {fmt(x.charge)}</>}
+                      </div>
+                    ))}
+                  </td>
                   <td className={cn(TD, 'text-center')}>{r.balance > 0 && <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => setAdjusting({ centerId: String(r.centerId || ''), studentId: String(r.studentId) })}><Scale className="mr-1 h-3.5 w-3.5" />Adjust</Button>}</td>
                 </tr>
               ))}

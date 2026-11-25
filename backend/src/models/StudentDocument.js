@@ -69,6 +69,10 @@ const studentDocSchema = new mongoose.Schema({
   // origin 'Request' only: the centre Documents tab it was raised from (Marksheet / Other Documents).
   // Requests made before these tabs existed have none and are placed by their name.
   section:     { type: String, enum: ['Marksheet', 'Other'] },
+  // Other Documents request the counselor marked urgent (and who / when); unmarking sets it back to normal
+  urgent:         { type: Boolean, default: false },
+  urgentMarkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  urgentMarkedAt: { type: Date },
 
   // Uploaded file
   fileUrl:   { type: String },
