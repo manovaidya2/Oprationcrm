@@ -38,3 +38,13 @@ export const DOCUMENT_OPTIONS = [
   'Provisional & Migration Certificate',
   'PhD Notification',
 ];
+
+// Centre document requests: the Documents tab has a Marksheet tab and an Other Documents tab, each with its
+// own list. "Other" (OTHER_NAME) lets the centre type a name that is not in the list.
+export const OTHER_NAME = '__other__';
+const isMarksheetName = name => /marksheet|transcript/i.test(name || '');
+export const MARKSHEET_REQUEST_OPTIONS = DOCUMENT_OPTIONS.filter(isMarksheetName);
+export const OTHER_REQUEST_OPTIONS = DOCUMENT_OPTIONS.filter(o => !isMarksheetName(o) && o !== 'Other Certificate - Custom');
+export const requestOptions = section => (section === 'Marksheet' ? MARKSHEET_REQUEST_OPTIONS : OTHER_REQUEST_OPTIONS);
+// The tab a request shows in: the one it was raised from; older requests (no section) go by their name
+export const requestSection = doc => doc?.section || (isMarksheetName(doc?.name) ? 'Marksheet' : 'Other');

@@ -23,7 +23,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi, authApi } from '@/lib/api';
 import { activeUniversities } from '@/lib/universities';
-import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
+import { OTHER_NAME, requestOptions, requestSection } from '@/lib/documentOptions';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -1359,10 +1359,47 @@ function FeeSection({ studentId, appStatus, student }) {
 }
 
 // ── DOCS SECTION ─────────────────────────────────────────────
+// Document requests are split into two tabs; each tab requests from its own list.
+const REQUEST_TABS = [
+  { key: 'Marksheet', label: 'Marksheet',       icon: GraduationCap, noun: 'marksheet' },
+  { key: 'Other',     label: 'Other Documents', icon: FileText,      noun: 'document' },
+];
+const requestTab = key => REQUEST_TABS.find(t => t.key === key) || REQUEST_TABS[1];
+const requestNameOf = f => (f.pick === OTHER_NAME ? f.customName.trim() : f.pick);
+
+// Dropdown of the tab's documents, plus "Other" which asks for the name.
+// value = { pick, customName }; onChange(patch)
+function RequestNameField({ section, value, onChange }) {
+  const { noun } = requestTab(section);
+  const isMarksheet = section === 'Marksheet';
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label className="text-xs font-semibold text-slate-600">{isMarksheet ? 'Marksheet' : 'Document'} *</Label>
+        <Select value={value.pick} onValueChange={v => onChange({ pick: v })}>
+          <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder={`Choose ${noun}`}/></SelectTrigger>
+          <SelectContent className="max-h-72">
+            {requestOptions(section).map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+            <SelectItem value={OTHER_NAME}>Other (type the name)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {value.pick === OTHER_NAME && (
+        <div>
+          <Label className="text-xs font-semibold text-slate-600">{isMarksheet ? 'Marksheet' : 'Document'} name *</Label>
+          <Input autoFocus maxLength={120} value={value.customName} onChange={e => onChange({ customName: e.target.value })}
+            placeholder={isMarksheet ? 'e.g. Semester 3 Marksheet' : 'e.g. Name Correction Letter'} className="mt-1 border-slate-200 h-10"/>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
   const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState('Marksheet');
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
   const [editDoc,setEditDoc]=useState(null);
@@ -1370,8 +1407,9 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const [accMap,setAccMap]=useState({});
   const fileRef=useRef();
   const EMPTY_PF = {amount:'',mode:'',upiId:'',utrRef:'',bankName:'',accountHolder:'',accountNumber:'',ifscCode:'',note:'',paidAt:'',paidToAccount:'',paidToAccountLabel:'',paymentScreenshot:null};
-  const [df,setDf]=useState({name:'',names:[],chargeFees:{},note:'',payAmount:'',requestType:'Soft Copy'});
-  const [editDf,setEditDf]=useState({name:'',chargeFee:'',note:'',requestType:'Soft Copy'});
+  const EMPTY_DF = {pick:'',customName:'',chargeFee:'',note:'',payAmount:'',requestType:'Soft Copy'};
+  const [df,setDf]=useState({...EMPTY_DF});
+  const [editDf,setEditDf]=useState({section:'Other',pick:'',customName:'',chargeFee:'',note:'',requestType:'Soft Copy'});
   const [dfPay,setDfPay]=useState({...EMPTY_PF});
   const [docFile,setDocFile]=useState(null);
   const editDocFileRef=useRef();
@@ -1389,36 +1427,45 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const load=useCallback(async()=>{ try{setLoading(true);setDocs(await docsApi.list({studentId, all:'1'}));} catch{} finally{setLoading(false);} },[studentId]);
   useEffect(()=>{load();},[load]);
 
+  const activeTab = requestTab(tab);
+  const counts = REQUEST_TABS.reduce((acc, t) => ({ ...acc, [t.key]: docs.filter(d => requestSection(d) === t.key).length }), {});
+  const tabDocs = docs.filter(d => requestSection(d) === tab);
+
+  function openAdd(){
+    setDf({...EMPTY_DF}); setDfPay({...EMPTY_PF});
+    setDocFile(null); if(fileRef.current) fileRef.current.value='';
+    setAddOpen(true);
+  }
+
   async function addDoc(){
-    const names = df.names?.length ? df.names : (df.name?.trim() ? [df.name.trim()] : []);
-    if(!names.length) return toast.error('Select at least one document');
+    const name = requestNameOf(df);
+    if(!name) return toast.error(df.pick === OTHER_NAME ? `Type the ${activeTab.noun} name` : `Choose a ${activeTab.noun}`);
+    if(Number(df.chargeFee) < 0) return toast.error('Charge cannot be negative');
     setSaving(true);
     try{
-      for (const name of names) {
-        const fd=new FormData();
-        fd.append('studentId',studentId); fd.append('name',name);
-        fd.append('note',df.note);
-        fd.append('chargeFee',df.chargeFees?.[name]||0);
-        fd.append('requestType',df.requestType||'Soft Copy');
-        if(isCounselorSwitch) fd.append('actingAsCenter','true');
-        if(df.payAmount&&Number(df.payAmount)>0){
-          fd.append('paymentAmount',df.payAmount);
-          fd.append('paymentMode',dfPay.mode||'UPI');
-          fd.append('paymentUpiId',dfPay.upiId||'');
-          fd.append('paymentUtrRef',dfPay.utrRef||'');
-          fd.append('paymentBankName',dfPay.bankName||'');
-          fd.append('paymentAccountHolder',dfPay.accountHolder||'');
-          fd.append('paymentAccountNumber',dfPay.accountNumber||'');
-          fd.append('paymentIfscCode',dfPay.ifscCode||'');
-          fd.append('paymentDate',dfPay.paidAt||'');
-          fd.append('paymentPaidToAccount',dfPay.paidToAccount||'');
-          fd.append('paymentPaidToAccountLabel',dfPay.paidToAccountLabel||'');
-        }
-        if(docFile) fd.append('file',docFile);
-        await docsApi.create(fd);
+      const fd=new FormData();
+      fd.append('studentId',studentId); fd.append('name',name); fd.append('section',tab);
+      fd.append('note',df.note);
+      fd.append('chargeFee',Number(df.chargeFee)||0);
+      fd.append('requestType',df.requestType||'Soft Copy');
+      if(isCounselorSwitch) fd.append('actingAsCenter','true');
+      if(df.payAmount&&Number(df.payAmount)>0){
+        fd.append('paymentAmount',df.payAmount);
+        fd.append('paymentMode',dfPay.mode||'UPI');
+        fd.append('paymentUpiId',dfPay.upiId||'');
+        fd.append('paymentUtrRef',dfPay.utrRef||'');
+        fd.append('paymentBankName',dfPay.bankName||'');
+        fd.append('paymentAccountHolder',dfPay.accountHolder||'');
+        fd.append('paymentAccountNumber',dfPay.accountNumber||'');
+        fd.append('paymentIfscCode',dfPay.ifscCode||'');
+        fd.append('paymentDate',dfPay.paidAt||'');
+        fd.append('paymentPaidToAccount',dfPay.paidToAccount||'');
+        fd.append('paymentPaidToAccountLabel',dfPay.paidToAccountLabel||'');
       }
-      toast.success(names.length > 1 ? `${names.length} document requests submitted` : 'Document request submitted'); setAddOpen(false);
-      setDf({name:'',names:[],chargeFees:{},note:'',payAmount:'',requestType:'Soft Copy'}); setDfPay({...EMPTY_PF});
+      if(docFile) fd.append('file',docFile);
+      await docsApi.create(fd);
+      toast.success(`${tab === 'Marksheet' ? 'Marksheet' : 'Document'} request submitted`); setAddOpen(false);
+      setDf({...EMPTY_DF}); setDfPay({...EMPTY_PF});
       setDocFile(null); if(fileRef.current) fileRef.current.value='';
       load();
     } catch(e){toast.error(e.message);} finally{setSaving(false);}
@@ -1488,19 +1535,24 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   }
 
   function openEditDoc(doc) {
+    const section = requestSection(doc);
+    const known = requestOptions(section).includes(doc.name);
     setEditDoc(doc);
-    setEditDf({ name: doc.name || '', chargeFee: doc.chargeFee || '', note: doc.note || '', requestType: doc.requestType || 'Soft Copy' });
+    setEditDf({ section, pick: known ? doc.name : OTHER_NAME, customName: known ? '' : (doc.name || ''),
+      chargeFee: doc.chargeFee || '', note: doc.note || '', requestType: doc.requestType || 'Soft Copy' });
     setEditDocFile(null);
     if (editDocFileRef.current) editDocFileRef.current.value = '';
   }
 
   async function saveDocEdit(){
     if(!editDoc) return;
-    if(!editDf.name.trim()) return toast.error('Document name required');
+    const name = requestNameOf(editDf);
+    if(!name) return toast.error(editDf.pick === OTHER_NAME ? 'Type the document name' : 'Choose a document');
     setSaving(true);
     try{
       const fd = new FormData();
-      fd.append('name', editDf.name);
+      fd.append('name', name);
+      fd.append('section', editDf.section);   // stays in the tab it is shown in, even if the name changes
       fd.append('chargeFee', editDf.chargeFee || 0);
       fd.append('note', editDf.note || '');
       fd.append('requestType', editDf.requestType || 'Soft Copy');
@@ -1538,11 +1590,23 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{docs.length} document{docs.length!==1?'s':''}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div role="tablist" aria-label="Document requests" className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
+          {REQUEST_TABS.map(t => {
+            const { icon: Icon } = t;
+            const active = tab === t.key;
+            return (
+              <button key={t.key} type="button" role="tab" aria-selected={active} onClick={()=>setTab(t.key)}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>
+                <Icon className={`h-3.5 w-3.5 ${active ? 'text-indigo-600' : ''}`}/>{t.label}
+                <span className={`min-w-[1.25rem] rounded-full px-1.5 text-center text-[10px] leading-4 tabular-nums ${active ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-600'}`}>{counts[t.key]}</span>
+              </button>
+            );
+          })}
+        </div>
         {isEnrolled && !isCancelled &&(
-          <Button size="sm" onClick={()=>setAddOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs">
-            <Plus className="h-3.5 w-3.5 mr-1.5"/>Request Document
+          <Button size="sm" onClick={openAdd} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs">
+            <Plus className="h-3.5 w-3.5 mr-1.5"/>{tab === 'Marksheet' ? 'Request Marksheet' : 'Request Document'}
           </Button>
         )}
       </div>
@@ -1559,16 +1623,16 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         </div>
       )}
 
-      {docs.length===0?(
+      {tabDocs.length===0?(
         <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
           <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
-            <FileText className="h-6 w-6 text-slate-400"/>
+            <activeTab.icon className="h-6 w-6 text-slate-400"/>
           </div>
-          <p className="text-sm font-medium text-slate-600">No documents yet</p>
-          <p className="text-xs text-slate-400 mt-1">Documents requested here will be tracked through the system</p>
+          <p className="text-sm font-medium text-slate-600">No {activeTab.noun} requests yet</p>
+          <p className="text-xs text-slate-400 mt-1">{tab === 'Marksheet' ? 'Marksheets' : 'Documents'} requested here will be tracked through the system</p>
         </div>
       )
-      :docs.map(d=>(
+      :tabDocs.map(d=>(
         <div key={d._id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm hover:shadow transition-shadow">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
@@ -1732,38 +1796,10 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       {/* Add Doc Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="text-slate-800">Request Document</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="text-slate-800">{tab === 'Marksheet' ? 'Request Marksheet' : 'Request Document'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div>
-              <Label className="text-xs font-semibold text-slate-600">Document Names *</Label>
-              <div className="mt-1 max-h-72 overflow-y-auto rounded-md border border-slate-200 p-2">
-                {DOCUMENT_OPTIONS.map(name => {
-                  const checked = df.names.includes(name);
-                  return (
-                    <label key={name} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-slate-50">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => setDf(p => {
-                          const nextCharges = { ...(p.chargeFees || {}) };
-                          if (checked) delete nextCharges[name];
-                          return {
-                            ...p,
-                            name: '',
-                            names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
-                            chargeFees: nextCharges,
-                          };
-                        })}
-                        className="h-4 w-4 accent-indigo-600"
-                      />
-                      <span>{name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="mt-1 text-xs text-slate-500">{df.names.length} selected</div>
-            </div>
-            <div className="grid grid-cols-1 gap-3">
+            <RequestNameField section={tab} value={df} onChange={patch=>setDf(p=>({...p,...patch}))}/>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
                 <Select value={df.requestType} onValueChange={v=>setDf(p=>({...p,requestType:v}))}>
@@ -1774,30 +1810,11 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-            {df.names.length > 0 && (
               <div>
-                <Label className="text-xs font-semibold text-slate-600">Document Charges</Label>
-                <div className="mt-1 space-y-2">
-                  {df.names.map(name => (
-                    <div key={name} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                      <span className="text-sm font-medium text-slate-700">{name}</span>
-                      <div className="flex items-center gap-2 sm:w-40">
-                        <span className="text-xs font-semibold text-slate-500">Charge</span>
-                        <Input
-                          type="number"
-                          min="0"
-                          value={df.chargeFees?.[name] ?? ''}
-                          onChange={e=>setDf(p=>({...p,chargeFees:{...(p.chargeFees||{}),[name]:e.target.value}}))}
-                          placeholder="0"
-                          className="h-9 border-slate-200 text-sm"
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label>
+                <Input type="number" min="0" value={df.chargeFee} onChange={e=>setDf(p=>({...p,chargeFee:e.target.value}))} placeholder="0" className="mt-1 border-slate-200 h-10"/>
               </div>
-            )}
+            </div>
             {/* <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={df.note} onChange={e=>setDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div> */}
             {/* <div><Label className="text-xs font-semibold text-slate-600">Upload File (optional)</Label><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setDocFile(e.target.files[0])} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-slate-100 file:text-slate-600 file:font-medium"/></div> */}
             {/* <div className="border-t border-slate-200 pt-3">
@@ -1818,15 +1835,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="text-slate-800">Edit Document Request</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div>
-              <Label className="text-xs font-semibold text-slate-600">Document Name *</Label>
-              <Select value={editDf.name} onValueChange={v=>setEditDf(p=>({...p,name:v}))}>
-                <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder="Choose document"/></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  {DOCUMENT_OPTIONS.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+            <RequestNameField section={editDf.section} value={editDf} onChange={patch=>setEditDf(p=>({...p,...patch}))}/>
             <div>
               <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
               <Select value={editDf.requestType} onValueChange={v=>setEditDf(p=>({...p,requestType:v}))}>

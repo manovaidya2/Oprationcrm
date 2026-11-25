@@ -66,6 +66,9 @@ const studentDocSchema = new mongoose.Schema({
   sharedAt:        { type: Date },
   sharedBy:        { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   requestType: { type: String, enum: ['Soft Copy', 'Hard Copy'], default: 'Soft Copy' },
+  // origin 'Request' only: the centre Documents tab it was raised from (Marksheet / Other Documents).
+  // Requests made before these tabs existed have none and are placed by their name.
+  section:     { type: String, enum: ['Marksheet', 'Other'] },
 
   // Uploaded file
   fileUrl:   { type: String },

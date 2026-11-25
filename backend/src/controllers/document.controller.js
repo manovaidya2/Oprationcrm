@@ -7,6 +7,9 @@ const Counselor     = require('../models/Counselor');
 const mongoose      = require('mongoose');
 const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
 
+// Centre Documents tab a request is raised from
+const DOC_SECTIONS = ['Marksheet', 'Other'];
+
 async function loadDoc(id) {
   const doc = await StudentDoc.findById(id)
     .populate('student', 'name center counselor phone email courseName courseYear fatherName enrollmentNumber')
@@ -270,11 +273,13 @@ exports.get = asyncHandler(async (req, res) => {
 // POST /api/documents - Center creates doc request with optional payment
 exports.create = asyncHandler(async (req, res) => {
   const {
-    studentId, name, type, note, chargeFee, requestType,
+    studentId, type, note, chargeFee, requestType, section,
     paymentAmount, paymentMode, paymentUtrRef, paymentDate,
     paymentUpiId, paymentBankName, paymentAccountHolder, paymentAccountNumber, paymentIfscCode,
     paymentPaidToAccount, paymentPaidToAccountLabel,
   } = req.body;
+  const name = String(req.body.name || '').trim();
+  if (!name) { const e = new Error('Document name is required'); e.status = 400; throw e; }
   const student = await Student.findById(studentId);
   if (!student) { const e = new Error('Student not found'); e.status = 404; throw e; }
   const centerOriginated = await canUseCenterFlow(req, student.center);
@@ -295,8 +300,9 @@ exports.create = asyncHandler(async (req, res) => {
   const doc = new StudentDoc({
     student: studentId, center: student.center, counselor: student.counselor,
     university: student.university,
-    name: name.trim(), type: type||'', note: note||'',
+    name, type: type||'', note: note||'',
     requestType: requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy',
+    section: DOC_SECTIONS.includes(section) ? section : undefined,
     origin: 'Request',
     chargeFee: Number(chargeFee)||0,
     uploadedBy: req.user._id, status: 'Requested',
@@ -366,7 +372,12 @@ exports.update = asyncHandler(async (req, res) => {
       const e = new Error('Document request cannot be edited after scan is uploaded'); e.status = 400; throw e;
     }
   }
-  if (req.body.name !== undefined)      doc.name      = req.body.name;
+  if (req.body.name !== undefined) {
+    const name = String(req.body.name || '').trim();
+    if (!name) { const e = new Error('Document name is required'); e.status = 400; throw e; }
+    doc.name = name;
+  }
+  if (DOC_SECTIONS.includes(req.body.section)) doc.section = req.body.section;
   if (req.body.type !== undefined)      doc.type      = req.body.type;
   if (req.body.note !== undefined)      doc.note      = req.body.note;
   if (req.body.requestType !== undefined) doc.requestType = req.body.requestType === 'Hard Copy' ? 'Hard Copy' : 'Soft Copy';
