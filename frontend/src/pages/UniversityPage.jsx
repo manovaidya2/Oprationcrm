@@ -1,16 +1,11 @@
 import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback } from 'react';
 import {
-  BookOpen, BadgeCheck, Truck, Paperclip, Search, X, Eye,
-  Loader2, GraduationCap, FileText, Package, TrendingUp,
-  Clock, CheckCircle2, Hash, User, Building2, Download,
-  ChevronRight, History, Send, XCircle, AlertTriangle, Undo2,
+  BadgeCheck, Truck, Paperclip, Search, Eye, Loader2, GraduationCap, FileText, CheckCircle2, Download, ChevronRight, History, Send, XCircle, AlertTriangle, X,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { studentsApi, docsApi } from '@/lib/api';
@@ -55,7 +50,6 @@ const SECTION_META = {
   Other:     { label: 'Other Document', icon: FileText,      tone: 'bg-sky-50 text-sky-600',       badge: 'border-sky-200 bg-sky-50 text-sky-700' },
 };
 const isUrgentDoc = d => !!d.urgent || (d.statusHistory || []).some(h => h.status === 'Urgent_Requested');
-const urgentSince = d => (d.urgent ? d.urgentMarkedAt : [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested')?.at);
 const requestedAt = d => [...(d.statusHistory || [])].reverse().find(h => h.status === 'Sent_To_University')?.at || d.createdAt;
 // the date Dispatch received it from the university (older records: the receipt in the history)
 const receivedOn = d => d.receivedFromUniversityAt || [...(d.statusHistory || [])].reverse().find(h => h.status === 'Dispatch_Received')?.at || null;
@@ -90,120 +84,6 @@ function StudentLink({ student, onOpen }) {
     <button type="button" onClick={() => onOpen(student)} className="font-semibold text-slate-800 hover:text-purple-700 hover:underline">
       {student.name}
     </button>
-  );
-}
-
-// A request waiting for the university's courier
-function PendingRequestCard({ d, selected, onToggle, onOpenStudent, showSection }) {
-  const urgent = isUrgentDoc(d);
-  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
-  const since = urgent ? urgentSince(d) : null;
-  return (
-    <Card className={`mb-2 ${urgent ? 'border-red-200 bg-red-50/40' : 'border-amber-200'}`}>
-      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
-        <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${d.name}`}
-          className={`mt-2.5 h-4 w-4 shrink-0 ${urgent ? 'accent-red-600' : 'accent-purple-600'}`}/>
-        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold">{d.name}</span>
-            {showSection && <SectionBadge d={d}/>}
-            {urgent && <UrgentBadge/>}
-            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
-          </div>
-          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
-            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
-            <EnrollmentChip student={d.student}/>
-            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-            <span>Requested: {fmtDt(requestedAt(d))}</span>
-            {since && <span className="font-medium text-red-700">Urgent since {fmtDt(since)}</span>}
-          </div>
-        </div>
-        <span className={`ml-auto shrink-0 text-xs font-medium px-2.5 py-1 rounded-full border ${urgent ? 'text-red-700 bg-red-100 border-red-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
-          {urgent ? 'Urgent - Awaiting Physical Courier' : '⏳ Awaiting Physical Courier'}
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
-
-// A document Dispatch sent back for correction: what to correct, waiting for the corrected copy
-function CorrectionCard({ d, onOpenStudent }) {
-  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
-  return (
-    <Card className="mb-2 border-amber-300 bg-amber-50/40">
-      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
-        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold">{d.name}</span>
-            <SectionBadge d={d}/>
-            {isUrgentDoc(d) && <UrgentBadge/>}
-            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
-          </div>
-          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
-            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
-            <EnrollmentChip student={d.student}/>
-            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
-          </div>
-          <div className="mt-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-900">
-            <span className="font-semibold">Correction needed:</span> {d.correctionNote || '—'}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-            <span>Sent back: {fmtDt(d.correctionSentAt)}</span>
-            {d.correctionCount > 1 && <span className="font-semibold text-amber-800">{d.correctionCount}{d.correctionCount === 2 ? 'nd' : d.correctionCount === 3 ? 'rd' : 'th'} correction</span>}
-          </div>
-        </div>
-        <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border text-amber-800 bg-amber-100 border-amber-300">
-          <Undo2 className="h-3.5 w-3.5"/>Send corrected copy
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
-
-// A request the university has sent: Dispatch marked it received (the date it reached the office).
-// Older ones the university marked dispatched itself may still be on the way.
-function SentCard({ d, onOpenStudent }) {
-  const urgent = isUrgentDoc(d);
-  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
-  const received = receivedOn(d);
-  return (
-    <Card className="mb-2 border-l-4 border-l-emerald-400">
-      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
-        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold">{d.name}</span>
-            {urgent && <UrgentBadge/>}
-            {d.correctionCount > 0 && <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Corrected copy</span>}
-            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
-          </div>
-          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
-            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
-            <EnrollmentChip student={d.student}/>
-            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
-          </div>
-          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-            <span>Requested: {fmtDt(requestedAt(d))}</span>
-            {received && <span className="font-semibold text-emerald-700">Received at office: {fmtDt(received)}</span>}
-          </div>
-          {hasCourier(d.courierInfo) && (
-            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
-              <Truck className="h-3 w-3"/>
-              {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
-              {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
-              {d.courierInfo.documentsDesc && <span>· {d.courierInfo.documentsDesc}</span>}
-            </div>
-          )}
-        </div>
-        <span className={`ml-auto shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border ${received ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-teal-700 bg-teal-50 border-teal-200'}`}>
-          {received ? <><CheckCircle2 className="h-3.5 w-3.5"/>Sent</> : <><Truck className="h-3.5 w-3.5"/>Sent · on the way</>}
-        </span>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -360,27 +240,6 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
   );
 }
 
-// ── Stat Card ─────────────────────────────────────────────────
-function StatCard({ icon: Icon, label, value, sub, color, trend }) {
-  return (
-    <Card className="relative overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="flex-1">
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{label}</p>
-            <p className={`text-3xl font-bold mt-1 ${color || 'text-foreground'}`}>{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
-            {trend && <p className="text-xs text-emerald-600 mt-1 font-medium">{trend}</p>}
-          </div>
-          <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${color ? color.replace('text-','bg-').replace('-600','-100').replace('-700','-100') : 'bg-muted'}`}>
-            <Icon className={`h-5 w-5 ${color || 'text-muted-foreground'}`}/>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ── Main Page ─────────────────────────────────────────────────
 export default function UniversityPage() {
   const [pending,   setPending]   = useState([]);
@@ -408,7 +267,8 @@ export default function UniversityPage() {
   const [docSearch, setDocSearch] = useState('');
   const [selectedDocIds, setSelectedDocIds] = useState([]);
   const [tab, setTab] = useState('pending');
-  const [urgentSection, setUrgentSection] = useState('');   // Urgent tab filter: '' (all) | 'Marksheet' | 'Other'
+  const [urgentSection, setUrgentSection] = useState('');
+  const [now] = useState(() => Date.now());   // for "waiting N days"   // Urgent tab filter: '' (all) | 'Marksheet' | 'Other'
 
   const load = useCallback(async () => {
     try {
@@ -463,7 +323,6 @@ export default function UniversityPage() {
   const marksheetPending  = awaitingDocs.filter(d => !isUrgentDoc(d) && requestSection(d) === 'Marksheet');
   const otherPending      = awaitingDocs.filter(d => !isUrgentDoc(d) && requestSection(d) === 'Other');
   const dispatchedDocs= docs.filter(d => DISPATCHED_STATUSES.includes(d.status));
-  const totalDocs     = docs.length;
 
   // ── CSV Export ───────────────────────────────────────────────
   function downloadCSV(type) {
@@ -523,14 +382,14 @@ export default function UniversityPage() {
     setModalStudent(allStudents.find(x => String(x._id) === String(st._id)) || st);
   }
 
-  // Request tabs: kind is 'Marksheet', 'Other' or 'urgent'
+  // Request tabs: kind is 'all', 'Marksheet', 'Other' or 'urgent'
   const inRequestTab = (kind, d) => (kind === 'urgent'
     ? isUrgentDoc(d) && (!urgentSection || requestSection(d) === urgentSection)
-    : requestSection(d) === kind);
+    : kind === 'all' || requestSection(d) === kind);
   const tabPendingDocs = kind => filtDocs.filter(d => d.status === 'Sent_To_University' && !d.correctionOpen && inRequestTab(kind, d) && (kind === 'urgent' || !isUrgentDoc(d)));
   const tabCorrectionDocs = () => filtDocs.filter(d => d.status === 'Sent_To_University' && d.correctionOpen)
     .sort((a, b) => new Date(a.correctionSentAt || 0) - new Date(b.correctionSentAt || 0));
-  const kindNoun = kind => (kind === 'urgent' ? 'urgent' : kind === 'Marksheet' ? 'marksheet' : 'other document');
+  const kindNoun = kind => (kind === 'urgent' ? 'urgent' : kind === 'all' ? 'document' : kind === 'Marksheet' ? 'marksheet' : 'other document');
   // Sent tabs: requests the university has sent (Dispatch received them), latest received first
   const receivedTime = d => new Date(receivedOn(d) || d.updatedAt || 0).getTime();
   const tabSentDocs = section => filtDocs
@@ -595,7 +454,7 @@ export default function UniversityPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `university_${kind === 'urgent' ? 'urgent' : kind === 'Marksheet' ? 'marksheet' : 'other'}_doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `university_${kind === 'urgent' ? 'urgent' : kind === 'all' ? 'all' : kind === 'Marksheet' ? 'marksheet' : 'other'}_doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length} students`);
@@ -609,87 +468,68 @@ export default function UniversityPage() {
   const filtCancelled = cancelled.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
   const filtDocs     = docs.filter(d => !dq || d.name?.toLowerCase().includes(dq) || d.student?.name?.toLowerCase().includes(dq) || d.student?.enrollmentNumber?.toLowerCase().includes(dq) || d.courierInfo?.trackingNo?.toLowerCase().includes(dq));
 
+  // ── how long something has waited, as a coloured badge ──
+  function waitBadge(at) {
+    if (!at) return <span className="text-xs text-slate-400">—</span>;
+    const days = Math.max(0, Math.floor((now - new Date(at).getTime()) / 86400000));
+    const tone = days >= 14 ? 'bg-red-50 text-red-700' : days >= 7 ? 'bg-orange-50 text-orange-700' : 'bg-slate-100 text-slate-600';
+    return <span className={`rounded-md px-2 py-0.5 text-xs font-bold tabular-nums ${tone}`}>{days === 0 ? 'today' : `${days} day${days === 1 ? '' : 's'}`}</span>;
+  }
+  const thCls = 'px-3 py-2.5 font-semibold';
+  const tdCls = 'px-3 py-3 align-top';
+  const emptyRow = (cols, text) => (
+    <tr><td colSpan={cols} className="px-3 py-14 text-center text-sm text-slate-500">{text}</td></tr>
+  );
+  const copyTag = d => d.requestType && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>;
+
+  // Document requests waiting for the university: one row per document, oldest first
   function renderRequestTab(kind) {
     const isUrgentTab = kind === 'urgent';
     const noun = kindNoun(kind);
-    const pendingList = tabPendingDocs(kind);
+    const pendingList = [...tabPendingDocs(kind)].sort((a, b) => new Date(requestedAt(a) || 0) - new Date(requestedAt(b) || 0));
     const selectedHere = pendingList.filter(d => selectedDocIds.includes(String(d._id))).length;
     const allSelected = pendingList.length > 0 && selectedHere === pendingList.length;
-    const urgentOfSection = isUrgentTab ? 0 : urgentPendingDocs.filter(d => requestSection(d) === kind).length;
-    // pending in this tab before the search box
-    const anyPending = docs.some(d => d.status === 'Sent_To_University' && inRequestTab(kind, d) && (isUrgentTab || !isUrgentDoc(d)));
-    const EmptyIcon = isUrgentTab ? AlertTriangle : SECTION_META[kind].icon;
+    const anyPending = docs.some(d => d.status === 'Sent_To_University' && !d.correctionOpen && inRequestTab(kind, d) && (isUrgentTab || !isUrgentDoc(d)));
     return (
       <>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[260px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-            <Input className="pl-9 pr-9" placeholder={`Search ${noun} requests…`}
-              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
-            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
-          </div>
-          <Button variant="outline" className={`gap-2 ${isUrgentTab ? 'border-red-300 text-red-700 hover:bg-red-50' : ''}`}
-            onClick={() => downloadDocRequestsCSV(kind)} disabled={pendingList.length === 0}>
-            <Download className="h-4 w-4"/>CSV {selectedHere ? `(${selectedHere})` : isUrgentTab ? 'Urgent Requests' : 'Requests'}
-          </Button>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead>
+              <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                <th className="w-10 px-4 py-2.5"><input type="checkbox" checked={allSelected} onChange={() => toggleAllDocs(pendingList)} aria-label="Select all" className="h-4 w-4 accent-indigo-600"/></th>
+                <th className={thCls}>Student</th>
+                <th className={thCls}>Course</th>
+                <th className={thCls}>{kind === 'Marksheet' ? 'Marksheet' : 'Document'}</th>
+                <th className={thCls}>Requested on</th>
+                <th className={thCls}>Waiting</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendingList.length === 0
+                ? emptyRow(6, anyPending ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : `No pending ${noun} requests. Ones that reached our office are under "Sent to the office".`)
+                : pendingList.map(d => {
+                  const checked = selectedDocIds.includes(String(d._id));
+                  return (
+                    <tr key={d._id} className={`border-t border-slate-100 ${checked ? 'bg-indigo-50/50' : 'hover:bg-slate-50/70'}`}>
+                      <td className="px-4 py-3 align-top"><input type="checkbox" checked={checked} onChange={() => toggleDocSelection(d._id)} aria-label={`Select ${d.name}`} className="mt-0.5 h-4 w-4 accent-indigo-600"/></td>
+                      <td className={tdCls}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
+                      <td className={`${tdCls} text-slate-600`}>{d.student?.courseName || '—'}</td>
+                      <td className={tdCls}>
+                        <div className="font-medium text-slate-900">{d.name}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">{(isUrgentTab || kind === 'all') && <SectionBadge d={d}/>}{isUrgentDoc(d) && <UrgentBadge/>}{copyTag(d)}</div>
+                      </td>
+                      <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(requestedAt(d))}</td>
+                      <td className={tdCls}>{waitBadge(requestedAt(d))}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
         </div>
-
-        {isUrgentTab && (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Urgent requests by section">
-            {[['', 'All'], ['Marksheet', 'Marksheet'], ['Other', 'Other Documents']].map(([val, label]) => {
-              const on = urgentSection === val;
-              const n = urgentPendingDocs.filter(d => !val || requestSection(d) === val).length;
-              return (
-                <button key={label} type="button" aria-pressed={on} onClick={() => setUrgentSection(val)}
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${on ? 'border-red-600 bg-red-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-red-200 hover:text-red-700'}`}>
-                  {label} <span className="tabular-nums opacity-80">{n}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {urgentOfSection > 0 && (
-          <button type="button" onClick={() => { setUrgentSection(kind); setTab('urgent'); }}
-            className="flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-left text-xs font-medium text-red-700 hover:bg-red-50">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0"/>
-            <span className="flex-1">{urgentOfSection} urgent {noun} request{urgentOfSection === 1 ? ' is' : 's are'} in the Urgent Requests tab</span>
-            <ChevronRight className="h-3.5 w-3.5 shrink-0"/>
-          </button>
-        )}
-
-        {pendingList.length > 0 && (
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <input type="checkbox" checked={allSelected} onChange={() => toggleAllDocs(pendingList)} aria-label="Select all"
-                className={`h-4 w-4 ${isUrgentTab ? 'accent-red-600' : 'accent-purple-600'}`}/>
-              <div className={`h-2 w-2 rounded-full animate-pulse ${isUrgentTab ? 'bg-red-500' : 'bg-amber-500'}`}/>
-              <span className={`text-sm font-semibold ${isUrgentTab ? 'text-red-700' : 'text-amber-700'}`}>
-                {isUrgentTab ? 'Urgent Pending Requests' : 'Pending My Action'} ({pendingList.length})
-              </span>
-              {selectedHere > 0 && <span className="text-xs text-muted-foreground">· {selectedHere} selected</span>}
-            </div>
-            {pendingList.map(d => (
-              <PendingRequestCard key={d._id} d={d} showSection={isUrgentTab}
-                selected={selectedDocIds.includes(String(d._id))} onToggle={() => toggleDocSelection(d._id)}
-                onOpenStudent={openDocStudent}/>
-            ))}
-          </div>
-        )}
-
-        {pendingList.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground">
-            {anyPending ? (
-              <><Search className="h-10 w-10 mx-auto mb-3 opacity-40"/>No results{docSearch ? ` for "${docSearch}"` : ''}</>
-            ) : (
-              <>
-                <EmptyIcon className={`h-10 w-10 mx-auto mb-3 ${isUrgentTab ? 'text-red-300' : 'text-emerald-400'}`}/>
-                <p>No pending {noun} requests</p>
-                <p className="text-xs mt-1">Requests that reached our office are in Marksheet Sent / Other Doc Sent.</p>
-              </>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+          <span>{pendingList.length} request{pendingList.length === 1 ? '' : 's'}{selectedHere ? ` · ${selectedHere} selected` : ''}</span>
+          <span>CSV: student, enrollment, course, documents, requested on{selectedHere ? ' — only the selected ones' : ''}</span>
+        </div>
       </>
     );
   }
@@ -722,28 +562,30 @@ export default function UniversityPage() {
   function renderCorrectionTab() {
     const list = tabCorrectionDocs();
     return (
-      <>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[260px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-            <Input className="pl-9 pr-9" placeholder="Search documents needing correction…"
-              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
-            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
-          </div>
-          <Button variant="outline" className="gap-2 border-amber-300 text-amber-800 hover:bg-amber-50" onClick={downloadCorrectionCSV} disabled={list.length === 0}>
-            <Download className="h-4 w-4"/>CSV Corrections
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">Documents our office found a mistake in. Correct them and send the corrected copy — it then shows under Marksheet Sent / Other Doc Sent.</p>
-        {list.length > 0
-          ? list.map(d => <CorrectionCard key={d._id} d={d} onOpenStudent={openDocStudent}/>)
-          : (
-            <div className="text-center py-12 text-muted-foreground">
-              <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-400"/>
-              {correctionDocs.length ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : 'No document needs correction'}
-            </div>
-          )}
-      </>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Student</th>
+              <th className={thCls}>Document</th>
+              <th className={thCls}>What to correct</th>
+              <th className={thCls}>Sent back</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.length === 0
+              ? emptyRow(4, correctionDocs.length ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : 'No document needs correction')
+              : list.map(d => (
+                <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                  <td className={`${tdCls} pl-4`}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
+                  <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1"><SectionBadge d={d}/>{isUrgentDoc(d) && <UrgentBadge/>}{copyTag(d)}</div></td>
+                  <td className={tdCls}><div className="rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-orange-900">{d.correctionNote || '—'}</div></td>
+                  <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(d.correctionSentAt)}{d.correctionCount > 1 && <div className="text-xs font-semibold text-orange-700">{d.correctionCount} times</div>}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
 
@@ -752,28 +594,186 @@ export default function UniversityPage() {
     const list = tabSentDocs(section);
     const anySent = docs.some(d => DISPATCHED_STATUSES.includes(d.status) && requestSection(d) === section);
     return (
-      <>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[260px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-            <Input className="pl-9 pr-9" placeholder={`Search sent ${noun}s…`}
-              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
-            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
-          </div>
-          <Button variant="outline" className="gap-2" onClick={() => downloadSentCSV(section)} disabled={list.length === 0}>
-            <Download className="h-4 w-4"/>CSV Sent
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">{noun.charAt(0).toUpperCase() + noun.slice(1)} requests you have sent, with the date each reached our office.</p>
-        {list.length > 0
-          ? list.map(d => <SentCard key={d._id} d={d} onOpenStudent={openDocStudent}/>)
-          : (
-            <div className="text-center py-12 text-muted-foreground">
-              <Send className="h-10 w-10 mx-auto mb-3 opacity-40"/>
-              {anySent ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : `No ${noun}s sent yet`}
-            </div>
-          )}
-      </>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Student</th>
+              <th className={thCls}>{section === 'Marksheet' ? 'Marksheet' : 'Document'}</th>
+              <th className={thCls}>Requested on</th>
+              <th className={thCls}>Received at office</th>
+              <th className={thCls}>Courier</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.length === 0
+              ? emptyRow(5, anySent ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : `No ${noun}s sent yet`)
+              : list.map(d => {
+                const received = receivedOn(d);
+                return (
+                  <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                    <td className={`${tdCls} pl-4`}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
+                    <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1">{isUrgentDoc(d) && <UrgentBadge/>}{d.correctionCount > 0 && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">Corrected copy</span>}{copyTag(d)}</div></td>
+                    <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(requestedAt(d))}</td>
+                    <td className={tdCls}>{received
+                      ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5"/>{fmtDt(received)}</span>
+                      : <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700"><Truck className="h-3.5 w-3.5"/>On the way</span>}</td>
+                    <td className={`${tdCls} text-xs text-slate-600`}>{hasCourier(d.courierInfo) ? <>{d.courierInfo.company}{d.courierInfo.trackingNo && <span className="ml-1 font-mono">{d.courierInfo.trackingNo}</span>}</> : '—'}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderPendingTab() {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Student</th>
+              <th className={thCls}>Course</th>
+              <th className={thCls}>Father</th>
+              <th className={thCls}>Submitted documents</th>
+              <th className={`${thCls} pr-4 text-right`}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtPending.length === 0
+              ? emptyRow(5, pending.length === 0 ? 'All students enrolled' : `No results for "${search}"`)
+              : filtPending.map(s => (
+                <tr key={s._id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                  <td className={`${tdCls} pl-4`}>
+                    <button type="button" onClick={() => setModalStudent(s)} className="font-semibold text-slate-900 hover:text-indigo-700 hover:underline">{s.name}</button>
+                    {s.phone && <div className="text-xs text-slate-500">{s.phone}</div>}
+                  </td>
+                  <td className={`${tdCls} text-slate-600`}>{[s.courseName, s.courseYear].filter(Boolean).join(' ') || '—'}</td>
+                  <td className={`${tdCls} text-slate-600`}>{s.fatherName || '—'}</td>
+                  <td className={tdCls}>
+                    <div className="flex max-w-xs flex-wrap gap-1">
+                      {(s.submissionDocs || []).map((d, i) => d.fileUrl
+                        ? <a key={i} href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-1.5 py-0.5 text-xs text-indigo-700 hover:bg-indigo-50"><Paperclip className="h-3 w-3"/>{d.name}</a>
+                        : <span key={i} className="rounded-md border border-slate-200 px-1.5 py-0.5 text-xs text-slate-500">{d.name}</span>)}
+                      {!s.submissionDocs?.length && <span className="text-xs text-slate-400">—</span>}
+                    </div>
+                  </td>
+                  <td className={`${tdCls} pr-4`}>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" aria-label={`View ${s.name}`} onClick={() => setModalStudent(s)}><Eye className="h-4 w-4"/></Button>
+                      <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700" onClick={() => { setSelStudent(s); setEnrNum(''); setEnrOpen(true); }}><BadgeCheck className="mr-1 h-4 w-4"/>Assign</Button>
+                      <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50" onClick={() => { setRejectStudent(s); setRejectReason(''); setRejectOpen(true); }}><XCircle className="mr-1 h-4 w-4"/>Reject</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderEnrolledTab() {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Student</th>
+              <th className={thCls}>Enrollment no.</th>
+              <th className={thCls}>Course</th>
+              <th className={thCls}>Phone</th>
+              <th className={thCls}>Document requests</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtEnrolled.length === 0
+              ? emptyRow(5, enrolled.length === 0 ? 'No enrolled students yet' : `No results for "${search}"`)
+              : filtEnrolled.map(s => {
+                const mine = docs.filter(d => String(d.student?._id || d.student) === String(s._id));
+                const sent = mine.filter(d => DISPATCHED_STATUSES.includes(d.status)).length;
+                return (
+                  <tr key={s._id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                    <td className={`${tdCls} pl-4`}><button type="button" onClick={() => setModalStudent(s)} className="font-semibold text-slate-900 hover:text-indigo-700 hover:underline">{s.name}</button></td>
+                    <td className={tdCls}><span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-mono text-xs font-bold text-emerald-700">{s.enrollmentNumber}</span></td>
+                    <td className={`${tdCls} text-slate-600`}>{[s.courseName, s.courseYear].filter(Boolean).join(' ') || '—'}</td>
+                    <td className={`${tdCls} text-slate-600`}>{s.phone || '—'}</td>
+                    <td className={`${tdCls} text-xs text-slate-600`}>{mine.length ? `${mine.length} request${mine.length === 1 ? '' : 's'}${sent ? ` · ${sent} sent` : ''}` : '—'}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderCancelledTab() {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Student</th>
+              <th className={thCls}>Enrollment no.</th>
+              <th className={thCls}>Centre</th>
+              <th className={thCls}>Course</th>
+              <th className={thCls}>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtCancelled.length === 0
+              ? emptyRow(5, 'No cancelled students')
+              : filtCancelled.map(s => (
+                <tr key={s._id} className="border-t border-slate-100">
+                  <td className={`${tdCls} pl-4`}>
+                    <button type="button" onClick={() => setModalStudent(s)} className="font-semibold text-slate-900 hover:text-indigo-700 hover:underline">{s.name}</button>
+                    {s.phone && <div className="text-xs text-slate-500">{s.phone}</div>}
+                  </td>
+                  <td className={tdCls}>{s.enrollmentNumber ? <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 font-mono text-xs font-bold text-emerald-700">{s.enrollmentNumber}</span> : '—'}</td>
+                  <td className={`${tdCls} text-slate-600`}>{s.center?.name || '—'}</td>
+                  <td className={`${tdCls} text-slate-600`}>{[s.courseName, s.courseYear].filter(Boolean).join(' ') || '—'}</td>
+                  <td className={`${tdCls} text-slate-600`}>{s.rejectionReason || '—'}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  function renderHistoryTab() {
+    const list = filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status));
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className={`${thCls} pl-4`}>Document</th>
+              <th className={thCls}>Student</th>
+              <th className={thCls}>Where it is</th>
+              <th className={thCls}>Courier</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.length === 0
+              ? emptyRow(4, dispatchedDocs.length ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : 'No dispatches yet')
+              : list.map(d => {
+                const si = docStatusInfo(d);
+                return (
+                  <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
+                    <td className={`${tdCls} pl-4`}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1"><SectionBadge d={d}/>{isUrgentDoc(d) && <UrgentBadge/>}</div></td>
+                    <td className={tdCls}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
+                    <td className={tdCls}><span className={`rounded-full px-2 py-0.5 text-xs ${si.color}`}>{si.label}</span></td>
+                    <td className={`${tdCls} text-xs text-slate-600`}>{hasCourier(d.courierInfo) ? <>{d.courierInfo.company}{d.courierInfo.trackingNo && <span className="ml-1 font-mono">{d.courierInfo.trackingNo}</span>}{d.courierInfo.dispatchDate && <span> · {fmtDt(d.courierInfo.dispatchDate)}</span>}</> : '—'}</td>
+                  </tr>
+                );
+              })}
+          </tbody>
+        </table>
+      </div>
     );
   }
 
@@ -783,391 +783,146 @@ export default function UniversityPage() {
     </div>
   );
 
+  // ── Cards on top (one per area, a count of what is there), tabs inside the chosen one, then its rows ──
+  const CARDS = [
+    { key: 'pending',    first: 'pending',       label: 'Pending enrollment', dot: 'bg-amber-500', tone: 'text-amber-700',   count: pending.length,
+      sub: pending.length ? 'to enroll' : 'all enrolled', tabs: ['pending'] },
+    { key: 'requests',   first: 'allreq',        label: 'Document requests', dot: 'bg-blue-600',  tone: 'text-blue-700',    count: marksheetPending.length + otherPending.length,
+      sub: `${marksheetPending.length} marksheet · ${otherPending.length} other`, tabs: ['allreq', 'marksheetreq', 'otherreq'] },
+    { key: 'urgent',     first: 'urgent',        label: 'Urgent requests', dot: 'bg-red-600',     tone: 'text-red-700',     count: urgentPendingDocs.length,
+      sub: urgentPendingDocs.length ? 'send first' : 'none waiting', tabs: ['urgent'] },
+    { key: 'correction', first: 'correction',    label: 'Correction needed', dot: 'bg-orange-500', tone: 'text-orange-700', count: correctionDocs.length,
+      sub: correctionDocs.length ? 'to correct' : 'none waiting', tabs: ['correction'] },
+    { key: 'sent',       first: 'marksheetsent', label: 'Document sent',  dot: 'bg-emerald-600', tone: 'text-emerald-700', count: dispatchedDocs.length,
+      sub: `${dispatchedDocs.filter(d => requestSection(d) === 'Marksheet').length} marksheet · ${dispatchedDocs.filter(d => requestSection(d) === 'Other').length} other`,
+      tabs: ['marksheetsent', 'othersent', 'dispatched'] },
+    { key: 'enrolled',   first: 'enrolled',      label: 'Enrolled',       dot: 'bg-slate-500',   tone: 'text-slate-700',   count: enrolled.length,
+      sub: 'students', tabs: ['enrolled'] },
+    { key: 'cancelled',  first: 'cancelled',     label: 'Cancelled',      dot: 'bg-zinc-400',    tone: 'text-zinc-600',    count: cancelled.length,
+      sub: 'admissions', tabs: ['cancelled'] },
+  ];
+  const card = CARDS.find(c => c.tabs.includes(tab)) || CARDS[0];
+  const TAB_LABEL = {
+    allreq: ['All', marksheetPending.length + otherPending.length], marksheetreq: ['Marksheet', marksheetPending.length], otherreq: ['Other documents', otherPending.length],
+    marksheetsent: ['Marksheet sent'], othersent: ['Other doc sent'], dispatched: ['All sent (history)'],
+  };
+  const isStudentTab = ['pending', 'enrolled', 'cancelled'].includes(tab);
+  const requestKind = { allreq: 'all', marksheetreq: 'Marksheet', otherreq: 'Other', urgent: 'urgent' }[tab];
+  const selectedInTab = requestKind ? tabPendingDocs(requestKind).filter(d => selectedDocIds.includes(String(d._id))) : [];
+  const urgentElsewhere = requestKind && requestKind !== 'urgent'
+    ? urgentPendingDocs.filter(d => requestKind === 'all' || requestSection(d) === requestKind).length : 0;
+  const segBtn = on => `rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors ${on ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 pb-16">
 
       {/* ── Header ──────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-purple-600"/>University Portal
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">
-            Manage student admissions and document requests
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" className="gap-2 border-amber-300 text-amber-700 hover:bg-amber-50" onClick={() => downloadCSV('pending')} disabled={pending.length===0}>
-            <Download className="h-4 w-4"/>Pending CSV ({pending.length})
-          </Button>
-          <Button variant="outline" size="sm" className="gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50" onClick={() => downloadCSV('enrolled')} disabled={enrolled.length===0}>
-            <Download className="h-4 w-4"/>Enrolled CSV ({enrolled.length})
-          </Button>
-          {pending.length > 0 && (
-            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"/>
-              <span className="text-sm text-amber-700 font-medium">{pending.length} awaiting enrollment</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <StatCard
-          icon={GraduationCap}
-          label="Total Students"
-          value={allStudents.length}
-          sub={`${pending.length} pending · ${enrolled.length} enrolled`}
-          color="text-purple-600"
-        />
-        <StatCard
-          icon={BadgeCheck}
-          label="Enrolled"
-          value={enrolled.length}
-          sub="Enrollment numbers assigned"
-          color="text-emerald-600"
-          trend={enrolled.length > 0 ? `${Math.round((enrolled.length/Math.max(allStudents.length,1))*100)}% completion rate` : null}
-        />
-        <StatCard
-          icon={FileText}
-          label="Document Requests"
-          value={totalDocs}
-          sub={`${marksheetPending.length} marksheet · ${otherPending.length} other · ${urgentPendingDocs.length} urgent pending`}
-          color="text-blue-600"
-        />
-        <StatCard
-          icon={XCircle}
-          label="Cancelled"
-          value={cancelled.length}
-          sub="Applications cancelled by Admin"
-          color="text-slate-500"
-        />
-      </div>
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">University portal</h1>
+        <p className="text-sm text-slate-500">Enrollments and document requests for your students</p>
+      </header>
 
-      {/* ── Quick Overview Row ───────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Pending Action card */}
-        <Card className="border-amber-200 bg-amber-50/50">
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm text-amber-700 flex items-center gap-2">
-              <Clock className="h-4 w-4"/>Requires Action
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4 space-y-2">
-            {pending.length > 0 && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Enrollment Pending</span>
-                <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{pending.length}</span>
-              </div>
-            )}
-            {[
-              ['marksheetreq', 'Marksheet Requests', marksheetPending.length, 'text-violet-700 bg-violet-100'],
-              ['otherreq',     'Other Doc Requests', otherPending.length,     'text-sky-700 bg-sky-100'],
-              ['urgent',       'Urgent Doc Requests', urgentPendingDocs.length, 'text-red-700 bg-red-100'],
-              ['correction',   'Correction Needed',   correctionDocs.length,    'text-amber-800 bg-amber-100'],
-            ].filter(([, , n]) => n > 0).map(([val, label, n, tone]) => (
-              <button key={val} type="button" onClick={() => { if (val === 'urgent') setUrgentSection(''); setTab(val); }}
-                className="flex w-full items-center justify-between text-sm rounded hover:bg-amber-100/60 -mx-1 px-1">
-                <span className="text-muted-foreground">{label}</span>
-                <span className={`font-bold px-2 py-0.5 rounded ${tone}`}>{n}</span>
-              </button>
-            ))}
-            {pending.length === 0 && awaitingDocs.length === 0 && correctionDocs.length === 0 && (
-              <p className="text-sm text-muted-foreground">All clear ✓</p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Document status breakdown */}
-        <Card>
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <FileText className="h-4 w-4 text-blue-600"/>Document Pipeline
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4 space-y-1.5">
-            {[
-              ['Sent_To_University',    'Pending My Action'],
-              ['University_Dispatched', 'Sent to Dispatch'],
-              ['Dispatch_Received',     'Dispatch Confirmed Receipt'],
-              ['Scanned',               'Scanned by Dispatch'],
-              ['Counselor_Received',    'With Counselor'],
-              ['Payment_Verified',      'Payment Verified'],
-              ['Dispatched',            'Dispatched to Center'],
-              ['Delivered',             'Delivered'],
-            ].map(([status, label]) => {
-              const count = docs.filter(d => d.status === status).length;
-              if (count === 0) return null;
-              const si = DOC_STATUS[status];
-              return (
-                <div key={status} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <div className={`h-1.5 w-1.5 rounded-full ${si?.dot || 'bg-gray-400'}`}/>
-                    <span className="text-muted-foreground">{label}</span>
-                  </div>
-                  <span className="font-semibold">{count}</span>
-                </div>
-              );
-            })}
-            {docs.length === 0 && <p className="text-xs text-muted-foreground">No documents yet</p>}
-          </CardContent>
-        </Card>
-
-        {/* Recent dispatches */}
-        <Card>
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Truck className="h-4 w-4 text-teal-600"/>Recent Dispatches
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4 space-y-2">
-            {dispatchedDocs.slice(0,3).map(d => (
-              <div key={d._id} className="text-xs">
-                <div className="font-medium truncate">{d.student?.name} · {d.name}</div>
-                {d.courierInfo?.trackingNo && (
-                  <div className="text-muted-foreground font-mono">{d.courierInfo.trackingNo}</div>
-                )}
-              </div>
-            ))}
-            {dispatchedDocs.length === 0 && <p className="text-xs text-muted-foreground">No dispatches yet</p>}
-            {dispatchedDocs.length > 3 && (
-              <p className="text-xs text-muted-foreground">+{dispatchedDocs.length-3} more</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── Main Tabs ────────────────────────────────────────── */}
-      <div>
-        {/* Combined search */}
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-          <Input className="pl-9 pr-9"
-            placeholder="Search student name, enrollment no., phone…"
-            value={search} onChange={e => setSearch(e.target.value)}/>
-          {search && (
-            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-              <X className="h-4 w-4"/>
+      {/* ── Cards ── */}
+      <nav aria-label="Portal sections" className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        {CARDS.map(c => {
+          const on = card.key === c.key;
+          return (
+            <button key={c.key} type="button" aria-pressed={on} title={`${c.label} — ${c.sub}`}
+              onClick={() => { if (c.key === 'urgent') setUrgentSection(''); setTab(c.first); }}
+              className={`flex min-w-0 flex-col gap-1.5 rounded-xl border bg-white px-3 py-2.5 text-left shadow-sm transition-colors ${on ? 'border-indigo-600 ring-1 ring-indigo-600' : 'border-slate-200 hover:border-slate-300'}`}>
+              <span className={`flex min-w-0 items-center gap-1.5 text-xs font-semibold ${c.tone}`}>
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.dot}`}/><span className="truncate whitespace-nowrap">{c.label}</span>
+              </span>
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="text-lg font-bold leading-none text-slate-900 tabular-nums">{c.count}</span>
+                <span className="truncate whitespace-nowrap text-[11px] text-slate-500">{c.sub}</span>
+              </span>
             </button>
-          )}
-        </div>
+          );
+        })}
+      </nav>
 
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
-            {[
-              { val:'pending',    label:'Pending Enrollment',  count: pending.length,       dot:'bg-amber-500',  icon: <Clock className="h-3.5 w-3.5"/> },
-              // a count only on tabs with work waiting; Enrolled / Cancelled / Dispatched History are records
-              { val:'enrolled',   label:'Enrolled',            count: 0,                    dot:'',              icon: <CheckCircle2 className="h-3.5 w-3.5"/> },
-              { val:'cancelled',  label:'Cancelled',           count: 0,                    dot:'',              icon: <XCircle className="h-3.5 w-3.5"/> },
-              { val:'marksheetreq', label:'Marksheet Requests', count: marksheetPending.length, dot:'bg-violet-500', icon: <GraduationCap className="h-3.5 w-3.5"/> },
-              { val:'otherreq',   label:'Other Doc Requests',  count: otherPending.length,  dot:'bg-sky-500',    icon: <FileText className="h-3.5 w-3.5"/> },
-              { val:'urgent',     label:'Urgent Requests',     count: urgentPendingDocs.length, dot:'bg-red-500', icon: <AlertTriangle className="h-3.5 w-3.5"/> },
-              { val:'correction', label:'Correction Needed',   count: correctionDocs.length, dot:'bg-amber-500', icon: <Undo2 className="h-3.5 w-3.5"/> },
-              { val:'marksheetsent', label:'Marksheet Sent',   count: 0,                    dot:'',              icon: <Send className="h-3.5 w-3.5"/> },
-              { val:'othersent',  label:'Other Doc Sent',      count: 0,                    dot:'',              icon: <Send className="h-3.5 w-3.5"/> },
-              { val:'dispatched', label:'Dispatched History',  count: 0,                    dot:'',              icon: <Truck className="h-3.5 w-3.5"/> },
-            ].map(({ val, label, count, dot, icon }) => (
-              <TabsTrigger key={val} value={val}
-                className="rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-1.5 px-3 flex items-center gap-1.5">
-                {icon}{label}
-                {count > 0 && (
-                  <span className={`text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 ${dot ? `${dot} text-white` : 'bg-slate-200 text-slate-600'}`}>
-                    {count}
-                  </span>
-                )}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          {/* ── Pending Enrollment ───────────────────────── */}
-          <TabsContent value="pending" className="space-y-2 mt-4">
-            {filtPending.length === 0
-              ? <div className="text-center py-12 text-muted-foreground">
-                  {pending.length === 0
-                    ? <><CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-500"/><p>All students enrolled!</p></>
-                    : <p>No results for "{search}"</p>}
-                </div>
-              : filtPending.map(s => (
-                <Card key={s._id} className="border-l-4 border-l-amber-400 hover:shadow-sm transition-shadow">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 cursor-pointer" onClick={() => setModalStudent(s)}>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-base">{s.name}</span>
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Pending Enrollment</span>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-0.5 mt-2 text-xs text-muted-foreground">
-                          {s.courseName    && <span className="flex items-center gap-1"><BookOpen className="h-3 w-3"/>{s.courseName} {s.courseYear}</span>}
-                          {s.phone         && <span className="flex items-center gap-1"><User className="h-3 w-3"/>{s.phone}</span>}
-                          {s.fatherName    && <span>Father: {s.fatherName}</span>}
-                          {s.email         && <span>{s.email}</span>}
-                        </div>
-                        {s.submissionDocs?.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {s.submissionDocs.map((d,i) => (
-                              <span key={i} className="text-xs flex items-center gap-1 bg-muted border rounded px-2 py-0.5">
-                                <Paperclip className="h-3 w-3 text-muted-foreground"/>
-                                {d.fileUrl
-                                  ? <a href={`${MEDIA}${d.fileUrl}`} target="_blank" rel="noreferrer" className="text-blue-600 underline" onClick={e=>e.stopPropagation()}>{d.name}</a>
-                                  : <span>{d.name}</span>}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex gap-2 flex-shrink-0">
-                        <Button variant="ghost" size="sm" onClick={() => setModalStudent(s)}>
-                          <Eye className="h-3.5 w-3.5"/>
-                        </Button>
-                        <Button size="sm" className="bg-purple-600 hover:bg-purple-700"
-                          onClick={() => { setSelStudent(s); setEnrNum(''); setEnrOpen(true); }}>
-                          <BadgeCheck className="h-3.5 w-3.5 mr-1"/>Assign
-                        </Button>
-                        <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50"
-                          onClick={() => { setRejectStudent(s); setRejectReason(''); setRejectOpen(true); }}>
-                          <XCircle className="h-3.5 w-3.5 mr-1"/>Reject
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))
-            }
-          </TabsContent>
-
-          {/* ── Enrolled Students ────────────────────────── */}
-          <TabsContent value="enrolled" className="space-y-2 mt-4">
-            {filtEnrolled.length === 0
-              ? <div className="text-center py-12 text-muted-foreground">
-                  {enrolled.length === 0 ? 'No enrolled students yet' : `No results for "${search}"`}
-                </div>
-              : filtEnrolled.map(s => {
-                  const studentDocCount = docs.filter(d => String(d.student?._id||d.student) === String(s._id)).length;
-                  const dispatched = docs.filter(d => String(d.student?._id||d.student) === String(s._id) && DISPATCHED_STATUSES.includes(d.status)).length;
-                  return (
-                    <Card key={s._id} className="border-l-4 border-l-emerald-400 cursor-pointer hover:shadow-sm transition-shadow"
-                      onClick={() => setModalStudent(s)}>
-                      <CardContent className="p-4 flex items-center justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold">{s.name}</span>
-                            <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                              {s.enrollmentNumber}
-                            </span>
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-3">
-                            {s.courseName    && <span>{s.courseName} {s.courseYear}</span>}
-                            {s.phone         && <span>{s.phone}</span>}
-                          </div>
-                          {(studentDocCount > 0) && (
-                            <div className="flex gap-3 mt-1.5 text-xs">
-                              {studentDocCount > 0 && <span className="text-blue-600"><FileText className="h-3 w-3 inline mr-0.5"/>{studentDocCount} doc request{studentDocCount!==1?'s':''}</span>}
-                              {dispatched > 0 && <span className="text-teal-600"><Truck className="h-3 w-3 inline mr-0.5"/>{dispatched} dispatched</span>}
-                            </div>
-                          )}
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0"/>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-            }
-          </TabsContent>
-
-          {/* ── Cancelled Students ────────────────────────── */}
-          <TabsContent value="cancelled" className="space-y-2 mt-4">
-            {filtCancelled.length === 0 ? (
-              <div className="text-center py-12 border border-dashed rounded-lg">
-                <XCircle className="h-8 w-8 mx-auto text-muted-foreground mb-2 opacity-40"/>
-                <p className="text-sm text-muted-foreground">No cancelled students</p>
+      {/* ── The chosen area: tabs, search, export, rows ── */}
+      <section aria-label={card.label} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {card.tabs.length > 1 && (
+              <div role="tablist" aria-label={card.label} className="inline-flex rounded-xl bg-slate-100 p-1">
+                {card.tabs.map(t => (
+                  <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={segBtn(tab === t)}>
+                    {TAB_LABEL[t][0]}{TAB_LABEL[t][1] !== undefined && <span className="ml-1.5 tabular-nums text-slate-400">{TAB_LABEL[t][1]}</span>}
+                  </button>
+                ))}
               </div>
-            ) : filtCancelled.map(s => (
-              <Card key={s._id} className="border-slate-200 bg-slate-50/50">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-slate-700">{s.name}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 font-medium border border-slate-300">
-                          🚫 Cancelled
-                        </span>
-                        {s.enrollmentNumber && (
-                          <span className="text-xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                            {s.enrollmentNumber}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-muted-foreground">
-                        {s.center?.name   && <span>{s.center.name}</span>}
-                        {s.courseName     && <span>· {s.courseName} {s.courseYear}</span>}
-                        {s.phone          && <span>· {s.phone}</span>}
-                      </div>
-                      {s.rejectionReason && (
-                        <div className="mt-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600">
-                          <span className="font-semibold">Reason:</span> {s.rejectionReason}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </TabsContent>
+            )}
+            {tab === 'urgent' && (
+              <div role="tablist" aria-label="Urgent requests" className="inline-flex rounded-xl bg-slate-100 p-1">
+                {[['', 'All'], ['Marksheet', 'Marksheet'], ['Other', 'Other documents']].map(([val, label]) => (
+                  <button key={label} type="button" role="tab" aria-selected={urgentSection === val} onClick={() => setUrgentSection(val)} className={segBtn(urgentSection === val)}>
+                    {label}<span className="ml-1.5 tabular-nums text-slate-400">{urgentPendingDocs.filter(d => !val || requestSection(d) === val).length}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {card.tabs.length === 1 && tab !== 'urgent' && <span className="text-[13px] font-semibold text-slate-700">{card.label}</span>}
+            {urgentElsewhere > 0 && (
+              <button type="button" onClick={() => { setUrgentSection(requestKind === 'all' ? '' : requestKind); setTab('urgent'); }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-[13px] font-semibold text-red-700 hover:bg-red-100">
+                <AlertTriangle className="h-3.5 w-3.5"/>{urgentElsewhere} urgent — under Urgent<ChevronRight className="h-3.5 w-3.5"/>
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex h-9 min-w-[240px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-slate-400">
+              <Search className="h-4 w-4"/>
+              <input type="search" value={isStudentTab ? search : docSearch} onChange={e => (isStudentTab ? setSearch : setDocSearch)(e.target.value)}
+                placeholder={isStudentTab ? 'Name, enrollment no., phone' : 'Student, enrollment no., document'} aria-label="Search"
+                className="flex-1 bg-transparent text-sm text-slate-900 outline-none"/>
+            </label>
+            {(tab === 'pending' || tab === 'enrolled') && (
+              <Button variant="outline" size="sm" className="h-9" onClick={() => downloadCSV(tab)} disabled={(tab === 'pending' ? pending : enrolled).length === 0}>
+                <Download className="mr-1.5 h-4 w-4"/>Export CSV
+              </Button>
+            )}
+            {requestKind && (
+              <Button variant="outline" size="sm" className="h-9" onClick={() => downloadDocRequestsCSV(requestKind)} disabled={tabPendingDocs(requestKind).length === 0}>
+                <Download className="mr-1.5 h-4 w-4"/>Export CSV
+              </Button>
+            )}
+            {tab === 'correction' && (
+              <Button variant="outline" size="sm" className="h-9" onClick={downloadCorrectionCSV} disabled={tabCorrectionDocs().length === 0}><Download className="mr-1.5 h-4 w-4"/>Export CSV</Button>
+            )}
+            {(tab === 'marksheetsent' || tab === 'othersent') && (
+              <Button variant="outline" size="sm" className="h-9" onClick={() => downloadSentCSV(tab === 'marksheetsent' ? 'Marksheet' : 'Other')}
+                disabled={tabSentDocs(tab === 'marksheetsent' ? 'Marksheet' : 'Other').length === 0}><Download className="mr-1.5 h-4 w-4"/>Export CSV</Button>
+            )}
+          </div>
+        </div>
+        {tab === 'pending' && renderPendingTab()}
+        {tab === 'enrolled' && renderEnrolledTab()}
+        {tab === 'cancelled' && renderCancelledTab()}
+        {requestKind && renderRequestTab(requestKind)}
+        {tab === 'correction' && renderCorrectionTab()}
+        {tab === 'marksheetsent' && renderSentTab('Marksheet')}
+        {tab === 'othersent' && renderSentTab('Other')}
+        {tab === 'dispatched' && renderHistoryTab()}
+      </section>
 
-          {/* ── Document Requests: Marksheet / Other Documents / Urgent ── */}
-          <TabsContent value="marksheetreq" className="space-y-3 mt-4">{renderRequestTab('Marksheet')}</TabsContent>
-          <TabsContent value="otherreq" className="space-y-3 mt-4">{renderRequestTab('Other')}</TabsContent>
-          <TabsContent value="urgent" className="space-y-3 mt-4">{renderRequestTab('urgent')}</TabsContent>
-          <TabsContent value="correction" className="space-y-3 mt-4">{renderCorrectionTab()}</TabsContent>
-          <TabsContent value="marksheetsent" className="space-y-3 mt-4">{renderSentTab('Marksheet')}</TabsContent>
-          <TabsContent value="othersent" className="space-y-3 mt-4">{renderSentTab('Other')}</TabsContent>
+      {/* ── Selection bar (only while something is selected) ── */}
+      {selectedInTab.length > 0 && (
+        <div role="toolbar" aria-label="Selected requests" className="sticky bottom-4 z-20 mx-auto flex w-fit flex-wrap items-center gap-3 rounded-2xl bg-slate-900 py-2.5 pl-5 pr-2.5 text-white shadow-xl">
+          <span className="text-sm font-semibold">{selectedInTab.length} selected</span>
+          <span className="h-5 w-px bg-slate-600"/>
+          <Button size="sm" className="h-9 bg-white text-slate-900 hover:bg-slate-100" onClick={() => downloadDocRequestsCSV(requestKind)}>
+            <Download className="mr-1.5 h-4 w-4"/>Export CSV
+          </Button>
+          <Button size="sm" variant="ghost" aria-label="Clear selection" className="h-9 text-slate-300 hover:bg-slate-800 hover:text-white"
+            onClick={() => { const ids = selectedInTab.map(d => String(d._id)); setSelectedDocIds(prev => prev.filter(x => !ids.includes(x))); }}>
+            <X className="h-4 w-4"/>
+          </Button>
+        </div>
+      )}
 
-          <TabsContent value="dispatched" className="space-y-2 mt-4">
-            <p className="text-sm text-muted-foreground">Complete record of all documents dispatched from university.</p>
-            {dispatchedDocs.length === 0
-              ? <div className="text-center py-12 text-muted-foreground">
-                  <Truck className="h-10 w-10 mx-auto mb-3"/>No dispatches yet
-                </div>
-              : dispatchedDocs.map(d => {
-                  const si = docStatusInfo(d);
-                  return (
-                    <Card key={d._id} className="border-l-4 border-l-teal-400">
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-medium">{d.name}</span>
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
-                              <SectionBadge d={d}/>
-                              {isUrgentDoc(d) && <UrgentBadge/>}
-                            </div>
-                            <div className="text-sm text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-  Student: <b>{d.student?.name}</b>
-  {d.student?.enrollmentNumber && (
-    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-      {d.student.enrollmentNumber}
-    </span>
-  )}
-</div>
-
-                            {/* Courier details box */}
-                            {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
-                              <div className="mt-2 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-0.5">
-                                {d.courierInfo.company && <div><span className="text-muted-foreground">Company:</span> <b>{d.courierInfo.company}</b></div>}
-                                {d.courierInfo.trackingNo && <div><span className="text-muted-foreground">Tracking:</span> <b className="font-mono">{d.courierInfo.trackingNo}</b></div>}
-                                {d.courierInfo.dispatchDate && <div><span className="text-muted-foreground">Date:</span> {fmtDt(d.courierInfo.dispatchDate)}</div>}
-                                {d.courierInfo.documentsDesc && <div><span className="text-muted-foreground">Docs:</span> {d.courierInfo.documentsDesc}</div>}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })
-            }
-          </TabsContent>
-        </Tabs>
-      </div>
 
       {/* ── Enrollment Dialog ────────────────────────────────── */}
       <Dialog open={enrOpen} onOpenChange={setEnrOpen}>

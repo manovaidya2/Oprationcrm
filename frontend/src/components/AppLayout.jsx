@@ -4,9 +4,10 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive,
+  CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive, PanelLeftClose, PanelLeftOpen,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
 import { notifApi } from '@/lib/api';
@@ -116,11 +117,32 @@ const ROLE_LABELS = {
   AdmissionMarker: 'Admission Marker',
 };
 
+// While the sidebar is collapsed to icons, hovering one shows what it is
+function NavTip({ show, label, children }) {
+  if (!show) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right" sideOffset={10} className="hidden lg:block bg-slate-900 text-white">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const SIDEBAR_KEY = 'crm_sidebar_collapsed';
+
 export function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  // desktop: the sidebar can be narrowed to icons (remembered on this browser); phones keep the slide-in menu
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; } });
+  function toggleSidebar() {
+    setCollapsed(c => {
+      try { localStorage.setItem(SIDEBAR_KEY, c ? '0' : '1'); } catch { /* storage may be blocked */ }
+      return !c;
+    });
+  }
   const [notifs, setNotifs] = useState([]);
   const [showNotifs, setShowNotifs] = useState(false);
   const previousPathRef = useRef(location.pathname);
@@ -170,18 +192,20 @@ export function AppLayout() {
   const roleColor = ROLE_COLORS[user?.role] || 'bg-gray-500';
 
   return (
+    <TooltipProvider delayDuration={0}>
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
       <aside className={cn(
-        'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r bg-card transition-transform duration-200',
+        'fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r bg-card transition-[transform,width] duration-200',
+        collapsed && 'lg:w-16',
         open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       )}>
         {/* Brand */}
-        <div className="flex h-14 items-center gap-3 border-b px-4">
+        <div className={cn('flex h-14 items-center gap-3 border-b px-4', collapsed && 'lg:justify-center lg:px-0')}>
           <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0', roleColor)}>
             {user?.role?.[0]}
           </div>
-          <div className="flex-1 min-w-0">
+          <div className={cn('flex-1 min-w-0', collapsed && 'lg:hidden')}>
             <div className="text-sm font-semibold leading-none">EduCRM</div>
             <div className="text-xs text-muted-foreground mt-0.5 truncate">
               {user?.role === 'University' && user?.universityId
@@ -195,45 +219,53 @@ export function AppLayout() {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        <nav className={cn('flex-1 overflow-y-auto p-3 space-y-1', collapsed && 'lg:px-2')}>
           {navItems.map(item => {
             const active = item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
             return (
-              <Link key={item.to} to={item.to} onClick={() => setOpen(false)}
-                className={cn(
-                  'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                  active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                )}>
-                <item.icon className="h-4 w-4 flex-shrink-0" />
-                {item.label}
-                {['/chat', '/help'].includes(item.to) && chatUnread > 0 && (
-                  <span className={cn(
-                    'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold',
-                    active ? 'bg-white text-primary' : 'bg-red-500 text-white'
+              <NavTip key={item.to} show={collapsed} label={item.label}>
+                <Link to={item.to} onClick={() => setOpen(false)} aria-label={collapsed ? item.label : undefined}
+                  className={cn(
+                    'relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
+                    collapsed && 'lg:justify-center lg:px-0 lg:py-2.5',
+                    active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
                   )}>
-                    {chatUnread > 9 ? '9+' : chatUnread}
-                  </span>
-                )}
-                {active && <ChevronRight className="h-3.5 w-3.5 ml-auto" />}
-              </Link>
+                  <item.icon className={cn('h-4 w-4 flex-shrink-0', collapsed && 'lg:h-5 lg:w-5')} />
+                  <span className={cn('truncate', collapsed && 'lg:hidden')}>{item.label}</span>
+                  {['/chat', '/help'].includes(item.to) && chatUnread > 0 && (
+                    <span className={cn(
+                      'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold',
+                      collapsed && 'lg:absolute lg:right-1 lg:top-0.5 lg:ml-0 lg:h-4 lg:min-w-4 lg:px-1',
+                      active ? 'bg-white text-primary' : 'bg-red-500 text-white'
+                    )}>
+                      {chatUnread > 9 ? '9+' : chatUnread}
+                    </span>
+                  )}
+                  {active && <ChevronRight className={cn('h-3.5 w-3.5 ml-auto', collapsed && 'lg:hidden')} />}
+                </Link>
+              </NavTip>
             );
           })}
         </nav>
 
         {/* User info */}
-        <div className="border-t p-3">
-          <div className="flex items-center gap-2.5 mb-2">
-            <div className={cn('h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0', roleColor)}>
-              {initials}
-            </div>
-            <div className="flex-1 min-w-0">
+        <div className={cn('border-t p-3', collapsed && 'lg:px-2')}>
+          <div className={cn('flex items-center gap-2.5 mb-2', collapsed && 'lg:justify-center')}>
+            <NavTip show={collapsed} label={`${user?.name || ''}${user?.email ? ` · ${user.email}` : ''}`}>
+              <div className={cn('h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0', roleColor)}>
+                {initials}
+              </div>
+            </NavTip>
+            <div className={cn('flex-1 min-w-0', collapsed && 'lg:hidden')}>
               <div className="text-sm font-medium truncate">{user?.name}</div>
               <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
             </div>
           </div>
-          <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground hover:text-foreground" onClick={logout}>
-            <LogOut className="h-4 w-4 mr-2" /> Logout
-          </Button>
+          <NavTip show={collapsed} label="Logout">
+            <Button variant="ghost" size="sm" aria-label="Logout" className={cn('w-full justify-start text-muted-foreground hover:text-foreground', collapsed && 'lg:justify-center lg:px-0')} onClick={logout}>
+              <LogOut className={cn('h-4 w-4 mr-2', collapsed && 'lg:mr-0')} /><span className={cn(collapsed && 'lg:hidden')}>Logout</span>
+            </Button>
+          </NavTip>
         </div>
       </aside>
 
@@ -241,10 +273,14 @@ export function AppLayout() {
       {open && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       {/* Main */}
-      <div className="flex-1 min-w-0 overflow-x-hidden flex flex-col lg:ml-60 min-h-screen">
+      <div className={cn('flex-1 min-w-0 overflow-x-hidden flex flex-col min-h-screen transition-[margin] duration-200', collapsed ? 'lg:ml-16' : 'lg:ml-60')}>
         {/* Top bar */}
         <header className="sticky top-0 z-40 flex h-14 min-w-0 items-center overflow-visible border-b bg-card/95 backdrop-blur px-4 gap-3">
-          <button className="lg:hidden" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
+          <button className="lg:hidden" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="h-5 w-5" /></button>
+          <button type="button" onClick={toggleSidebar} aria-label={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'} title={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+            className="hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground">
+            {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+          </button>
           <div className="flex-1" />
 
           {/* Notifications */}
@@ -305,10 +341,14 @@ export function AppLayout() {
         </header>
 
         {/* Page content */}
-        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full', location.pathname.startsWith('/centre-billing') || location.pathname.startsWith('/account-ledger') || location.pathname.startsWith('/invoice') || location.pathname.startsWith('/payment-desk') ? 'max-w-[100vw] lg:max-w-[calc(100vw-15rem)]' : 'max-w-6xl')}>
+        <main className={cn('flex-1 min-w-0 overflow-x-hidden p-4 md:p-6 mx-auto w-full',
+          ['/centre-billing', '/account-ledger', '/invoice', '/payment-desk'].some(p => location.pathname.startsWith(p))
+            ? cn('max-w-[100vw]', collapsed ? 'lg:max-w-[calc(100vw-4rem)]' : 'lg:max-w-[calc(100vw-15rem)]')
+            : collapsed ? 'max-w-6xl lg:max-w-[1400px]' : 'max-w-6xl')}>
           <Outlet />
         </main>
       </div>
     </div>
+    </TooltipProvider>
   );
 }
