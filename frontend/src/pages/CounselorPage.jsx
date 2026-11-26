@@ -180,6 +180,7 @@ const DOC_COLORS = {
   Payment_Verified:   'bg-green-50 text-green-700 border border-green-200',
   Dispatched:         'bg-teal-50 text-teal-700 border border-teal-200',
   Delivered:          'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  Closed:             'bg-slate-100 text-slate-600 border border-slate-300',
 };
 
 // ── Reusable InfoRow ──────────────────────────────────────────

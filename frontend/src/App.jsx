@@ -14,7 +14,8 @@ const AccountantPage       = lazy(() => import('@/pages/AccountantPage'));
 const UniversityPage       = lazy(() => import('@/pages/UniversityPage'));
 const UniversityManagePage = lazy(() => import('@/pages/UniversityManagePage'));
 const DispatchPage         = lazy(() => import('@/pages/DispatchPage'));
-const DocumentInventoryPage= lazy(() => import('@/pages/DocumentInventoryPage'));
+const NewInventoryPage     = lazy(() => import('@/pages/NewInventoryPage'));
+const NewInventoryStudentPage = lazy(() => import('@/pages/NewInventoryStudentPage'));
 const StudentsPage         = lazy(() => import('@/pages/StudentsPage'));
 const CentersPage          = lazy(() => import('@/pages/CentersPage'));
 const SettingsPage              = lazy(() => import('@/pages/SettingsPage'));
@@ -55,15 +56,15 @@ const ROLE_HOME = {
 // Routes each role can access
 const ROLE_ALLOWED = {
   Center:     ['/center', '/students/', '/help'],
-  Accountant: ['/admission-timeline', '/accountant','/students', '/students/', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
-  University: ['/university', '/students/', '/chat'],
-  Dispatch:   ['/dispatch', '/students', '/students/', '/document-inventory', '/chat'],
-  PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/document-inventory', '/chat'],
+  Accountant: ['/admission-timeline', '/accountant','/students', '/students/', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
+  University: ['/university', '/students/'],
+  Dispatch:   ['/dispatch', '/students', '/students/', '/new-inventory', '/chat'],
+  PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/new-inventory', '/chat'],
   Payment:    ['/payment-desk', '/chat'],
   // Adds admissions inside a centre's panel (/center); students and centres are view-only
   AdmissionMarker: ['/admissions', '/center', '/students', '/students/', '/centers', '/chat'],
-  Counselor:  ['/admission-timeline', '/counselor', '/center', '/students', '/centers', '/dashboard', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
-  ViewerCounselor: ['/admission-timeline', '/counselor', '/center', '/students', '/students/', '/centers', '/document-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  Counselor:  ['/admission-timeline', '/counselor', '/center', '/students', '/centers', '/dashboard', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  ViewerCounselor: ['/admission-timeline', '/counselor', '/center', '/students', '/students/', '/centers', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
 };
 
 function ProtectedRoute({ children }) {
@@ -104,7 +105,8 @@ export default function App() {
           <Route path="universities"        element={<W><UniversityManagePage /></W>} />
           {/* Dispatch */}
           <Route path="dispatch"            element={<W><DispatchPage /></W>} />
-          <Route path="document-inventory"  element={<W><DocumentInventoryPage /></W>} />
+          <Route path="new-inventory"       element={<W><NewInventoryPage /></W>} />
+          <Route path="new-inventory/:studentId" element={<W><NewInventoryStudentPage /></W>} />
           {/* Admin / Counselor shared */}
           <Route path="students"            element={<W><StudentsPage /></W>} />
           <Route path="centers"             element={<W><CentersPage /></W>} />

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check, FileSpreadsheet, FileText, Landmark,
+  CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -20,7 +20,7 @@ const NAV_CONFIG = {
     { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
-    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
@@ -36,7 +36,7 @@ const NAV_CONFIG = {
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
-    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/invoice', label: 'Invoice', icon: FileText },
@@ -47,7 +47,7 @@ const NAV_CONFIG = {
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
-    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/invoice', label: 'Invoice', icon: FileText },
@@ -61,7 +61,7 @@ const NAV_CONFIG = {
     { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/accountant', label: 'Fee Verification', icon: IndianRupee },
     { to: '/students',   label: 'Students',         icon: GraduationCap },
-    { to: '/document-inventory', label: 'Doc Inventory', icon: Package },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
@@ -70,12 +70,11 @@ const NAV_CONFIG = {
   ],
   University: [
     { to: '/university', label: 'Student Records', icon: BookOpen },
-    { to: '/chat',       label: 'Team Chat',       icon: MessageSquare },
   ],
   Dispatch: [
     { to: '/dispatch', label: 'Documents', icon: Package },
     { to: '/students', label: 'Students', icon: GraduationCap },
-    { to: '/document-inventory', label: 'Inventory', icon: BookOpen },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
   Payment: [
@@ -86,7 +85,7 @@ const NAV_CONFIG = {
     { to: '/payment-coordinator', label: 'Installments', icon: CalendarClock },
     { to: '/payment-due-timeline', label: 'Old Student Records', icon: IndianRupee },
     { to: '/students', label: 'Students', icon: GraduationCap },
-    { to: '/document-inventory', label: 'Doc Inventory', icon: BookOpen },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
   AdmissionMarker: [
@@ -134,7 +133,8 @@ export function AppLayout() {
   }, [location.pathname]);
 
   const baseNavItems = NAV_CONFIG[user?.role] || [];
-  const navItems = user?.role && user.role !== 'Center' && !baseNavItems.some(item => item.to === '/chat')
+  // every role gets Team Chat except centres (they have Help) and universities (no chat)
+  const navItems = user?.role && !['Center', 'University'].includes(user.role) && !baseNavItems.some(item => item.to === '/chat')
     ? [...baseNavItems, { to: '/chat', label: 'Team Chat', icon: MessageSquare }]
     : baseNavItems;
   const unread = notifs.filter(n => !n.read).length;

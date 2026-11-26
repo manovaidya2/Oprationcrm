@@ -7,6 +7,14 @@ const Counselor = require('../models/Counselor');
 const Student = require('../models/Student');
 const { notify, audit, notifyCounselors, centreCounselorUserIds, adminUserIds } = require('../utils/helpers');
 
+// Roles that cannot be added to a team chat (centres use help tickets). University logins have no
+// chat at all: every /chat route refuses them.
+const NO_TEAM_CHAT_ROLES = ['Center', 'University'];
+exports.blockUniversity = (req, _res, next) => {
+  if (req.user?.role === 'University') { const e = new Error('Team chat is not available for university logins'); e.status = 403; return next(e); }
+  next();
+};
+
 // Centres this counselor works on — a centre's help tickets are shared by all of its counselors
 async function counselorCentreIds(req) {
   if (req.user.role !== 'Counselor' || !req.user.counselorId) return [];
@@ -86,7 +94,7 @@ exports.users = asyncHandler(async (req, res) => {
   }
   const users = await User.find({
     isActive: true,
-    role: { $ne: 'Center' },
+    role: { $nin: NO_TEAM_CHAT_ROLES },
     _id: { $ne: req.user._id },
   })
     .select('name email role avatarColor avatarSeed counselorId universityId')
@@ -139,7 +147,7 @@ exports.createInternal = asyncHandler(async (req, res) => {
   if (ids.length < 2) {
     const e = new Error('Select at least one team member'); e.status = 400; throw e;
   }
-  const users = await User.find({ _id: { $in: ids }, isActive: true, role: { $ne: 'Center' } }).select('_id name role');
+  const users = await User.find({ _id: { $in: ids }, isActive: true, role: { $nin: NO_TEAM_CHAT_ROLES } }).select('_id name role');
   if (users.length !== ids.length) {
     const e = new Error('Invalid team member selected'); e.status = 400; throw e;
   }
@@ -292,8 +300,9 @@ exports.sendMessage = asyncHandler(async (req, res) => {
   conversation.lastMessagePreview = body.slice(0, 120);
   await conversation.save();
 
-  conversation = await Conversation.findById(conversation._id).populate('participants', '_id');
-  await notifyConversation(conversation, req.user, message);
+  const saved = await Conversation.findById(conversation._id).populate('participants', '_id role').lean();
+  // a university member of an older chat cannot open it any more, so is not notified
+  await notifyConversation({ ...saved, participants: saved.participants.filter(p => p.role !== 'University') }, req.user, message);
 
   const out = await ChatMessage.findById(message._id).populate('sender', 'name email role avatarColor avatarSeed');
   res.status(201).json(out);

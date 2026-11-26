@@ -248,7 +248,8 @@ exports.billFetch = asyncHandler(async (req, res) => {
   const [students, docs, bills] = await Promise.all([
     Student.find({ university: uni._id, applicationStatus: 'Enrolled' })
       .select('name enrollmentNumber courseName courseYear statusHistory updatedAt').lean(),
-    StudentDocument.find({ university: uni._id, origin: { $ne: 'Inventory' } })
+    // a request answered from the New Inventory never went to the university, so it is not on its bill
+    StudentDocument.find({ university: uni._id, origin: { $ne: 'Inventory' }, inventoryItem: null })
       .populate('student', 'name enrollmentNumber courseName courseYear').lean(),
     UniversityBill.find({ university: uni._id }).select('title rows.kind rows.student rows.document').lean(),
   ]);

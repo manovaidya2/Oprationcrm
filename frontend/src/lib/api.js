@@ -180,6 +180,17 @@ export const docsApi = {
   requestChanges: (id, note)    => request(`/documents/${id}/request-changes`, { method: 'PATCH', body: JSON.stringify({ note }) }),
   accountantAction:(id, action, note) => request(`/documents/${id}/accountant-action`, { method: 'PATCH', body: JSON.stringify({ action, note }) }),
   dispatchReceive:(id)          => request(`/documents/${id}/dispatch-receive`, { method: 'PATCH' }),
+  // { ids, receivedAt?, company?, trackingNo?, note? } -> { received: [ids], failed: [{ id, name?, error }] }
+  dispatchReceiveMany: (data)   => request('/documents/dispatch-receive', { method: 'POST', body: JSON.stringify(data) }),
+  // Dispatch closes old requests that are not moving ({ ids, reason? }) / reopens them ({ ids })
+  closeRequests:  (data)        => request('/documents/close', { method: 'POST', body: JSON.stringify(data) }),
+  // couriered requests the centre has received (Dispatch marks them) { ids }
+  centreReceivedMany: (data)    => request('/documents/centre-received', { method: 'POST', body: JSON.stringify(data) }),
+  // Dispatch's correction check: { ids } -> { checked, failed, next: { id: 'scan' | 'dispatch' | 'payment' } } /
+  // back to the university { ids, note }
+  correctionChecked: (data)     => request('/documents/correction-checked', { method: 'POST', body: JSON.stringify(data) }),
+  sendForCorrection: (data)     => request('/documents/send-for-correction', { method: 'POST', body: JSON.stringify(data) }),
+  reopenRequests: (data)        => request('/documents/reopen', { method: 'POST', body: JSON.stringify(data) }),
   uploadScan:     (id, fd)      => uploadRequest(`/documents/${id}/upload-scan`, 'PATCH', fd),
   addPayment:     (id, data)    => request(`/documents/${id}/payments`, { method: 'POST', body: JSON.stringify(data) }),
   verifyPayment:  (id, approved, note) => request(`/documents/${id}/verify-payment`, { method: 'PATCH', body: JSON.stringify({ approved, note }) }),
@@ -195,14 +206,14 @@ export const docsApi = {
   markPaymentFollowup: (id, data) => request(`/documents/${id}/payment-followup`, { method: 'POST', body: JSON.stringify(data) }),
 };
 
-export const documentInventoryApi = {
-  list:        (params = {})     => request(`/document-inventory?${new URLSearchParams(params)}`),
-  addDocs:     (studentId, data) => request(`/document-inventory/${studentId}/docs`, { method: 'POST', body: JSON.stringify(data) }),
-  markReceived:(docId, data={})  => request(`/document-inventory/docs/${docId}/receive`, { method: 'PATCH', body: JSON.stringify(data) }),
-  requestDoc:  (docId, data={})  => request(`/document-inventory/docs/${docId}/request`, { method: 'PATCH', body: JSON.stringify(data) }),
-  urgentDoc:   (docId, data={})  => request(`/document-inventory/docs/${docId}/urgent`, { method: 'PATCH', body: JSON.stringify(data) }),
-  markDispatched:(docId, data={}) => request(`/document-inventory/docs/${docId}/dispatched`, { method: 'PATCH', body: JSON.stringify(data) }),
-  markDelivered: (docId, data={}) => request(`/document-inventory/docs/${docId}/delivered`, { method: 'PATCH', body: JSON.stringify(data) }),
+// New Inventory: each student's marksheets / other documents — in the office, sent to the centre, received by it
+// (it replaced the old Document Inventory)
+export const newInventoryApi = {
+  students: (params = {})      => request(`/new-inventory/students?${new URLSearchParams(params)}`),
+  student:  (id)               => request(`/new-inventory/students/${id}`),
+  addItem:  (id, data)         => request(`/new-inventory/students/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
+  // where a document is now: 'office' | 'sent' | 'received' (by the centre)
+  setCentreState: (itemId, state) => request(`/new-inventory/items/${itemId}/centre`, { method: 'PATCH', body: JSON.stringify({ state }) }),
 };
 
 export const chatApi = {

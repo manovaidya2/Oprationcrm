@@ -73,6 +73,28 @@ const studentDocSchema = new mongoose.Schema({
   urgent:         { type: Boolean, default: false },
   urgentMarkedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   urgentMarkedAt: { type: Date },
+  // Other Documents request answered from the New Inventory when the accountant approved it (not asked of the university)
+  inventoryItem:      { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryDocument' },
+  inventoryMatchedAt: { type: Date },
+  // Dispatch marked the document received from the university (the date it arrived, who marked it) and
+  // the New Inventory entry it went into. The university portal lists it as Sent from then on.
+  receivedFromUniversityAt: { type: Date },
+  receivedFromUniversityBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  receivedIntoInventory:    { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryDocument' },
+  // Dispatch checks a document from the university for corrections: checked (then a soft copy goes to the scan,
+  // a hard copy to dispatch), or sent back to the university for correction — open until the corrected copy is checked
+  correctionCheckedAt: { type: Date },
+  correctionCheckedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  correctionOpen:      { type: Boolean, default: false },
+  correctionCount:     { type: Number, default: 0 },
+  correctionSentAt:    { type: Date },
+  correctionSentBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  correctionNote:      { type: String, trim: true },
+  // status 'Closed': the stage it was closed at (Reopen puts it back there), when, by whom and why
+  closedFromStatus: { type: String },
+  closedAt:         { type: Date },
+  closedBy:         { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  closedReason:     { type: String, trim: true },
 
   // Uploaded file
   fileUrl:   { type: String },
@@ -102,7 +124,7 @@ const studentDocSchema = new mongoose.Schema({
       'Sent_To_University', // university notified
       'Dispatch_Received',  // dispatch got courier from university
       'Scanned',            // dispatch uploaded scan
-      'Accountant_Received', // dispatch sent scan to accountant first
+      'Accountant_Received', // (older scans only) dispatch sent the scan to the accountant first — scans now go straight to the counselor
       'Counselor_Received', // accountant forwarded scan to counselor
       'Center_Notified',    // counselor forwarded to center, waiting payment
       'Payment_Submitted',  // center paid, accountant to verify
@@ -110,6 +132,7 @@ const studentDocSchema = new mongoose.Schema({
       'University_Dispatched', // university sent via courier to dispatch
       'Dispatched',         // dispatch sent courier to center
       'Delivered',          // center confirmed receipt
+      'Closed',             // Dispatch closed an old request that was not moving (kept with its history and payments; can be reopened)
     ],
     default: 'Requested',
   },

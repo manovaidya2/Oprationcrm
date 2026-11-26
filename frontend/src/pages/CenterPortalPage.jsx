@@ -24,6 +24,7 @@ import { useAuth } from '@/context/AuthContext';
 import { studentsApi, paymentsApi, docsApi, centersApi, counselorsApi, universitiesApi, paymentAccountsApi, authApi } from '@/lib/api';
 import { activeUniversities } from '@/lib/universities';
 import { OTHER_NAME, requestOptions, requestSection } from '@/lib/documentOptions';
+import { DocNameField } from '@/components/DocNameField';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -408,6 +409,7 @@ const DOC_STATUS = {
   Payment_Verified:{label:'Payment Verified',color:'bg-green-50 text-green-700 border border-green-200'},
   Dispatched:{label:'🚚 Dispatched',color:'bg-teal-50 text-teal-700 border border-teal-200'},
   Delivered:{label:'✓ Delivered',color:'bg-emerald-50 text-emerald-700 border border-emerald-200'},
+  Closed:{label:'Closed',color:'bg-slate-100 text-slate-600 border border-slate-300'},
 };
 const SBadge = ({status,map}) => {
   const s=(map||APP_STATUS)[status]||{label:status,color:'bg-slate-100 text-slate-600 border border-slate-200'};
@@ -1367,34 +1369,6 @@ const REQUEST_TABS = [
 const requestTab = key => REQUEST_TABS.find(t => t.key === key) || REQUEST_TABS[1];
 const requestNameOf = f => (f.pick === OTHER_NAME ? f.customName.trim() : f.pick);
 
-// Dropdown of the tab's documents, plus "Other" which asks for the name.
-// value = { pick, customName }; onChange(patch)
-function RequestNameField({ section, value, onChange }) {
-  const { noun } = requestTab(section);
-  const isMarksheet = section === 'Marksheet';
-  return (
-    <div className="space-y-3">
-      <div>
-        <Label className="text-xs font-semibold text-slate-600">{isMarksheet ? 'Marksheet' : 'Document'} *</Label>
-        <Select value={value.pick} onValueChange={v => onChange({ pick: v })}>
-          <SelectTrigger className="mt-1 border-slate-200 h-10"><SelectValue placeholder={`Choose ${noun}`}/></SelectTrigger>
-          <SelectContent className="max-h-72">
-            {requestOptions(section).map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-            <SelectItem value={OTHER_NAME}>Other (type the name)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {value.pick === OTHER_NAME && (
-        <div>
-          <Label className="text-xs font-semibold text-slate-600">{isMarksheet ? 'Marksheet' : 'Document'} name *</Label>
-          <Input autoFocus maxLength={120} value={value.customName} onChange={e => onChange({ customName: e.target.value })}
-            placeholder={isMarksheet ? 'e.g. Semester 3 Marksheet' : 'e.g. Name Correction Letter'} className="mt-1 border-slate-200 h-10"/>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
   const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
@@ -1819,7 +1793,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="text-slate-800">{tab === 'Marksheet' ? 'Request Marksheet' : 'Request Document'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <RequestNameField section={tab} value={df} onChange={patch=>setDf(p=>({...p,...patch}))}/>
+            <DocNameField section={tab} value={df} onChange={patch=>setDf(p=>({...p,...patch}))}/>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
@@ -1875,7 +1849,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="text-slate-800">Edit Document Request</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <RequestNameField section={editDf.section} value={editDf} onChange={patch=>setEditDf(p=>({...p,...patch}))}/>
+            <DocNameField section={editDf.section} value={editDf} onChange={patch=>setEditDf(p=>({...p,...patch}))}/>
             <div>
               <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
               <Select value={editDf.requestType} onValueChange={v=>setEditDf(p=>({...p,requestType:v}))}>

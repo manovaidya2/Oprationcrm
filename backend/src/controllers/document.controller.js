@@ -5,6 +5,8 @@ const Payment       = require('../models/Payment');
 const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
 const PaymentAccount = require('../models/PaymentAccount');
+const InventoryDocument = require('../models/InventoryDocument');
+const { findOtherDocumentInStock } = require('./newInventory.controller');
 const mongoose      = require('mongoose');
 const fs            = require('fs');
 const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
@@ -210,6 +212,15 @@ function mergeInventoryDispatchStatus(inventoryDoc, requestDoc) {
 exports.list = asyncHandler(async (req, res) => {
   // documents added from the student page (origin 'Added') have their own tabs and are not part of the request / dispatch flow
   const filter = req.user.role === 'University' ? { origin: { $ne: 'Added' } } : { origin: { $nin: ['Inventory', 'Added'] } };
+  // requests made from the old Document Inventory page (now removed) that still wait for the university:
+  // Dispatch marks them received (into the New Inventory) or closes them
+  if (req.user.role === 'Dispatch') {
+    delete filter.origin;
+    filter.$or = [
+      { origin: { $nin: ['Inventory', 'Added'] } },
+      { origin: 'Inventory', status: { $in: ['Sent_To_University', 'University_Dispatched', 'Closed'] } },
+    ];
+  }
   if (isValidObjectId(req.query.studentId)) filter.student = req.query.studentId;
 
   const { role, centerId, counselorId, universityId } = req.user;
@@ -233,6 +244,8 @@ exports.list = asyncHandler(async (req, res) => {
   if (role === 'University' && universityId) {
     filter.university = universityId;
   }
+  // a request answered from the New Inventory never went to the university
+  if (role === 'University') filter.inventoryItem = null;
 
   const bypassStatus = req.query.all && ['Admin','Counselor','ViewerCounselor','Accountant','Dispatch','University'].includes(role);
 
@@ -257,6 +270,7 @@ exports.list = asyncHandler(async (req, res) => {
     .populate('lastUpdatedBy', 'name role')
     .populate('statusHistory.changedBy', 'name role')
     .populate('urgentMarkedBy', 'name role')
+    .populate('closedBy', 'name role')
     .sort('-createdAt')
     .lean();
 
@@ -427,7 +441,16 @@ exports.setUrgent = asyncHandler(async (req, res) => {
   addHistoryOnly(doc, urgent ? 'Marked_Urgent' : 'Marked_Normal', req.user, urgent ? 'Marked as an urgent request' : 'Urgent mark removed');
   await doc.save();
   await audit(urgent ? 'doc_marked_urgent' : 'doc_marked_normal', 'StudentDocument', doc._id, req.user, { urgent }, `${doc.name}: ${urgent ? 'marked urgent' : 'urgent mark removed'}`);
-  res.json(await loadDoc(doc._id));
+  const fresh = await loadDoc(doc._id);
+  // already waiting at the university: tell them it moved to their Urgent Requests
+  if (urgent && doc.status === 'Sent_To_University' && !doc.inventoryItem && doc.university) {
+    const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
+    if (uniUsers.length) await notify(uniUsers.map(u => u._id), {
+      message: `Urgent document request: "${doc.name}" - Student: ${fresh.student?.name || ''}`,
+      type: 'doc_forwarded', documentId: doc._id, studentId: fresh.student?._id, role: 'University',
+    });
+  }
+  res.json(fresh);
 });
 
 exports.update = asyncHandler(async (req, res) => {
@@ -538,26 +561,40 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     const e = new Error('Not in accountant queue'); e.status = 400; throw e;
   }
 
+  let inStock = null;   // the New Inventory document that answers an approved Other Documents request
   if (action === 'approve') {
     pushHistory(doc, 'Fee_Approved', req.user, note||'');
     const verifiedPayments = markDocPaymentsVerified(doc, req.user);
     const paidTotal = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     doc.totalPaid = paidTotal;
     const fullyPaid = doc.chargeFee <= 0 || paidTotal >= doc.chargeFee;
+    // An other document already held in the New Inventory for this student is not asked of the university:
+    // a soft copy goes straight to Dispatch to scan (a hard copy goes to Dispatch / the centre's payment as before).
+    inStock = sectionOf(doc.section, doc.name) === 'Other' ? await findOtherDocumentInStock(docStudentId(doc), doc.name) : null;
+    if (inStock) {
+      doc.inventoryItem = inStock._id;
+      doc.inventoryMatchedAt = new Date();
+      addHistoryOnly(doc, 'Inventory_Matched', req.user, 'Found in the New Inventory - not requested from the university');
+    }
     if (isHardCopyRequest(doc) && fullyPaid) {
       doc.status = 'Payment_Verified';
       doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: verifiedPayments > 0 ? 'Hard copy payment verified - ready for dispatch' : 'Hard copy has no pending fee - ready for dispatch' });
     } else if (isHardCopyRequest(doc)) {
       doc.status = 'Center_Notified';
       doc.statusHistory.push({ status: 'Center_Notified', changedBy: req.user._id, at: new Date(), note: 'Hard copy fee approved - payment required before dispatch' });
+    } else if (inStock) {
+      doc.status = 'Dispatch_Received';
+      doc.statusHistory.push({ status: 'Dispatch_Received', changedBy: req.user._id, at: new Date(), note: 'Document is in the New Inventory - Dispatch to scan and upload' });
     } else {
       doc.status = 'Sent_To_University';
       doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: 'Requested from dispatch inventory - external courier expected' });
     }
     // University portal is skipped for document requests; Dispatch owns receipt.
-    // Also notify Dispatch — courier will arrive from university directly
+    // Also notify Dispatch — courier will arrive from university directly (or the document is already in the inventory)
     if (!isHardCopyRequest(doc) || fullyPaid) await notifyRole('Dispatch', {
-      message: `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
+      message: inStock
+        ? `In the New Inventory: "${doc.name}" — Student: ${doc.student?.name}. ${isHardCopyRequest(doc) ? 'Ready to dispatch to the centre.' : 'Please scan and upload it.'}`
+        : `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
       type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
     });
     if (isHardCopyRequest(doc) && !fullyPaid) {
@@ -579,7 +616,11 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     pushHistory(doc, 'Fee_Pending', req.user, note||'Fees not cleared');
   }
   await doc.save();
-  await audit('accountant_doc_action', 'StudentDocument', doc._id, req.user, { action, note }, `Accountant ${action}`);
+  if (inStock) {
+    // the inventory document remembers the request it answered (once, even if the request is approved again)
+    await InventoryDocument.updateOne({ _id: inStock._id, 'matches.request': { $ne: doc._id } }, { $push: { matches: { request: doc._id, at: doc.inventoryMatchedAt, by: req.user._id } } });
+  }
+  await audit('accountant_doc_action', 'StudentDocument', doc._id, req.user, { action, note, inventoryItem: inStock?._id }, `Accountant ${action}${inStock ? ' (found in the New Inventory)' : ''}`);
   res.json(doc);
 });
 
@@ -599,19 +640,118 @@ exports.universityDispatch = asyncHandler(async (req, res) => {
   res.json(doc);
 });
 
-// Dispatch confirms receipt from university
+// ── Dispatch: received from the university ───────────────────
+// Dispatch marks one or many requests received (the date it arrived, the courier if known). The request moves
+// on to Upload Scan, the university portal lists it as Sent with that date, and the document goes into the
+// student's New Inventory (held in the office).
+const RECEIVABLE_STATUSES = ['Sent_To_University', 'University_Dispatched'];
+
+function receivedDateOf(value) {
+  if (!value) return new Date();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) { const e = new Error('Invalid received date'); e.status = 400; throw e; }
+  // a date picked "today" in India can be a little ahead of the server's clock: that is today, now
+  if (date.getTime() > Date.now() + 36 * 3600 * 1000) { const e = new Error('The received date cannot be in the future'); e.status = 400; throw e; }
+  return date.getTime() > Date.now() ? new Date() : date;
+}
+
+function receiptOptions(body = {}) {
+  const text = (v, max) => String(v || '').trim().slice(0, max);
+  return { receivedAt: receivedDateOf(body.receivedAt), company: text(body.company, 80), trackingNo: text(body.trackingNo, 80), note: text(body.note, 300) };
+}
+
+async function receiveFromUniversity(doc, user, { receivedAt, company, trackingNo, note }) {
+  if (doc.status === 'Sent_To_University') {
+    pushHistory(doc, 'University_Dispatched', user, 'Sent by the university', receivedAt);
+  }
+  if (company || trackingNo) {   // the courier it came by (kept with any details the university gave)
+    const ci = doc.courierInfo ? doc.courierInfo.toObject() : {};
+    doc.courierInfo = {
+      ...ci,
+      company: company || ci.company || '',
+      trackingNo: trackingNo || ci.trackingNo || '',
+      documentsDesc: ci.documentsDesc || note || '',
+      sentBy: ci.sentBy || user._id,
+      sentAt: ci.sentAt || new Date(),
+    };
+  }
+  doc.receivedFromUniversityAt = receivedAt;
+  doc.receivedFromUniversityBy = user._id;
+  doc.correctionCheckedAt = undefined;   // every copy that arrives is checked (a corrected one again)
+  doc.correctionCheckedBy = undefined;
+  const what = doc.correctionOpen ? 'Corrected copy received from the university' : 'Received from the university';
+  const courier = [company, trackingNo].filter(Boolean).join(' - ');
+  pushHistory(doc, 'Dispatch_Received', user, [what, courier && `Courier: ${courier}`, note].filter(Boolean).join(' · '), receivedAt);
+
+  const itemId = await inventoryEntryFor(doc, user, receivedAt);
+  await doc.save();
+  if (itemId) await logInventory(itemId, what, user, courier ? `Courier: ${courier}` : '', { $unset: { correctionSentAt: 1 } }, receivedAt);
+}
+
+// a line in the New Inventory entry's log (plus any other change to the entry)
+async function logInventory(itemId, action, user, note = '', extra = {}, at = new Date()) {
+  try {
+    await InventoryDocument.updateOne({ _id: itemId }, { ...extra, $push: { log: { action, at, by: user?._id, note: note || undefined } } });
+  } catch (e) {
+    console.error('New Inventory log failed', itemId, e.message);
+  }
+}
+
+// The New Inventory entry holding this request's document: the one it was answered from, the one it went into
+// when received, or (received before receipts went into the inventory) a new one now. Once per document name
+// in a student's tab: an entry already there is used. Sets doc.receivedIntoInventory; the caller saves doc.
+async function inventoryEntryFor(doc, user, receivedAt = new Date()) {
+  const linked = doc.inventoryItem || doc.receivedIntoInventory;
+  if (linked && await InventoryDocument.exists({ _id: linked._id || linked })) return linked._id || linked;
+  const studentId = docStudentId(doc);
+  if (!studentId) return null;
+  const section = sectionOf(doc.section, doc.name);
+  const key = { student: studentId, section, nameKey: InventoryDocument.nameKeyOf(doc.name) };
+  let item = await InventoryDocument.findOne(key).select('_id').lean();
+  if (!item) {
+    try {
+      item = await InventoryDocument.create({
+        student: studentId, center: doc.center?._id || doc.center, section, name: doc.name,
+        note: 'Received from the university', addedBy: user._id, fromRequest: doc._id, receivedAt,
+      });
+    } catch (e) {
+      if (e.code !== 11000) throw e;
+      item = await InventoryDocument.findOne(key).select('_id').lean();
+    }
+  }
+  doc.receivedIntoInventory = item?._id;
+  return item?._id || null;
+}
+
+// when the document reached the office from the university (older receipts: the history)
+const receivedAtOf = doc => doc.receivedFromUniversityAt
+  || [...(doc.statusHistory || [])].reverse().find(h => h.status === 'Dispatch_Received')?.at || new Date();
+
+// The request was couriered to the centre ('sent') / the centre has it ('received'): its New Inventory entry
+// shows that (the entry is made if the document never went in). Never blocks the step itself. Caller saves doc.
+async function noteCentreStep(doc, user, step, at = new Date()) {
+  try {
+    const itemId = await inventoryEntryFor(doc, user, receivedAtOf(doc));
+    if (!itemId) return;
+    const set = step === 'received'
+      ? { centreReceivedAt: at, centreReceivedBy: user._id }
+      : { sentToCentreAt: at, sentToCentreBy: user._id };
+    await logInventory(itemId, step === 'received' ? 'Received by the centre' : 'Sent to the centre', user, '',
+      step === 'received' ? { $set: set } : { $set: set, $unset: { centreReceivedAt: 1, centreReceivedBy: 1 } }, at);
+  } catch (e) {
+    console.error('New Inventory update failed', doc?._id, e.message);
+  }
+}
+
+// PATCH /documents/:id/dispatch-receive { receivedAt?, company?, trackingNo?, note? }
 exports.dispatchReceive = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   // Now dispatch can confirm receipt from either University_Dispatched OR Sent_To_University
-  if (!['University_Dispatched', 'Sent_To_University'].includes(doc.status)) {
+  if (!RECEIVABLE_STATUSES.includes(doc.status)) {
     const e = new Error('Must be Sent_To_University or University_Dispatched status'); e.status = 400; throw e;
   }
-  // If coming directly from Sent_To_University, set University_Dispatched first in history
-  if (doc.status === 'Sent_To_University') {
-    pushHistory(doc, 'University_Dispatched', req.user, 'Courier arrived at dispatch — auto-confirmed university dispatch');
-  }
-  pushHistory(doc, 'Dispatch_Received', req.user, 'Courier received from university');
-  await doc.save();
+  const opts = receiptOptions(req.body);
+  await receiveFromUniversity(doc, req.user, opts);
 
   // Notify university users that their courier was received by dispatch
   const uniId = doc.university?._id || doc.university;
@@ -631,32 +771,251 @@ exports.dispatchReceive = asyncHandler(async (req, res) => {
     });
   }
 
-  await audit('dispatch_received', 'StudentDocument', doc._id, req.user, {}, `Courier received for ${doc.name}`);
+  await audit('dispatch_received', 'StudentDocument', doc._id, req.user, { receivedAt: opts.receivedAt, inventory: doc.receivedIntoInventory }, `Courier received for ${doc.name}`);
   res.json(doc);
 });
 
-// Dispatch uploads scanned copy -> goes to ACCOUNTANT first, then counselor, then center
+// POST /documents/dispatch-receive { ids, receivedAt?, company?, trackingNo?, note? } — several at once.
+// Each request is done on its own: one that is no longer waiting is reported back, the rest still go through.
+exports.dispatchReceiveMany = asyncHandler(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(String))].filter(isValidObjectId);
+  if (!ids.length) { const e = new Error('Select the documents received'); e.status = 400; throw e; }
+  if (ids.length > 200) { const e = new Error('Mark at most 200 documents at a time'); e.status = 400; throw e; }
+  const opts = receiptOptions(req.body);
+
+  const received = [];
+  const failed = [];
+  for (const id of ids) {
+    try {
+      const doc = await loadDoc(id);
+      if (!RECEIVABLE_STATUSES.includes(doc.status)) {
+        failed.push({ id, name: doc.name, error: 'No longer waiting for the university' });
+        continue;
+      }
+      await receiveFromUniversity(doc, req.user, opts);
+      received.push(doc);
+      await audit('dispatch_received', 'StudentDocument', doc._id, req.user, { receivedAt: opts.receivedAt, inventory: doc.receivedIntoInventory, bulk: true }, `Courier received for ${doc.name}`);
+    } catch (e) {
+      failed.push({ id, error: e.message });
+    }
+  }
+
+  // one notification per university for the whole batch
+  const byUniversity = new Map();
+  received.forEach(doc => {
+    const uniId = String(doc.university?._id || doc.university || '');
+    if (!uniId) return;
+    if (!byUniversity.has(uniId)) byUniversity.set(uniId, []);
+    byUniversity.get(uniId).push(doc);
+  });
+  for (const [uniId, docs] of byUniversity) {
+    const uniUsers = await User.find({ role: 'University', universityId: uniId, isActive: true }).select('_id').lean();
+    if (!uniUsers.length) continue;
+    await notify(uniUsers.map(u => u._id), docs.length === 1
+      ? { message: `Dispatch received "${docs[0].name}" (Student: ${docs[0].student?.name}) - marked Sent`, type: 'doc_forwarded', documentId: docs[0]._id, studentId: docs[0].student?._id, role: 'University' }
+      : { message: `Dispatch received ${docs.length} documents from you - marked Sent`, type: 'doc_forwarded', role: 'University' });
+  }
+
+  res.json({ received: received.map(d => String(d._id)), failed });
+});
+
+// ── Dispatch: correction check of a document received from the university ──
+// Checked: a soft copy goes on to Upload Scan; a hard copy to Ready to Dispatch (paid) or to the centre's payment.
+// Sent back: it goes to the university's Correction Needed tab and back to Dispatch's request tabs, and the corrected
+// copy goes through Mark Received and the check again.
+
+// POST /documents/correction-checked { ids }
+exports.correctionChecked = asyncHandler(async (req, res) => {
+  const next = {};
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status !== 'Dispatch_Received' || doc.inventoryItem) return 'Not waiting for a correction check';
+    if (doc.correctionCheckedAt) return 'Already checked';
+    const corrected = doc.correctionOpen;
+    doc.correctionCheckedAt = new Date();
+    doc.correctionCheckedBy = req.user._id;
+    doc.correctionOpen = false;
+    addHistoryOnly(doc, 'Correction_Checked', req.user, corrected ? 'Corrected copy checked by Dispatch - no correction needed' : 'Checked by Dispatch - no correction needed');
+    next[String(doc._id)] = 'scan';
+    if (isHardCopyRequest(doc)) {
+      const paid = (doc.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      if ((doc.chargeFee || 0) <= 0 || paid >= doc.chargeFee) {
+        pushHistory(doc, 'Payment_Verified', req.user, 'Correction checked - hard copy ready to dispatch');
+        next[String(doc._id)] = 'dispatch';
+      } else {
+        pushHistory(doc, 'Center_Notified', req.user, 'Correction checked - hard copy fee to be paid before dispatch');
+        next[String(doc._id)] = 'payment';
+      }
+    }
+    const itemId = await inventoryEntryFor(doc, req.user, receivedAtOf(doc));
+    await doc.save();
+    if (itemId) await logInventory(itemId, corrected ? 'Corrected copy checked by Dispatch' : 'Correction checked by Dispatch', req.user, '',
+      { $set: { correctionCheckedAt: doc.correctionCheckedAt, correctionCheckedBy: req.user._id } });
+    if (next[String(doc._id)] === 'payment') {
+      const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true }).select('_id').lean();
+      if (centerUser) await notify(centerUser._id, { message: `Payment required for hard copy document "${doc.name}"`, type: 'doc_payment_required', documentId: doc._id, role: 'Center' });
+    }
+    await audit('doc_correction_checked', 'StudentDocument', doc._id, req.user, { next: next[String(doc._id)] }, `Correction checked: ${doc.name}`);
+    return null;
+  });
+  res.json({ checked: done, failed, next });
+});
+
+// POST /documents/send-for-correction { ids, note } — what is wrong is required
+exports.sendForCorrection = asyncHandler(async (req, res) => {
+  const note = String(req.body.note || '').trim().slice(0, 500);
+  if (!note) { const e = new Error('Write what needs to be corrected'); e.status = 400; throw e; }
+  const sent = [];
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status !== 'Dispatch_Received' || doc.correctionCheckedAt || doc.inventoryItem) return 'Only documents waiting for the correction check can be sent back';
+    doc.correctionOpen = true;
+    doc.correctionCount = (doc.correctionCount || 0) + 1;
+    doc.correctionSentAt = new Date();
+    doc.correctionSentBy = req.user._id;
+    doc.correctionNote = note;
+    addHistoryOnly(doc, 'Sent_For_Correction', req.user, `Sent back to the university for correction: ${note}`);
+    pushHistory(doc, 'Sent_To_University', req.user, 'Waiting for the corrected copy from the university');
+    const itemId = await inventoryEntryFor(doc, req.user, receivedAtOf(doc));
+    await doc.save();
+    if (itemId) await logInventory(itemId, 'Sent back to the university for correction', req.user, note, { $set: { correctionSentAt: doc.correctionSentAt }, $unset: { correctionCheckedAt: 1, correctionCheckedBy: 1 } });
+    await audit('doc_sent_for_correction', 'StudentDocument', doc._id, req.user, { note, count: doc.correctionCount }, `Sent for correction: ${doc.name}`);
+    sent.push(doc);
+    return null;
+  });
+  // the university hears once per batch
+  const byUniversity = new Map();
+  sent.forEach(doc => {
+    const uniId = String(doc.university || '');
+    if (!uniId) return;
+    if (!byUniversity.has(uniId)) byUniversity.set(uniId, []);
+    byUniversity.get(uniId).push(doc);
+  });
+  for (const [uniId, docs] of byUniversity) {
+    const uniUsers = await User.find({ role: 'University', universityId: uniId, isActive: true }).select('_id').lean();
+    if (!uniUsers.length) continue;
+    await notify(uniUsers.map(u => u._id), {
+      message: docs.length === 1 ? `Correction needed: "${docs[0].name}" - ${note}` : `Correction needed for ${docs.length} documents - ${note}`,
+      type: 'doc_forwarded', role: 'University', ...(docs.length === 1 ? { documentId: docs[0]._id } : {}),
+    });
+  }
+  res.json({ sent: done, failed });
+});
+
+// ── Dispatch: close old requests that are not moving / reopen them ──
+// Closing does not delete: the request keeps its history and payments, leaves the Dispatch and university
+// lists (status 'Closed'), and Reopen puts it back at the stage it was closed at.
+const CLOSABLE_STATUSES = ['Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
+
+async function forEachRequest(ids, work) {
+  const unique = [...new Set((Array.isArray(ids) ? ids : []).map(String))].filter(isValidObjectId);
+  if (!unique.length) { const e = new Error('Select the requests'); e.status = 400; throw e; }
+  if (unique.length > 200) { const e = new Error('At most 200 requests at a time'); e.status = 400; throw e; }
+  const done = [];
+  const failed = [];
+  for (const id of unique) {
+    try {
+      const doc = await StudentDoc.findById(id);
+      if (!doc) { failed.push({ id, error: 'Request not found' }); continue; }
+      const problem = await work(doc);
+      if (problem) failed.push({ id, name: doc.name, error: problem });
+      else done.push(id);
+    } catch (e) {
+      failed.push({ id, error: e.message });
+    }
+  }
+  return { done, failed };
+}
+
+// POST /documents/close { ids, reason? }
+exports.closeRequests = asyncHandler(async (req, res) => {
+  const reason = String(req.body.reason || '').trim().slice(0, 300);
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status === 'Closed') return 'Already closed';
+    if (!CLOSABLE_STATUSES.includes(doc.status)) return 'Only requests waiting for the university or for their scan can be closed';
+    doc.closedFromStatus = doc.status;
+    doc.closedAt = new Date();
+    doc.closedBy = req.user._id;
+    doc.closedReason = reason;
+    pushHistory(doc, 'Closed', req.user, reason ? `Closed by ${req.user.role}: ${reason}` : `Closed by ${req.user.role} - not moving forward`);
+    await doc.save();
+    await audit('doc_closed', 'StudentDocument', doc._id, req.user, { from: doc.closedFromStatus, reason }, `Request closed: ${doc.name}`);
+    return null;
+  });
+  res.json({ closed: done, failed });
+});
+
+// POST /documents/centre-received { ids } — Dispatch marks couriered requests as received by the centre
+// (when the centre has not confirmed it itself); their New Inventory entries show it too
+exports.centreReceivedMany = asyncHandler(async (req, res) => {
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status === 'Delivered') return 'Already received by the centre';
+    if (doc.status !== 'Dispatched') return 'Not sent to the centre yet';
+    pushHistory(doc, 'Delivered', req.user, `Received by centre - marked by ${req.user.role}`);
+    await noteCentreStep(doc, req.user, 'received');
+    await doc.save();
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+      message: `"${doc.name}" marked received by the centre (by ${req.user.name || req.user.role})`,
+      type: 'doc_delivered', documentId: doc._id,
+    });
+    await audit('doc_delivered', 'StudentDocument', doc._id, req.user, { via: 'dispatch' }, `Delivered: ${doc.name}`);
+    return null;
+  });
+  res.json({ received: done, failed });
+});
+
+// POST /documents/reopen { ids }
+exports.reopenRequests = asyncHandler(async (req, res) => {
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status !== 'Closed') return 'Not closed';
+    const back = CLOSABLE_STATUSES.includes(doc.closedFromStatus) ? doc.closedFromStatus : 'Sent_To_University';
+    pushHistory(doc, back, req.user, `Reopened by ${req.user.role}`);
+    doc.closedFromStatus = undefined;
+    doc.closedAt = undefined;
+    doc.closedBy = undefined;
+    doc.closedReason = undefined;
+    await doc.save();
+    await audit('doc_reopened', 'StudentDocument', doc._id, req.user, { to: back }, `Request reopened: ${doc.name}`);
+    return null;
+  });
+  res.json({ reopened: done, failed });
+});
+
+// Dispatch uploads scanned copy -> straight to the counselor, then the centre
+// (scans used to go to the accountant first; ones still there are forwarded by accountantForwardScan)
 exports.uploadScan = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   if (doc.status !== 'Dispatch_Received') { const e = new Error('Must confirm receipt first'); e.status = 400; throw e; }
+  // a copy from the university is checked for corrections first (one answered from the New Inventory was not sent for)
+  if (!doc.correctionCheckedAt && !doc.inventoryItem) { const e = new Error('Check the document for corrections first (Correction Check)'); e.status = 400; throw e; }
 
   if (req.file) { doc.scannedUrl = `/uploads/${req.file.filename}`; doc.scannedName = req.file.originalname; }
   if (req.body.scannedUrl) doc.scannedUrl = req.body.scannedUrl;
 
+  // the scan is kept with the document in the New Inventory, to download later
+  if (doc.scannedUrl) {
+    const itemId = await inventoryEntryFor(doc, req.user, receivedAtOf(doc));
+    if (itemId) {
+      const added = await InventoryDocument.updateOne({ _id: itemId, 'files.url': { $ne: doc.scannedUrl } }, { $push: { files: {
+        url: doc.scannedUrl, name: doc.scannedName || doc.name, sizeKb: req.file ? Math.round(req.file.size / 1024) : 0,
+        uploadedAt: new Date(), uploadedBy: req.user._id, request: doc._id,
+      } } });
+      if (added.modifiedCount) await logInventory(itemId, 'Scan uploaded', req.user, doc.scannedName || '');
+    }
+  }
+
   pushHistory(doc, 'Scanned', req.user, 'Scanned copy uploaded by dispatch');
-  doc.status = 'Accountant_Received';
-  doc.statusHistory.push({ status: 'Accountant_Received', changedBy: req.user._id, at: new Date(), note: 'Scanned copy sent to accountant for review' });
+  // straight to the counselor ("From Dispatch"); the accountant no longer reviews scans
+  pushHistory(doc, 'Counselor_Received', req.user, 'Scanned copy sent to the counselor');
   await doc.save();
 
-  await notifyRole('Accountant', {
-    message: `Scanned document received from Dispatch: "${doc.name}" for ${doc.student?.name}. Please review and forward to counselor.`,
-    type: 'doc_scanned', documentId: doc._id, role: 'Accountant',
+  await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+    message: `Scanned document from Dispatch: "${doc.name}" for ${doc.student?.name}. Please review and forward to the centre.`,
+    type: 'doc_scanned', documentId: doc._id,
   });
   await audit('scan_uploaded', 'StudentDocument', doc._id, req.user, {}, `Scan uploaded for ${doc.name}`);
   res.json(doc);
 });
 
-// Accountant forwards scan to counselor
+// Accountant forwards scan to counselor — only scans uploaded before they went straight to the counselor
 exports.accountantForwardScan = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   if (doc.status !== 'Accountant_Received') { const e = new Error('Must be Accountant_Received status'); e.status = 400; throw e; }
@@ -894,6 +1253,7 @@ exports.dispatchToCenter = asyncHandler(async (req, res) => {
   // Overwrite courierInfo with dispatch-to-center details
   doc.centerCourierInfo = { company: company||'', trackingNo, dispatchDate: dispatchDate ? new Date(dispatchDate) : new Date(), documentsDesc: documentsDesc||doc.name, sentBy: req.user._id, sentAt: new Date() };
   pushHistory(doc, 'Dispatched', req.user, `Courier: ${company||''} - ${trackingNo}`);
+  await noteCentreStep(doc, req.user, 'sent');
   await doc.save();
 
   // Notify COUNSELOR first with courier details
@@ -925,6 +1285,7 @@ exports.centerConfirmDelivery = asyncHandler(async (req, res) => {
   }
 
   pushHistory(doc, 'Delivered', req.user, 'Center confirmed receipt of courier');
+  await noteCentreStep(doc, req.user, 'received');
   await doc.save();
 
   

@@ -103,6 +103,7 @@ const DOC_STATUS_COLORS = {
   Sent_To_University:'bg-purple-100 text-purple-700', Center_Notified:'bg-amber-100 text-amber-700',
   Payment_Submitted:'bg-blue-100 text-blue-700', Payment_Verified:'bg-green-100 text-green-700',
   Dispatched:'bg-teal-100 text-teal-700', Delivered:'bg-emerald-100 text-emerald-700',
+  Closed:'bg-slate-200 text-slate-600',
 };
 
 const ALL_APP_STATUSES = [

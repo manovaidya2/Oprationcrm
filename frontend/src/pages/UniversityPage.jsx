@@ -4,7 +4,7 @@ import {
   BookOpen, BadgeCheck, Truck, Paperclip, Search, X, Eye,
   Loader2, GraduationCap, FileText, Package, TrendingUp,
   Clock, CheckCircle2, Hash, User, Building2, Download,
-  ChevronRight, History, Send, XCircle, AlertTriangle,
+  ChevronRight, History, Send, XCircle, AlertTriangle, Undo2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { studentsApi, docsApi } from '@/lib/api';
+import { requestSection } from '@/lib/documentOptions';
 
 const fmtDt  = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const fmtFull= d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
@@ -23,10 +24,14 @@ const DOC_STATUS = {
   University_Dispatched:{ label:'Sent to Dispatch',   color:'bg-teal-100 text-teal-700',      dot:'bg-teal-500' },
   Dispatch_Received:    { label:'Dispatch Received',  color:'bg-blue-100 text-blue-700',      dot:'bg-blue-500' },
   Scanned:              { label:'Scanned',             color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
+  Accountant_Received:  { label:'With Accountant',    color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
   Counselor_Received:   { label:'With Counselor',     color:'bg-purple-100 text-purple-700',  dot:'bg-purple-500' },
-  Payment_Verified:     { label:'Payment Verified',   color:'bg-green-100 text-green-700',    dot:'bg-green-500' },
+  Center_Notified:      { label:'With Centre',        color:'bg-purple-100 text-purple-700',  dot:'bg-purple-500' },
+  Payment_Submitted:    { label:'Payment Submitted',  color:'bg-amber-100 text-amber-700',    dot:'bg-amber-500' },
+  Payment_Verified:    { label:'Payment Verified',   color:'bg-green-100 text-green-700',    dot:'bg-green-500' },
   Dispatched:           { label:'Dispatched to Center',color:'bg-emerald-100 text-emerald-700',dot:'bg-emerald-500' },
   Delivered:            { label:'Delivered',           color:'bg-emerald-100 text-emerald-700',dot:'bg-emerald-600' },
+  Closed:               { label:'Closed',              color:'bg-slate-200 text-slate-600',    dot:'bg-slate-400' },
 };
 
 // All statuses AFTER university has dispatched — used to keep records in history
@@ -43,6 +48,165 @@ const DISPATCHED_STATUSES = [
   'Delivered',
 ];
 
+// Document requests reach the university in three tabs: Marksheet and Other Documents (the tab the centre
+// raised them from) and Urgent — the counselor's urgent mark, or the older inventory "urgent request".
+const SECTION_META = {
+  Marksheet: { label: 'Marksheet',      icon: GraduationCap, tone: 'bg-violet-50 text-violet-600', badge: 'border-violet-200 bg-violet-50 text-violet-700' },
+  Other:     { label: 'Other Document', icon: FileText,      tone: 'bg-sky-50 text-sky-600',       badge: 'border-sky-200 bg-sky-50 text-sky-700' },
+};
+const isUrgentDoc = d => !!d.urgent || (d.statusHistory || []).some(h => h.status === 'Urgent_Requested');
+const urgentSince = d => (d.urgent ? d.urgentMarkedAt : [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested')?.at);
+const requestedAt = d => [...(d.statusHistory || [])].reverse().find(h => h.status === 'Sent_To_University')?.at || d.createdAt;
+// the date Dispatch received it from the university (older records: the receipt in the history)
+const receivedOn = d => d.receivedFromUniversityAt || [...(d.statusHistory || [])].reverse().find(h => h.status === 'Dispatch_Received')?.at || null;
+const hasCourier = c => c && (c.dispatchDate || c.documentsDesc || c.trackingNo || c.company);
+const docStatusInfo = d => DOC_STATUS[d.status] || { label: String(d.status || '').replace(/_/g, ' '), color: 'bg-gray-100 text-gray-700' };
+
+function SectionBadge({ d }) {
+  const meta = SECTION_META[requestSection(d)];
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}>{meta.label}</span>;
+}
+
+function UrgentBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">
+      <AlertTriangle className="h-3 w-3"/>Urgent
+    </span>
+  );
+}
+
+function EnrollmentChip({ student }) {
+  if (!student?.enrollmentNumber) return null;
+  return (
+    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+      {student.enrollmentNumber}
+    </span>
+  );
+}
+
+function StudentLink({ student, onOpen }) {
+  if (!student?._id) return <b>{student?.name || '—'}</b>;
+  return (
+    <button type="button" onClick={() => onOpen(student)} className="font-semibold text-slate-800 hover:text-purple-700 hover:underline">
+      {student.name}
+    </button>
+  );
+}
+
+// A request waiting for the university's courier
+function PendingRequestCard({ d, selected, onToggle, onOpenStudent, showSection }) {
+  const urgent = isUrgentDoc(d);
+  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
+  const since = urgent ? urgentSince(d) : null;
+  return (
+    <Card className={`mb-2 ${urgent ? 'border-red-200 bg-red-50/40' : 'border-amber-200'}`}>
+      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
+        <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${d.name}`}
+          className={`mt-2.5 h-4 w-4 shrink-0 ${urgent ? 'accent-red-600' : 'accent-purple-600'}`}/>
+        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{d.name}</span>
+            {showSection && <SectionBadge d={d}/>}
+            {urgent && <UrgentBadge/>}
+            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
+          </div>
+          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
+            <EnrollmentChip student={d.student}/>
+            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span>Requested: {fmtDt(requestedAt(d))}</span>
+            {since && <span className="font-medium text-red-700">Urgent since {fmtDt(since)}</span>}
+          </div>
+        </div>
+        <span className={`ml-auto shrink-0 text-xs font-medium px-2.5 py-1 rounded-full border ${urgent ? 'text-red-700 bg-red-100 border-red-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
+          {urgent ? 'Urgent - Awaiting Physical Courier' : '⏳ Awaiting Physical Courier'}
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
+// A document Dispatch sent back for correction: what to correct, waiting for the corrected copy
+function CorrectionCard({ d, onOpenStudent }) {
+  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
+  return (
+    <Card className="mb-2 border-amber-300 bg-amber-50/40">
+      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
+        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{d.name}</span>
+            <SectionBadge d={d}/>
+            {isUrgentDoc(d) && <UrgentBadge/>}
+            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
+          </div>
+          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
+            <EnrollmentChip student={d.student}/>
+            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
+          </div>
+          <div className="mt-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-900">
+            <span className="font-semibold">Correction needed:</span> {d.correctionNote || '—'}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span>Sent back: {fmtDt(d.correctionSentAt)}</span>
+            {d.correctionCount > 1 && <span className="font-semibold text-amber-800">{d.correctionCount}{d.correctionCount === 2 ? 'nd' : d.correctionCount === 3 ? 'rd' : 'th'} correction</span>}
+          </div>
+        </div>
+        <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border text-amber-800 bg-amber-100 border-amber-300">
+          <Undo2 className="h-3.5 w-3.5"/>Send corrected copy
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
+// A request the university has sent: Dispatch marked it received (the date it reached the office).
+// Older ones the university marked dispatched itself may still be on the way.
+function SentCard({ d, onOpenStudent }) {
+  const urgent = isUrgentDoc(d);
+  const { icon: Icon, tone } = SECTION_META[requestSection(d)];
+  const received = receivedOn(d);
+  return (
+    <Card className="mb-2 border-l-4 border-l-emerald-400">
+      <CardContent className="p-4 flex flex-wrap sm:flex-nowrap items-start gap-3">
+        <div className={`h-9 w-9 shrink-0 rounded-lg flex items-center justify-center ${tone}`}><Icon className="h-4 w-4"/></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold">{d.name}</span>
+            {urgent && <UrgentBadge/>}
+            {d.correctionCount > 0 && <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">Corrected copy</span>}
+            {d.requestType && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>}
+          </div>
+          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
+            Student: <StudentLink student={d.student} onOpen={onOpenStudent}/>
+            <EnrollmentChip student={d.student}/>
+            {d.student?.courseName && <span className="text-xs">· {d.student.courseName}</span>}
+          </div>
+          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span>Requested: {fmtDt(requestedAt(d))}</span>
+            {received && <span className="font-semibold text-emerald-700">Received at office: {fmtDt(received)}</span>}
+          </div>
+          {hasCourier(d.courierInfo) && (
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
+              <Truck className="h-3 w-3"/>
+              {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
+              {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
+              {d.courierInfo.documentsDesc && <span>· {d.courierInfo.documentsDesc}</span>}
+            </div>
+          )}
+        </div>
+        <span className={`ml-auto shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border ${received ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-teal-700 bg-teal-50 border-teal-200'}`}>
+          {received ? <><CheckCircle2 className="h-3.5 w-3.5"/>Sent</> : <><Truck className="h-3.5 w-3.5"/>Sent · on the way</>}
+        </span>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Student Detail Modal ─────────────────────────────────────
 function StudentModal({ student, docs, onClose, onAssign, onReject }) {
   const [fullStudent, setFullStudent] = useState(student);
@@ -54,7 +218,9 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
   const s = fullStudent;
   const studentDocs = docs.filter(d => String(d.student?._id || d.student) === String(student._id));
   const dispatchedDocs = studentDocs.filter(d => DISPATCHED_STATUSES.includes(d.status));
-  const isEnrolled = student.applicationStatus === 'Enrolled';
+  // opened from a document request the student may carry no status until the full record loads
+  const status = s.applicationStatus || student.applicationStatus;
+  const awaitingEnrollment = status ? status === 'Sent_To_University' : !student.enrollmentNumber;
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
@@ -129,13 +295,15 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
               </p>
               <div className="space-y-2">
                 {studentDocs.map(d => {
-                  const si = DOC_STATUS[d.status] || { label: d.status, color: 'bg-gray-100 text-gray-700' };
+                  const si = docStatusInfo(d);
                   return (
                     <div key={d._id} className="flex items-center justify-between gap-2 bg-muted/20 rounded px-3 py-2">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm">{d.name}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
+                          <SectionBadge d={d}/>
+                          {isUrgentDoc(d) && <UrgentBadge/>}
                         </div>
                         {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
   <div className="text-xs text-muted-foreground mt-0.5">
@@ -176,12 +344,12 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
 
         <DialogFooter className="gap-2 flex-wrap">
           <Button variant="outline" onClick={onClose}>Close</Button>
-          {!isEnrolled && onReject && (
+          {awaitingEnrollment && onReject && (
             <Button variant="outline" className="border-red-300 text-red-600 hover:bg-red-50" onClick={() => { onClose(); onReject(student); }}>
               <XCircle className="h-4 w-4 mr-1"/>Reject Application
             </Button>
           )}
-          {!isEnrolled && onAssign && (
+          {awaitingEnrollment && onAssign && (
             <Button className="bg-purple-600 hover:bg-purple-700" onClick={() => { onClose(); onAssign(student); }}>
               <BadgeCheck className="h-4 w-4 mr-1"/>Assign Enrollment
             </Button>
@@ -239,6 +407,8 @@ export default function UniversityPage() {
   const [search,  setSearch]  = useState('');
   const [docSearch, setDocSearch] = useState('');
   const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [tab, setTab] = useState('pending');
+  const [urgentSection, setUrgentSection] = useState('');   // Urgent tab filter: '' (all) | 'Marksheet' | 'Other'
 
   const load = useCallback(async () => {
     try {
@@ -285,11 +455,13 @@ export default function UniversityPage() {
   }
 
   // ── Derived stats ───────────────────────────────────────────
-  const isUrgentDoc = d => (d.statusHistory || []).some(h => h.status === 'Urgent_Requested');
   const allStudents   = [...pending, ...enrolled, ...cancelled];
-  const urgentPendingDocs = docs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d));
-  const urgentHistoryDocs = docs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d));
-  const pendingDocs   = docs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d));
+  const awaitingDocs  = docs.filter(d => d.status === 'Sent_To_University' && !d.correctionOpen);
+  const correctionDocs = docs.filter(d => d.status === 'Sent_To_University' && d.correctionOpen);
+  // each pending request shows in one tab: urgent ones in Urgent, the rest in Marksheet / Other
+  const urgentPendingDocs = awaitingDocs.filter(isUrgentDoc);
+  const marksheetPending  = awaitingDocs.filter(d => !isUrgentDoc(d) && requestSection(d) === 'Marksheet');
+  const otherPending      = awaitingDocs.filter(d => !isUrgentDoc(d) && requestSection(d) === 'Other');
   const dispatchedDocs= docs.filter(d => DISPATCHED_STATUSES.includes(d.status));
   const totalDocs     = docs.length;
 
@@ -339,22 +511,79 @@ export default function UniversityPage() {
     setSelectedDocIds(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
   }
 
-  function downloadDocRequestsCSV(urgentOnly = false) {
-    const pendingList = filtDocs.filter(d => d.status === 'Sent_To_University' && (urgentOnly ? isUrgentDoc(d) : !isUrgentDoc(d)));
+  function toggleAllDocs(list) {
+    const ids = list.map(d => String(d._id));
+    const allOn = ids.length > 0 && ids.every(id => selectedDocIds.includes(id));
+    setSelectedDocIds(prev => (allOn ? prev.filter(id => !ids.includes(id)) : [...new Set([...prev, ...ids])]));
+  }
+
+  // A student opened from a request card: the full list entry when we have it (it carries the status)
+  function openDocStudent(st) {
+    if (!st?._id) return;
+    setModalStudent(allStudents.find(x => String(x._id) === String(st._id)) || st);
+  }
+
+  // Request tabs: kind is 'Marksheet', 'Other' or 'urgent'
+  const inRequestTab = (kind, d) => (kind === 'urgent'
+    ? isUrgentDoc(d) && (!urgentSection || requestSection(d) === urgentSection)
+    : requestSection(d) === kind);
+  const tabPendingDocs = kind => filtDocs.filter(d => d.status === 'Sent_To_University' && !d.correctionOpen && inRequestTab(kind, d) && (kind === 'urgent' || !isUrgentDoc(d)));
+  const tabCorrectionDocs = () => filtDocs.filter(d => d.status === 'Sent_To_University' && d.correctionOpen)
+    .sort((a, b) => new Date(a.correctionSentAt || 0) - new Date(b.correctionSentAt || 0));
+  const kindNoun = kind => (kind === 'urgent' ? 'urgent' : kind === 'Marksheet' ? 'marksheet' : 'other document');
+  // Sent tabs: requests the university has sent (Dispatch received them), latest received first
+  const receivedTime = d => new Date(receivedOn(d) || d.updatedAt || 0).getTime();
+  const tabSentDocs = section => filtDocs
+    .filter(d => DISPATCHED_STATUSES.includes(d.status) && requestSection(d) === section)
+    .sort((a, b) => receivedTime(b) - receivedTime(a));
+
+  function downloadSentCSV(section) {
+    const list = tabSentDocs(section);
+    if (!list.length) return toast.error(`No ${kindNoun(section)}s sent yet`);
+    const rows = list.map(d => ({
+      'Student Name': d.student?.name || '',
+      'Enrollment Number': d.student?.enrollmentNumber || '',
+      'Course': d.student?.courseName || '',
+      'Document': d.name || '',
+      'Copy': d.requestType || '',
+      'Urgent': isUrgentDoc(d) ? 'Yes' : 'No',
+      'Requested On': fmtDt(requestedAt(d)),
+      'Received On': receivedOn(d) ? fmtDt(receivedOn(d)) : 'On the way',
+      'Courier': d.courierInfo?.company || '',
+      'Tracking No': d.courierInfo?.trackingNo || '',
+    }));
+    const headers = Object.keys(rows[0]);
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [headers.map(escape).join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `university_${section === 'Marksheet' ? 'marksheet' : 'other'}_sent_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} documents`);
+  }
+
+  function downloadDocRequestsCSV(kind) {
+    const pendingList = tabPendingDocs(kind);
     const selected = pendingList.filter(d => selectedDocIds.includes(String(d._id)));
     const list = selected.length ? selected : pendingList;
-    if (!list.length) return toast.error(urgentOnly ? 'No urgent document requests to export' : 'No requested documents to export');
-    const grouped = new Map();
+    if (!list.length) return toast.error(`No ${kindNoun(kind)} requests to export`);
+    const grouped = new Map();   // one row per student and section
     list.forEach(doc => {
-      const sid = String(doc.student?._id || doc.student?.enrollmentNumber || doc.student?.name || doc._id);
-      if (!grouped.has(sid)) grouped.set(sid, { student: doc.student || {}, docs: [] });
-      grouped.get(sid).docs.push(doc.name);
+      const section = requestSection(doc);
+      const sid = `${String(doc.student?._id || doc.student?.enrollmentNumber || doc.student?.name || doc._id)}|${section}`;
+      if (!grouped.has(sid)) grouped.set(sid, { student: doc.student || {}, section, urgent: false, docs: [] });
+      const g = grouped.get(sid);
+      g.docs.push(doc.name);
+      if (isUrgentDoc(doc)) g.urgent = true;
     });
-    const rows = [...grouped.values()].map(({ student, docs }) => ({
+    const rows = [...grouped.values()].map(({ student, section, urgent, docs }) => ({
       'Student Name': student.name || '',
       'Enrollment Number': student.enrollmentNumber || '',
       'Course': student.courseName || '',
-      'Request Type': urgentOnly ? 'Urgent' : 'Normal',
+      'Section': SECTION_META[section].label,
+      'Request Type': urgent ? 'Urgent' : 'Normal',
       'Requested Documents': docs.join(' | '),
     }));
     const headers = Object.keys(rows[0]);
@@ -364,7 +593,7 @@ export default function UniversityPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `university_${urgentOnly ? 'urgent_' : ''}doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `university_${kind === 'urgent' ? 'urgent' : kind === 'Marksheet' ? 'marksheet' : 'other'}_doc_requests_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success(`Exported ${rows.length} students`);
@@ -377,6 +606,174 @@ export default function UniversityPage() {
   const filtEnrolled = enrolled.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
   const filtCancelled = cancelled.filter(s => !q || s.name?.toLowerCase().includes(q) || s.enrollmentNumber?.toLowerCase().includes(q) || s.phone?.includes(q));
   const filtDocs     = docs.filter(d => !dq || d.name?.toLowerCase().includes(dq) || d.student?.name?.toLowerCase().includes(dq) || d.student?.enrollmentNumber?.toLowerCase().includes(dq) || d.courierInfo?.trackingNo?.toLowerCase().includes(dq));
+
+  function renderRequestTab(kind) {
+    const isUrgentTab = kind === 'urgent';
+    const noun = kindNoun(kind);
+    const pendingList = tabPendingDocs(kind);
+    const selectedHere = pendingList.filter(d => selectedDocIds.includes(String(d._id))).length;
+    const allSelected = pendingList.length > 0 && selectedHere === pendingList.length;
+    const urgentOfSection = isUrgentTab ? 0 : urgentPendingDocs.filter(d => requestSection(d) === kind).length;
+    // pending in this tab before the search box
+    const anyPending = docs.some(d => d.status === 'Sent_To_University' && inRequestTab(kind, d) && (isUrgentTab || !isUrgentDoc(d)));
+    const EmptyIcon = isUrgentTab ? AlertTriangle : SECTION_META[kind].icon;
+    return (
+      <>
+        <div className="flex flex-wrap gap-2">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+            <Input className="pl-9 pr-9" placeholder={`Search ${noun} requests…`}
+              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
+            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
+          </div>
+          <Button variant="outline" className={`gap-2 ${isUrgentTab ? 'border-red-300 text-red-700 hover:bg-red-50' : ''}`}
+            onClick={() => downloadDocRequestsCSV(kind)} disabled={pendingList.length === 0}>
+            <Download className="h-4 w-4"/>CSV {selectedHere ? `(${selectedHere})` : isUrgentTab ? 'Urgent Requests' : 'Requests'}
+          </Button>
+        </div>
+
+        {isUrgentTab && (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Urgent requests by section">
+            {[['', 'All'], ['Marksheet', 'Marksheet'], ['Other', 'Other Documents']].map(([val, label]) => {
+              const on = urgentSection === val;
+              const n = urgentPendingDocs.filter(d => !val || requestSection(d) === val).length;
+              return (
+                <button key={label} type="button" aria-pressed={on} onClick={() => setUrgentSection(val)}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${on ? 'border-red-600 bg-red-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-red-200 hover:text-red-700'}`}>
+                  {label} <span className="tabular-nums opacity-80">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {urgentOfSection > 0 && (
+          <button type="button" onClick={() => { setUrgentSection(kind); setTab('urgent'); }}
+            className="flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-left text-xs font-medium text-red-700 hover:bg-red-50">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0"/>
+            <span className="flex-1">{urgentOfSection} urgent {noun} request{urgentOfSection === 1 ? ' is' : 's are'} in the Urgent Requests tab</span>
+            <ChevronRight className="h-3.5 w-3.5 shrink-0"/>
+          </button>
+        )}
+
+        {pendingList.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <input type="checkbox" checked={allSelected} onChange={() => toggleAllDocs(pendingList)} aria-label="Select all"
+                className={`h-4 w-4 ${isUrgentTab ? 'accent-red-600' : 'accent-purple-600'}`}/>
+              <div className={`h-2 w-2 rounded-full animate-pulse ${isUrgentTab ? 'bg-red-500' : 'bg-amber-500'}`}/>
+              <span className={`text-sm font-semibold ${isUrgentTab ? 'text-red-700' : 'text-amber-700'}`}>
+                {isUrgentTab ? 'Urgent Pending Requests' : 'Pending My Action'} ({pendingList.length})
+              </span>
+              {selectedHere > 0 && <span className="text-xs text-muted-foreground">· {selectedHere} selected</span>}
+            </div>
+            {pendingList.map(d => (
+              <PendingRequestCard key={d._id} d={d} showSection={isUrgentTab}
+                selected={selectedDocIds.includes(String(d._id))} onToggle={() => toggleDocSelection(d._id)}
+                onOpenStudent={openDocStudent}/>
+            ))}
+          </div>
+        )}
+
+        {pendingList.length === 0 && (
+          <div className="text-center py-12 text-muted-foreground">
+            {anyPending ? (
+              <><Search className="h-10 w-10 mx-auto mb-3 opacity-40"/>No results{docSearch ? ` for "${docSearch}"` : ''}</>
+            ) : (
+              <>
+                <EmptyIcon className={`h-10 w-10 mx-auto mb-3 ${isUrgentTab ? 'text-red-300' : 'text-emerald-400'}`}/>
+                <p>No pending {noun} requests</p>
+                <p className="text-xs mt-1">Requests that reached our office are in Marksheet Sent / Other Doc Sent.</p>
+              </>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  function downloadCorrectionCSV() {
+    const list = tabCorrectionDocs();
+    if (!list.length) return toast.error('No documents need correction');
+    const rows = list.map(d => ({
+      'Student Name': d.student?.name || '',
+      'Enrollment Number': d.student?.enrollmentNumber || '',
+      'Course': d.student?.courseName || '',
+      'Document': d.name || '',
+      'Section': SECTION_META[requestSection(d)].label,
+      'Correction Needed': d.correctionNote || '',
+      'Sent Back On': fmtDt(d.correctionSentAt),
+      'Times Sent Back': d.correctionCount || 1,
+    }));
+    const headers = Object.keys(rows[0]);
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [headers.map(escape).join(','), ...rows.map(r => headers.map(h => escape(r[h])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `university_correction_needed_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} documents`);
+  }
+
+  function renderCorrectionTab() {
+    const list = tabCorrectionDocs();
+    return (
+      <>
+        <div className="flex flex-wrap gap-2">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+            <Input className="pl-9 pr-9" placeholder="Search documents needing correction…"
+              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
+            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
+          </div>
+          <Button variant="outline" className="gap-2 border-amber-300 text-amber-800 hover:bg-amber-50" onClick={downloadCorrectionCSV} disabled={list.length === 0}>
+            <Download className="h-4 w-4"/>CSV Corrections
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">Documents our office found a mistake in. Correct them and send the corrected copy — it then shows under Marksheet Sent / Other Doc Sent.</p>
+        {list.length > 0
+          ? list.map(d => <CorrectionCard key={d._id} d={d} onOpenStudent={openDocStudent}/>)
+          : (
+            <div className="text-center py-12 text-muted-foreground">
+              <CheckCircle2 className="h-10 w-10 mx-auto mb-3 text-emerald-400"/>
+              {correctionDocs.length ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : 'No document needs correction'}
+            </div>
+          )}
+      </>
+    );
+  }
+
+  function renderSentTab(section) {
+    const noun = kindNoun(section);
+    const list = tabSentDocs(section);
+    const anySent = docs.some(d => DISPATCHED_STATUSES.includes(d.status) && requestSection(d) === section);
+    return (
+      <>
+        <div className="flex flex-wrap gap-2">
+          <div className="relative flex-1 min-w-[260px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
+            <Input className="pl-9 pr-9" placeholder={`Search sent ${noun}s…`}
+              value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
+            {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
+          </div>
+          <Button variant="outline" className="gap-2" onClick={() => downloadSentCSV(section)} disabled={list.length === 0}>
+            <Download className="h-4 w-4"/>CSV Sent
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{noun.charAt(0).toUpperCase() + noun.slice(1)} requests you have sent, with the date each reached our office.</p>
+        {list.length > 0
+          ? list.map(d => <SentCard key={d._id} d={d} onOpenStudent={openDocStudent}/>)
+          : (
+            <div className="text-center py-12 text-muted-foreground">
+              <Send className="h-10 w-10 mx-auto mb-3 opacity-40"/>
+              {anySent ? `No results${docSearch ? ` for "${docSearch}"` : ''}` : `No ${noun}s sent yet`}
+            </div>
+          )}
+      </>
+    );
+  }
 
   if (loading) return (
     <div className="flex h-64 items-center justify-center">
@@ -432,7 +829,7 @@ export default function UniversityPage() {
           icon={FileText}
           label="Document Requests"
           value={totalDocs}
-          sub={`${pendingDocs.length} normal · ${urgentPendingDocs.length} urgent pending`}
+          sub={`${marksheetPending.length} marksheet · ${otherPending.length} other · ${urgentPendingDocs.length} urgent pending`}
           color="text-blue-600"
         />
         <StatCard
@@ -460,19 +857,19 @@ export default function UniversityPage() {
                 <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{pending.length}</span>
               </div>
             )}
-            {pendingDocs.length > 0 && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Doc Requests</span>
-                <span className="font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded">{pendingDocs.length}</span>
-              </div>
-            )}
-            {urgentPendingDocs.length > 0 && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Urgent Doc Requests</span>
-                <span className="font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded">{urgentPendingDocs.length}</span>
-              </div>
-            )}
-            {pending.length === 0 && pendingDocs.length === 0 && urgentPendingDocs.length === 0 && (
+            {[
+              ['marksheetreq', 'Marksheet Requests', marksheetPending.length, 'text-violet-700 bg-violet-100'],
+              ['otherreq',     'Other Doc Requests', otherPending.length,     'text-sky-700 bg-sky-100'],
+              ['urgent',       'Urgent Doc Requests', urgentPendingDocs.length, 'text-red-700 bg-red-100'],
+              ['correction',   'Correction Needed',   correctionDocs.length,    'text-amber-800 bg-amber-100'],
+            ].filter(([, , n]) => n > 0).map(([val, label, n, tone]) => (
+              <button key={val} type="button" onClick={() => { if (val === 'urgent') setUrgentSection(''); setTab(val); }}
+                className="flex w-full items-center justify-between text-sm rounded hover:bg-amber-100/60 -mx-1 px-1">
+                <span className="text-muted-foreground">{label}</span>
+                <span className={`font-bold px-2 py-0.5 rounded ${tone}`}>{n}</span>
+              </button>
+            ))}
+            {pending.length === 0 && awaitingDocs.length === 0 && correctionDocs.length === 0 && (
               <p className="text-sm text-muted-foreground">All clear ✓</p>
             )}
           </CardContent>
@@ -552,15 +949,20 @@ export default function UniversityPage() {
           )}
         </div>
 
-        <Tabs defaultValue="pending">
+        <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
             {[
               { val:'pending',    label:'Pending Enrollment',  count: pending.length,       dot:'bg-amber-500',  icon: <Clock className="h-3.5 w-3.5"/> },
-              { val:'enrolled',   label:'Enrolled',            count: enrolled.length,      dot:'bg-emerald-500',icon: <CheckCircle2 className="h-3.5 w-3.5"/> },
-              { val:'cancelled',  label:'Cancelled',           count: cancelled.length,     dot:'bg-slate-400',  icon: <XCircle className="h-3.5 w-3.5"/> },
-              { val:'docreq',     label:'Doc Requests',        count: pendingDocs.length,   dot:'bg-blue-500',   icon: <FileText className="h-3.5 w-3.5"/> },
-              { val:'urgent',     label:'Urgent Requests',     count: urgentPendingDocs.length + urgentHistoryDocs.length, dot:'bg-red-500', icon: <AlertTriangle className="h-3.5 w-3.5"/> },
-              { val:'dispatched', label:'Dispatched History',  count: dispatchedDocs.length,dot:'',              icon: <Truck className="h-3.5 w-3.5"/> },
+              // a count only on tabs with work waiting; Enrolled / Cancelled / Dispatched History are records
+              { val:'enrolled',   label:'Enrolled',            count: 0,                    dot:'',              icon: <CheckCircle2 className="h-3.5 w-3.5"/> },
+              { val:'cancelled',  label:'Cancelled',           count: 0,                    dot:'',              icon: <XCircle className="h-3.5 w-3.5"/> },
+              { val:'marksheetreq', label:'Marksheet Requests', count: marksheetPending.length, dot:'bg-violet-500', icon: <GraduationCap className="h-3.5 w-3.5"/> },
+              { val:'otherreq',   label:'Other Doc Requests',  count: otherPending.length,  dot:'bg-sky-500',    icon: <FileText className="h-3.5 w-3.5"/> },
+              { val:'urgent',     label:'Urgent Requests',     count: urgentPendingDocs.length, dot:'bg-red-500', icon: <AlertTriangle className="h-3.5 w-3.5"/> },
+              { val:'correction', label:'Correction Needed',   count: correctionDocs.length, dot:'bg-amber-500', icon: <Undo2 className="h-3.5 w-3.5"/> },
+              { val:'marksheetsent', label:'Marksheet Sent',   count: 0,                    dot:'',              icon: <Send className="h-3.5 w-3.5"/> },
+              { val:'othersent',  label:'Other Doc Sent',      count: 0,                    dot:'',              icon: <Send className="h-3.5 w-3.5"/> },
+              { val:'dispatched', label:'Dispatched History',  count: 0,                    dot:'',              icon: <Truck className="h-3.5 w-3.5"/> },
             ].map(({ val, label, count, dot, icon }) => (
               <TabsTrigger key={val} value={val}
                 className="rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-1.5 px-3 flex items-center gap-1.5">
@@ -709,226 +1111,13 @@ export default function UniversityPage() {
             ))}
           </TabsContent>
 
-          {/* ── Document Requests ────────────────────────── */}
-          <TabsContent value="docreq" className="space-y-3 mt-4">
-            {/* Doc search */}
-            <div className="flex flex-wrap gap-2">
-              <div className="relative flex-1 min-w-[260px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-              <Input className="pl-9 pr-9" placeholder="Search documents…"
-                value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
-              {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
-              </div>
-              <Button
-                variant="outline"
-                className="gap-2"
-                onClick={() => downloadDocRequestsCSV(false)}
-                disabled={filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).length === 0}
-              >
-                <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'Requests'}
-              </Button>
-            </div>
-
-            {/* Group: Pending Action */}
-            {filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).length > 0 && (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse"/>
-                  <span className="text-sm font-semibold text-amber-700">Pending My Action ({filtDocs.filter(d=>d.status==='Sent_To_University' && !isUrgentDoc(d)).length})</span>
-                </div>
-                {filtDocs.filter(d => d.status === 'Sent_To_University' && !isUrgentDoc(d)).map(d => (
-                  <Card key={d._id} className="border-amber-200 mb-2">
-                    <CardContent className="p-4 flex items-center justify-between gap-3">
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={selectedDocIds.includes(String(d._id))}
-                          onChange={() => toggleDocSelection(d._id)}
-                          className="mt-1 h-4 w-4 accent-purple-600"
-                        />
-                        <div>
-                        <div className="font-medium">{d.name}</div>
-                       <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-  Student: <b>{d.student?.name}</b>
-  {d.student?.enrollmentNumber && (
-    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-      {d.student.enrollmentNumber}
-    </span>
-  )}
-</div>
-                        {/* {d.chargeFee > 0 && <div className="text-xs mt-0.5">Charge: <b>₹{d.chargeFee?.toLocaleString('en-IN')}</b></div>} */}
-                        </div>
-                      </div>
-                      <span className="text-xs font-medium text-amber-600 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full">
-                        ⏳ Awaiting Physical Courier
-                      </span>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-
-            {/* Group: History — only docs university has already dispatched or processed */}
-            {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status)).length > 0 && (
-              <div>
-                <span className="text-sm font-semibold text-muted-foreground flex items-center gap-2 mb-2">
-                  <History className="h-4 w-4"/>All Requests History ({filtDocs.filter(d=>DISPATCHED_STATUSES.includes(d.status)).length})
-                </span>
-                {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status)).map(d => {
-                  const si = DOC_STATUS[d.status] || { label: d.status, color: 'bg-gray-100 text-gray-700' };
-                  return (
-                    <div key={d._id} className="flex items-center justify-between border rounded-lg px-4 py-3 bg-card text-sm mb-1.5">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium">{d.name}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
-  {d.student?.name}
-  {d.student?.enrollmentNumber && (
-    <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-      {d.student.enrollmentNumber}
-    </span>
-  )}
-</div>
-                        {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
-                          <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
-                            <Truck className="h-3 w-3"/>
-                            {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
-                            {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
-                            {d.courierInfo.dispatchDate && <span>{fmtDt(d.courierInfo.dispatchDate)}</span>}
-                            {d.courierInfo.documentsDesc && <span>{d.courierInfo.documentsDesc}</span>}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {filtDocs.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <FileText className="h-10 w-10 mx-auto mb-3"/>
-                {docs.length === 0 ? 'No document requests yet' : `No results for "${docSearch}"`}
-              </div>
-            )}
-          </TabsContent>
-
-          {/* ── Dispatched History ───────────────────────── */}
-          <TabsContent value="urgent" className="space-y-3 mt-4">
-            <div className="flex flex-wrap gap-2">
-              <div className="relative flex-1 min-w-[260px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"/>
-                <Input className="pl-9 pr-9" placeholder="Search urgent documents..."
-                  value={docSearch} onChange={e => setDocSearch(e.target.value)}/>
-                {docSearch && <button onClick={() => setDocSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-4 w-4"/></button>}
-              </div>
-              <Button
-                variant="outline"
-                className="gap-2 border-red-300 text-red-700 hover:bg-red-50"
-                onClick={() => downloadDocRequestsCSV(true)}
-                disabled={filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).length === 0}
-              >
-                <Download className="h-4 w-4"/>CSV {selectedDocIds.length ? `(${selectedDocIds.length})` : 'Urgent Requests'}
-              </Button>
-            </div>
-
-            {filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).length > 0 ? (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <AlertTriangle className="h-4 w-4 text-red-600"/>
-                  <span className="text-sm font-semibold text-red-700">
-                    Urgent Pending Requests ({filtDocs.filter(d=>d.status==='Sent_To_University' && isUrgentDoc(d)).length})
-                  </span>
-                </div>
-                {filtDocs.filter(d => d.status === 'Sent_To_University' && isUrgentDoc(d)).map(d => {
-                  const urgentEntry = [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested');
-                  return (
-                    <Card key={d._id} className="border-red-200 bg-red-50/40 mb-2">
-                      <CardContent className="p-4 flex items-center justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedDocIds.includes(String(d._id))}
-                            onChange={() => toggleDocSelection(d._id)}
-                            className="mt-1 h-4 w-4 accent-red-600"
-                          />
-                          <div>
-                            <div className="font-medium">{d.name}</div>
-                            <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap">
-                              Student: <b>{d.student?.name}</b>
-                              {d.student?.enrollmentNumber && (
-                                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                  {d.student.enrollmentNumber}
-                                </span>
-                              )}
-                            </div>
-                            {urgentEntry?.at && (
-                              <div className="text-xs text-red-700 mt-0.5">Urgent requested: {fmtDt(urgentEntry.at)}</div>
-                            )}
-                          </div>
-                        </div>
-                        <span className="text-xs font-semibold text-red-700 bg-red-100 border border-red-200 px-2.5 py-1 rounded-full">
-                          Urgent - Awaiting Physical Courier
-                        </span>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            ) : filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-red-300"/>
-                {urgentPendingDocs.length === 0 && urgentHistoryDocs.length === 0 ? 'No urgent document requests' : `No results for "${docSearch}"`}
-              </div>
-            ) : null}
-
-            {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length > 0 && (
-              <div className="border-t pt-3">
-                <span className="text-sm font-semibold text-muted-foreground flex items-center gap-2 mb-2">
-                  <History className="h-4 w-4"/>Urgent Requests History ({filtDocs.filter(d=>DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).length})
-                </span>
-                {filtDocs.filter(d => DISPATCHED_STATUSES.includes(d.status) && isUrgentDoc(d)).map(d => {
-                  const si = DOC_STATUS[d.status] || { label: d.status, color: 'bg-gray-100 text-gray-700' };
-                  const urgentEntry = [...(d.statusHistory || [])].reverse().find(h => h.status === 'Urgent_Requested');
-                  return (
-                    <Card key={d._id} className="border-red-100 mb-2">
-                      <CardContent className="p-4 flex items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-medium">{d.name}</span>
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
-                            <span className="text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">Urgent</span>
-                          </div>
-                          <div className="text-sm text-muted-foreground flex items-center gap-2 flex-wrap mt-0.5">
-                            Student: <b>{d.student?.name}</b>
-                            {d.student?.enrollmentNumber && (
-                              <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                                {d.student.enrollmentNumber}
-                              </span>
-                            )}
-                          </div>
-                          {urgentEntry?.at && (
-                            <div className="text-xs text-red-700 mt-0.5">Urgent requested: {fmtDt(urgentEntry.at)}</div>
-                          )}
-                          {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
-                            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1 flex-wrap">
-                              <Truck className="h-3 w-3"/>
-                              {d.courierInfo.company && <span>{d.courierInfo.company}</span>}
-                              {d.courierInfo.trackingNo && <span className="font-mono">{d.courierInfo.trackingNo}</span>}
-                              {d.courierInfo.dispatchDate && <span>{fmtDt(d.courierInfo.dispatchDate)}</span>}
-                              {d.courierInfo.documentsDesc && <span>{d.courierInfo.documentsDesc}</span>}
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
+          {/* ── Document Requests: Marksheet / Other Documents / Urgent ── */}
+          <TabsContent value="marksheetreq" className="space-y-3 mt-4">{renderRequestTab('Marksheet')}</TabsContent>
+          <TabsContent value="otherreq" className="space-y-3 mt-4">{renderRequestTab('Other')}</TabsContent>
+          <TabsContent value="urgent" className="space-y-3 mt-4">{renderRequestTab('urgent')}</TabsContent>
+          <TabsContent value="correction" className="space-y-3 mt-4">{renderCorrectionTab()}</TabsContent>
+          <TabsContent value="marksheetsent" className="space-y-3 mt-4">{renderSentTab('Marksheet')}</TabsContent>
+          <TabsContent value="othersent" className="space-y-3 mt-4">{renderSentTab('Other')}</TabsContent>
 
           <TabsContent value="dispatched" className="space-y-2 mt-4">
             <p className="text-sm text-muted-foreground">Complete record of all documents dispatched from university.</p>
@@ -937,7 +1126,7 @@ export default function UniversityPage() {
                   <Truck className="h-10 w-10 mx-auto mb-3"/>No dispatches yet
                 </div>
               : dispatchedDocs.map(d => {
-                  const si = DOC_STATUS[d.status] || { label: d.status, color: 'bg-gray-100 text-gray-700' };
+                  const si = docStatusInfo(d);
                   return (
                     <Card key={d._id} className="border-l-4 border-l-teal-400">
                       <CardContent className="p-4">
@@ -946,6 +1135,8 @@ export default function UniversityPage() {
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-medium">{d.name}</span>
                               <span className={`text-xs px-2 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
+                              <SectionBadge d={d}/>
+                              {isUrgentDoc(d) && <UrgentBadge/>}
                             </div>
                             <div className="text-sm text-muted-foreground mt-0.5 flex items-center gap-2 flex-wrap">
   Student: <b>{d.student?.name}</b>

@@ -17,6 +17,7 @@ const uniC    = require('../controllers/university.controller');
 const payAccC = require('../controllers/paymentaccount.controller');
 const chatC   = require('../controllers/chat.controller');
 const accountLedgerC = require('../controllers/accountLedger.controller');
+const newInvC = require('../controllers/newInventory.controller');
 
 // ── Validation schemas ───────────────────────────────────────
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
@@ -44,14 +45,14 @@ router.patch('/auth/me/avatar',          protect, val(avatarSchema), authC.updat
 router.patch('/auth/users/:id/toggle',   protect, requireRole('Admin'), authC.toggleUser);
 router.delete('/auth/users/:id',         protect, requireRole('Admin'), authC.deleteUser);
 // CHAT + HELP TICKETS
-router.get   ('/chat/users',                         protect, chatC.users);
-router.get   ('/chat/conversations',                 protect, chatC.list);
-router.post  ('/chat/conversations',                 protect, chatC.createInternal);
-router.delete('/chat/conversations/:id',             protect, chatC.removeInternal);
-router.post  ('/chat/tickets',                       protect, requireRole('Center'), chatC.createTicket);
-router.get   ('/chat/conversations/:id/messages',    protect, chatC.messages);
-router.post  ('/chat/conversations/:id/messages',    protect, chatC.sendMessage);
-router.patch ('/chat/tickets/:id/status',            protect, chatC.updateTicketStatus);
+router.get   ('/chat/users',                         protect, chatC.blockUniversity, chatC.users);
+router.get   ('/chat/conversations',                 protect, chatC.blockUniversity, chatC.list);
+router.post  ('/chat/conversations',                 protect, chatC.blockUniversity, chatC.createInternal);
+router.delete('/chat/conversations/:id',             protect, chatC.blockUniversity, chatC.removeInternal);
+router.post  ('/chat/tickets',                       protect, chatC.blockUniversity, requireRole('Center'), chatC.createTicket);
+router.get   ('/chat/conversations/:id/messages',    protect, chatC.blockUniversity, chatC.messages);
+router.post  ('/chat/conversations/:id/messages',    protect, chatC.blockUniversity, chatC.sendMessage);
+router.patch ('/chat/tickets/:id/status',            protect, chatC.blockUniversity, chatC.updateTicketStatus);
 
 // ── UNIVERSITIES ──────────────────────────────────────────────
 router.get   ('/universities',          protect, uniC.list);
@@ -160,6 +161,12 @@ router.patch ('/document-inventory/docs/:id/request',   protect, requireRole('Ad
 router.patch ('/document-inventory/docs/:id/urgent',    protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryUrgentRequestDoc);
 router.patch ('/document-inventory/docs/:id/dispatched', protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDispatchedDoc);
 router.patch ('/document-inventory/docs/:id/delivered',  protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDeliveredDoc);
+
+// New Inventory: documents physically held per student (the Document Inventory above is unchanged)
+router.get  ('/new-inventory/students',           protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), newInvC.students);
+router.get  ('/new-inventory/students/:id',       protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), newInvC.student);
+router.post ('/new-inventory/students/:id/items', protect, requireRole('Admin','Accountant','Counselor','Dispatch'), newInvC.addItem);
+router.patch('/new-inventory/items/:itemId/centre', protect, requireRole('Admin','Dispatch'), newInvC.setCentreState);
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);
@@ -173,6 +180,12 @@ router.patch('/documents/:id/forward',            protect, requireRole('Admin','
 router.patch('/documents/:id/request-changes',    protect, requireRole('Admin','Counselor','Accountant'), docC.requestChanges);
 router.patch('/documents/:id/accountant-action',  protect, requireRole('Admin','Accountant'), docC.accountantAction);
 router.patch('/documents/:id/dispatch-receive',     protect, requireRole('Admin','Dispatch'), docC.dispatchReceive);
+router.post ('/documents/dispatch-receive',         protect, requireRole('Admin','Dispatch'), docC.dispatchReceiveMany);
+router.post ('/documents/close',                    protect, requireRole('Admin','Dispatch'), docC.closeRequests);
+router.post ('/documents/reopen',                   protect, requireRole('Admin','Dispatch'), docC.reopenRequests);
+router.post ('/documents/centre-received',          protect, requireRole('Admin','Dispatch'), docC.centreReceivedMany);
+router.post ('/documents/correction-checked',       protect, requireRole('Admin','Dispatch'), docC.correctionChecked);
+router.post ('/documents/send-for-correction',      protect, requireRole('Admin','Dispatch'), docC.sendForCorrection);
 router.patch('/documents/:id/upload-scan',          protect, requireRole('Admin','Dispatch'), upload.single('file'), docC.uploadScan);
 router.patch('/documents/:id/accountant-forward-scan', protect, requireRole('Admin','Accountant'), docC.accountantForwardScan);
 router.patch('/documents/:id/forward-to-center',    protect, requireRole('Admin','Counselor'), docC.counselorForwardToCenter);

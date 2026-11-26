@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Loader2, Package, Scan, Truck, CheckCircle2, Download,
   History, Eye, Search, X, Clock, Building2, User, Hash,
-  GraduationCap, FileText, Trash2,
+  GraduationCap, FileText, Trash2, PackageCheck, AlertTriangle, RotateCcw, XCircle, ClipboardCheck, Undo2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,9 +12,10 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { docsApi, documentInventoryApi } from '@/lib/api';
+import { docsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
+import { requestSection } from '@/lib/documentOptions';
 
 function ScannedFilesList({ doc, className = '' }) {
   const MBASE = MEDIA;
@@ -60,10 +61,25 @@ const STATUS_INFO = {
   Payment_Verified:      { label:'Payment Verified - Ready',  color:'bg-green-100 text-green-700' },
   Dispatched:            { label:'Dispatched to Center',      color:'bg-teal-100 text-teal-700' },
   Delivered:             { label:'Delivered',                 color:'bg-emerald-100 text-emerald-700' },
+  Closed:                { label:'Closed',                    color:'bg-slate-200 text-slate-600' },
 };
 
 // All statuses after scan has been uploaded
 const POST_SCAN_STATUSES = ['Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted','Payment_Verified','Dispatched','Delivered'];
+
+// Incoming (waiting for the university's courier) is split by the centre tab the request came from
+const INCOMING_TABS = [
+  { val: 'msreq',    key: 'Marksheet', label: 'Marksheet Requests', icon: GraduationCap, noun: 'marksheet' },
+  { val: 'otherreq', key: 'Other',     label: 'Other Doc Requests', icon: FileText,      noun: 'other document' },
+];
+// urgent: the counselor's mark, or the older inventory "urgent request"
+const isUrgentDoc = d => !!d.urgent || (d.statusHistory || []).some(h => h.status === 'Urgent_Requested');
+const urgentFirst = list => [...list].sort((a, b) => Number(isUrgentDoc(b)) - Number(isUrgentDoc(a)));
+const todayInput = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const EMPTY_RECEIVE = { receivedAt: '', company: '', trackingNo: '', note: '' };
 
 // ── Full Document Detail Modal ───────────────────────────────
 function DocDetailModal({ doc, onClose }) {
@@ -201,25 +217,56 @@ function DocDetailModal({ doc, onClose }) {
 }
 
 // ── Doc Card ─────────────────────────────────────────────────
-function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = false }) {
-  const st = STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
+function DocCard({ doc, action, onViewDetail, onDelete, selectable = false, selected = false, onToggle }) {
+  // received (or answered from the New Inventory) and waiting for its scan: it is held in the inventory
+  const inNewInventory = !!(doc.receivedIntoInventory || doc.inventoryItem);
+  const st = doc.status === 'Dispatch_Received' && inNewInventory
+    ? { label: 'In Inventory', color: 'bg-emerald-100 text-emerald-700' }
+    : STATUS_INFO[doc.status] || { label: doc.status, color: 'bg-gray-100 text-gray-700' };
   const courseFee = doc.courseFeeSummary;
   const chargeFee = Number(doc.chargeFee || 0);
   const totalPaid = Number(doc.totalPaid || 0);
   const dueAmount = Math.max(0, chargeFee - totalPaid);
   const hasFeeInfo = chargeFee > 0 || totalPaid > 0;
+  const urgent = isUrgentDoc(doc);
   return (
-    <Card className="hover:border-primary/40 transition-colors">
+    <Card className={`hover:border-primary/40 transition-colors ${urgent ? 'border-red-200' : ''} ${selected ? 'ring-2 ring-indigo-200' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
+          {selectable && (
+            <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Select ${doc.name}`}
+              className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"/>
+          )}
           <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onViewDetail(doc)}>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium">{doc.name}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${st.color}`}>{st.label}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full font-semibold border ${doc.requestType === 'Hard Copy' ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-sky-50 text-sky-700 border-sky-200'}`}>{doc.requestType || 'Soft Copy'}</span>
-              {alreadyInInventory && (
-                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Already in Inventory
+              {urgent && (
+                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold bg-red-50 text-red-700 border border-red-200">
+                  <AlertTriangle className="h-3 w-3"/>Urgent
+                </span>
+              )}
+              {doc.correctionOpen && ['Sent_To_University', 'University_Dispatched'].includes(doc.status) && (
+                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                  <Undo2 className="h-3 w-3"/>Sent for correction{doc.correctionCount > 1 ? ` (${doc.correctionCount}×)` : ''}
+                </span>
+              )}
+              {doc.correctionOpen && doc.status === 'Dispatch_Received' && (
+                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                  <ClipboardCheck className="h-3 w-3"/>Corrected copy — check again
+                </span>
+              )}
+              {doc.correctionCheckedAt && !['Sent_To_University', 'University_Dispatched'].includes(doc.status) && (
+                <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  title={`Correction checked ${fmtDt(doc.correctionCheckedAt)}`}>
+                  <ClipboardCheck className="h-3 w-3"/>Correction checked
+                </span>
+              )}
+              {doc.inventoryItem && doc.status !== 'Dispatch_Received' && (
+                <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                  title="Held in the office (New Inventory) — not requested from the university">
+                  In New Inventory
                 </span>
               )}
             </div>
@@ -228,6 +275,18 @@ function DocCard({ doc, action, onViewDetail, onDelete, alreadyInInventory = fal
               {doc.student?.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 ml-2">{doc.student.enrollmentNumber}</span>}
             </div>
             {doc.center?.name && <div className="text-xs text-muted-foreground">Center: {doc.center.name}</div>}
+            {doc.correctionOpen && doc.correctionNote && (
+              <div className="mt-1 rounded-md border border-amber-200 bg-amber-50/70 px-2 py-1 text-xs text-amber-900">
+                <b>Correction:</b> {doc.correctionNote} <span className="text-amber-700">· sent back {fmtDt(doc.correctionSentAt)}</span>
+              </div>
+            )}
+            {doc.status === 'Closed' && (
+              <div className="mt-1 text-xs text-slate-500">
+                Closed {fmtDt(doc.closedAt)}{doc.closedBy?.name ? ` by ${doc.closedBy.name}` : ''}
+                {doc.closedFromStatus && ` · was ${STATUS_INFO[doc.closedFromStatus]?.label || doc.closedFromStatus.replace(/_/g, ' ')}`}
+                {doc.closedReason && <span className="italic"> · “{doc.closedReason}”</span>}
+              </div>
+            )}
             {courseFee && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <span className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1">
@@ -294,7 +353,6 @@ export default function DispatchPage() {
   const { user } = useAuth();
   const { dismiss, isDismissed } = usePanelDismissals(user, 'dispatch');
   const [all,     setAll]     = useState([]);
-  const [inventoryReceivedKeys, setInventoryReceivedKeys] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [dialog,  setDialog]  = useState(null);
   const [detailDoc, setDetailDoc] = useState(null);
@@ -302,29 +360,17 @@ export default function DispatchPage() {
   const [saving,  setSaving]  = useState(false);
   const [search,  setSearch]  = useState('');
   const [selectedReadyIds, setSelectedReadyIds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);   // Requests, Upload Scan and Closed tabs
+  const [receiveForm, setReceiveForm] = useState(EMPTY_RECEIVE);
+  const [closeReason, setCloseReason] = useState('');
+  const [correctionNote, setCorrectionNote] = useState('');
   const fileRef = useRef();
   const [scanFile, setScanFile] = useState(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [d, inventoryResp] = await Promise.all([
-        docsApi.list({ all: '1' }),
-        documentInventoryApi.list({ limit: 100 }).catch(() => ({ rows: [] })),
-      ]);
-      setAll(d);
-      // /document-inventory returns a paginated { rows: [...] } object (older versions
-      // returned a bare array) — normalise both shapes.
-      const inventoryRows = Array.isArray(inventoryResp) ? inventoryResp : (inventoryResp?.rows || []);
-      const keys = new Set();
-      inventoryRows.forEach(({ student, docs = [] }) => {
-        docs.forEach(doc => {
-          if (doc.catalog) return;
-          if (!['Dispatch_Received', 'Scanned', 'Accountant_Received', 'Counselor_Received', 'Center_Notified', 'Payment_Submitted', 'Payment_Verified', 'Dispatched', 'Delivered'].includes(doc.status)) return;
-          keys.add(`${String(student?._id || doc.student?._id || doc.student)}::${String(doc.name || '').trim().toLowerCase()}`);
-        });
-      });
-      setInventoryReceivedKeys(keys);
+      setAll(await docsApi.list({ all: '1' }));
     } catch (e) {
       console.error('DispatchPage load failed', e);
       toast.error(e?.message || 'Failed to load dispatch queue');
@@ -343,23 +389,207 @@ export default function DispatchPage() {
 
   const visibleAll = all.filter(d => !isDismissed(`doc:${d._id}`));
   const incoming    = visibleAll.filter(d => ['University_Dispatched', 'Sent_To_University'].includes(d.status)).filter(filter);
-  const scanPending = visibleAll.filter(d => d.status === 'Dispatch_Received').filter(filter);
+  // a copy received from the university is checked for corrections first; one answered from the New Inventory was not sent for
+  const checkPending = urgentFirst(visibleAll.filter(d => d.status === 'Dispatch_Received' && !d.correctionCheckedAt && !d.inventoryItem).filter(filter));
+  const scanPending = visibleAll.filter(d => d.status === 'Dispatch_Received' && (d.correctionCheckedAt || d.inventoryItem)).filter(filter);
+  const closedDocs  = visibleAll.filter(d => d.status === 'Closed').filter(filter)
+    .sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
 
   // University Records = ALL docs that have courierInfo (came from university)
   // This NEVER removes a doc — stays visible at every stage permanently
   const uniRecords  = visibleAll.filter(d => d.courierInfo?.trackingNo || ['Sent_To_University','University_Dispatched'].includes(d.status)).filter(filter);
 
   const ready       = visibleAll.filter(d => d.status === 'Payment_Verified').filter(filter);
-  const inProgress  = visibleAll.filter(d => ['Counselor_Received','Center_Notified','Payment_Submitted','Scanned'].includes(d.status)).filter(filter);
+  // after the scan: with the counselor, the centre (payment) or the accountant (older scans, or a payment to verify)
+  const inProgress  = visibleAll.filter(d => ['Scanned','Accountant_Received','Counselor_Received','Center_Notified','Payment_Submitted'].includes(d.status)).filter(filter);
   const dispatched  = visibleAll.filter(d => ['Dispatched','Delivered'].includes(d.status)).filter(filter);
 
-  async function confirmReceipt(id) {
-    try { await docsApi.dispatchReceive(id); toast.success('Request processed'); load(); }
-    catch(e) { toast.error(e.message); }
+  const incomingBySection = {
+    Marksheet: urgentFirst(incoming.filter(d => requestSection(d) === 'Marksheet')),
+    Other:     urgentFirst(incoming.filter(d => requestSection(d) === 'Other')),
+  };
+  function toggleSelected(id) {
+    const key = String(id);
+    setSelectedIds(prev => (prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]));
+  }
+  function toggleAllSelected(list, on) {
+    const ids = list.map(d => String(d._id));
+    setSelectedIds(prev => (on ? [...new Set([...prev, ...ids])] : prev.filter(x => !ids.includes(x))));
   }
 
-  function isAlreadyInInventory(doc) {
-    return inventoryReceivedKeys.has(`${String(doc.student?._id || doc.student)}::${String(doc.name || '').trim().toLowerCase()}`);
+  // "Select all" bar of a tab, with that tab's buttons for the selected ones
+  function renderSelectBar(list, noun, buttons) {
+    if (!list.length) return null;
+    const selected = list.filter(d => selectedIds.includes(String(d._id)));
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={selected.length === list.length} onChange={e => toggleAllSelected(list, e.target.checked)} className="h-4 w-4 accent-indigo-600"/>
+          Select all {noun}
+          {selected.length > 0 && <span className="text-xs text-muted-foreground">· {selected.length} selected</span>}
+        </label>
+        <div className="flex flex-wrap gap-2">{buttons(selected)}</div>
+      </div>
+    );
+  }
+
+  const deleteSelectedButton = selected => (
+    <Button size="sm" variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => openClose(selected)} disabled={selected.length === 0 || saving}>
+      <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete ({selected.length})
+    </Button>
+  );
+
+  // Marksheet Requests / Other Doc Requests tab: waiting for the university's courier
+  function renderIncoming(tab) {
+    const list = incomingBySection[tab.key];
+    return (
+      <>
+        <p className="text-xs text-muted-foreground">
+          When the university's courier arrives, mark the documents received: each goes into the student's New Inventory, shows as Sent on the university portal and moves to Upload Scan.
+        </p>
+        {renderSelectBar(list, `${tab.noun} requests`, selected => (
+          <>
+            {deleteSelectedButton(selected)}
+            <Button size="sm" onClick={() => openReceive(selected)} disabled={selected.length === 0 || saving}>
+              <PackageCheck className="h-3.5 w-3.5 mr-1"/>Mark Received ({selected.length})
+            </Button>
+          </>
+        ))}
+        {list.length === 0
+          ? <div className="text-center py-10 text-muted-foreground">No {tab.noun} requests waiting</div>
+          : list.map(d => (
+            <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
+              selectable selected={selectedIds.includes(String(d._id))} onToggle={() => toggleSelected(d._id)}
+              onDelete={() => openClose([d])}
+              action={<Button size="sm" onClick={() => openReceive([d])}><PackageCheck className="h-3.5 w-3.5 mr-1"/>Mark Received</Button>}
+            />
+          ))
+        }
+      </>
+    );
+  }
+
+  // Delete = close: an old request that is not moving leaves the Dispatch and university lists, nothing is
+  // deleted (history and payments stay) and it can be reopened from the Closed tab
+  function openClose(docs) {
+    if (!docs.length) return toast.error('Select the requests to delete');
+    setDialog({ type: 'close', items: docs });
+    setCloseReason('');
+  }
+
+  async function closeSelected() {
+    const docs = dialog?.items || [];
+    if (!docs.length) return;
+    setSaving(true);
+    try {
+      const res = await docsApi.closeRequests({ ids: docs.map(d => d._id), reason: closeReason.trim() });
+      const done = res.closed || [];
+      if (done.length) toast.success(done.length === 1 ? `${docs.find(d => String(d._id) === done[0])?.name || 'Request'} closed — it is in the Closed tab` : `${done.length} requests closed — they are in the Closed tab`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A request'}: ${f.error}`));
+      setDialog(null);
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  async function reopenRequests(docs) {
+    if (!docs.length) return toast.error('Select the requests to reopen');
+    setSaving(true);
+    try {
+      const res = await docsApi.reopenRequests({ ids: docs.map(d => d._id) });
+      const done = res.reopened || [];
+      if (done.length) toast.success(done.length === 1 ? `${docs.find(d => String(d._id) === done[0])?.name || 'Request'} reopened — back where it was` : `${done.length} requests reopened — back where they were`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A request'}: ${f.error}`));
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  // Received from the university: one request (card button) or the selected ones, with one optional courier
+  function openReceive(docs) {
+    if (!docs.length) return toast.error('Select the documents received');
+    setDialog({ type: 'receive', items: docs });
+    setReceiveForm({ ...EMPTY_RECEIVE, receivedAt: todayInput() });
+  }
+
+  async function markReceived() {
+    const docs = dialog?.items || [];
+    if (!docs.length) return;
+    if (!receiveForm.receivedAt) return toast.error('Choose the date it was received');
+    if (receiveForm.receivedAt > todayInput()) return toast.error('The received date cannot be in the future');
+    setSaving(true);
+    try {
+      const res = await docsApi.dispatchReceiveMany({
+        ids: docs.map(d => d._id),
+        ...(receiveForm.receivedAt !== todayInput() ? { receivedAt: receiveForm.receivedAt } : {}),   // today: the time now
+        company: receiveForm.company.trim(),
+        trackingNo: receiveForm.trackingNo.trim(),
+        note: receiveForm.note.trim(),
+      });
+      const done = res.received || [];
+      if (done.length === 1) toast.success(`${docs.find(d => String(d._id) === done[0])?.name || 'Document'} received — added to the New Inventory, now in Correction Check`);
+      else if (done.length > 1) toast.success(`${done.length} documents received — added to the New Inventory, now in Correction Check`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A document'}: ${f.error}`));
+      setDialog(null);
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  // Correction check: fine -> soft copy to Upload Scan, hard copy to Ready to Dispatch (or the centre's payment)
+  async function markCorrectionChecked(docs) {
+    if (!docs.length) return toast.error('Select the documents checked');
+    setSaving(true);
+    try {
+      const res = await docsApi.correctionChecked({ ids: docs.map(d => d._id) });
+      const done = res.checked || [];
+      const where = Object.values(res.next || {});
+      const parts = [
+        where.filter(x => x === 'scan').length && `${where.filter(x => x === 'scan').length} to Upload Scan`,
+        where.filter(x => x === 'dispatch').length && `${where.filter(x => x === 'dispatch').length} to Ready to Dispatch`,
+        where.filter(x => x === 'payment').length && `${where.filter(x => x === 'payment').length} waiting for the centre's payment (hard copy)`,
+      ].filter(Boolean);
+      if (done.length) toast.success(`${done.length === 1 ? docs.find(d => String(d._id) === done[0])?.name || 'Document' : `${done.length} documents`} checked — ${parts.join(', ')}`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A document'}: ${f.error}`));
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  function openCorrection(docs) {
+    if (!docs.length) return toast.error('Select the documents to send back');
+    setDialog({ type: 'correction', items: docs });
+    setCorrectionNote('');
+  }
+
+  async function sendForCorrection() {
+    const docs = dialog?.items || [];
+    if (!docs.length) return;
+    if (!correctionNote.trim()) return toast.error('Write what needs to be corrected');
+    setSaving(true);
+    try {
+      const res = await docsApi.sendForCorrection({ ids: docs.map(d => d._id), note: correctionNote.trim() });
+      const done = res.sent || [];
+      if (done.length) toast.success(`${done.length === 1 ? docs.find(d => String(d._id) === done[0])?.name || 'Document' : `${done.length} documents`} sent back to the university for correction — back in the request tabs`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A document'}: ${f.error}`));
+      setDialog(null);
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
+  // the centre has the couriered document (it did not confirm itself): Delivered, and so in the New Inventory
+  async function markCentreReceived(docs) {
+    if (!docs.length) return toast.error('Select the documents the centre received');
+    setSaving(true);
+    try {
+      const res = await docsApi.centreReceivedMany({ ids: docs.map(d => d._id) });
+      const done = res.received || [];
+      if (done.length) toast.success(done.length === 1 ? `${docs.find(d => String(d._id) === done[0])?.name || 'Document'} marked received by the centre` : `${done.length} documents marked received by the centre`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || docs.find(d => String(d._id) === f.id)?.name || 'A document'}: ${f.error}`));
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function uploadScan() {
@@ -421,8 +651,8 @@ export default function DispatchPage() {
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 text-xs text-blue-700">
         <span className="font-medium">Flow: </span>
-        Document Request → Process Request → Upload Scan → Counselor Reviews →
-        Center Pays → Accountant Verifies → Dispatch to Center
+        Document Request → Mark Received (goes into the New Inventory) → Correction Check (or back to the university for correction) →
+        Upload Scan (soft copy) → Counselor Reviews → Center Pays → Accountant Verifies → Dispatch to Center · a hard copy goes from the check to Ready to Dispatch
       </div>
 
       <div className="relative">
@@ -451,15 +681,21 @@ export default function DispatchPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="incoming">
+      <Tabs defaultValue={INCOMING_TABS[0].val}>
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
-            { val:'incoming', label:'Incoming',           count: incoming.length,    dot:'bg-blue-500',   icon: null },
+            ...INCOMING_TABS.map(t => {
+              const { icon: Icon } = t;
+              const list = incomingBySection[t.key];
+              return { val: t.val, label: t.label, count: list.length, urgent: list.filter(isUrgentDoc).length, dot: 'bg-blue-500', icon: <Icon className="h-3.5 w-3.5"/> };
+            }),
+            { val:'check',    label:'Correction Check',   count: checkPending.length, dot:'bg-orange-500', icon: <ClipboardCheck className="h-3.5 w-3.5"/> },
             { val:'scan',     label:'Upload Scan',        count: scanPending.length, dot:'bg-amber-500',  icon: null },
             { val:'ready',    label:'Ready to Dispatch',  count: ready.length,       dot:'bg-emerald-500',icon: null },
             { val:'progress', label:'In Progress',        count: inProgress.length,  dot:'bg-indigo-500', icon: null },
             { val:'done',     label:'All Dispatched',     count: dispatched.length,  dot:'',              icon: <History className="h-3.5 w-3.5"/> },
-          ].map(({ val, label, count, dot, icon }) => (
+            { val:'closed',   label:'Closed',             count: 0,                  dot:'',              icon: <XCircle className="h-3.5 w-3.5"/> },
+          ].map(({ val, label, count, urgent, dot, icon }) => (
             <TabsTrigger key={val} value={val}
               className="rounded-lg text-xs font-semibold data-[state=active]:bg-white data-[state=active]:shadow-sm py-1.5 px-3 flex items-center gap-1.5">
               {icon}{label}
@@ -468,6 +704,7 @@ export default function DispatchPage() {
                   {count}
                 </span>
               )}
+              {urgent > 0 && <span className="rounded-full bg-red-100 px-1.5 text-[10px] font-bold leading-[18px] text-red-700">{urgent} urgent</span>}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -608,8 +845,8 @@ export default function DispatchPage() {
                       </Button>
                       {isAwaiting && (
                         <Button size="sm" className="bg-purple-600 hover:bg-purple-700 text-xs h-8"
-                          onClick={() => confirmReceipt(d._id)}>
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5"/>Process Request
+                          onClick={() => openReceive([d])}>
+                          <PackageCheck className="h-3.5 w-3.5 mr-1.5"/>Mark Received
                         </Button>
                       )}
                       {isReceived && (
@@ -635,16 +872,43 @@ export default function DispatchPage() {
           })}
         </TabsContent>
 
-        {/* Incoming */}
-        <TabsContent value="incoming" className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">Process request to proceed to scanning.</p>
-          {incoming.length === 0
-            ? <div className="text-center py-10 text-muted-foreground">No incoming couriers</div>
-            : incoming.map(d => (
+        {/* Marksheet Requests / Other Doc Requests (waiting for the university's courier) */}
+        {INCOMING_TABS.map(t => (
+          <TabsContent key={t.val} value={t.val} className="space-y-2 mt-3">{renderIncoming(t)}</TabsContent>
+        ))}
+
+        {/* Correction Check — every copy received from the university */}
+        <TabsContent value="check" className="space-y-2 mt-3">
+          <p className="text-xs text-muted-foreground">
+            Check each document received from the university. Correct: a soft copy goes to Upload Scan, a hard copy to Ready to Dispatch. Wrong: send it back to the university for correction — it waits in the request tabs for the corrected copy.
+          </p>
+          {renderSelectBar(checkPending, 'documents to check', selected => (
+            <>
+              {deleteSelectedButton(selected)}
+              <Button size="sm" variant="outline" className="border-amber-300 text-amber-800 hover:bg-amber-50" onClick={() => openCorrection(selected)} disabled={selected.length === 0 || saving}>
+                <Undo2 className="h-3.5 w-3.5 mr-1"/>Send back to University ({selected.length})
+              </Button>
+              <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markCorrectionChecked(selected)} disabled={selected.length === 0 || saving}>
+                <ClipboardCheck className="h-3.5 w-3.5 mr-1"/>Correction Checked ({selected.length})
+              </Button>
+            </>
+          ))}
+          {checkPending.length === 0
+            ? <div className="text-center py-10 text-muted-foreground">No documents to check</div>
+            : checkPending.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
-                alreadyInInventory={isAlreadyInInventory(d)}
-                onDelete={() => dismiss(`doc:${d._id}`)}
-                action={<Button size="sm" onClick={() => confirmReceipt(d._id)}><CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Process Request</Button>}
+                selectable selected={selectedIds.includes(String(d._id))} onToggle={() => toggleSelected(d._id)}
+                onDelete={() => openClose([d])}
+                action={
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button size="sm" variant="outline" className="border-amber-300 text-amber-800 hover:bg-amber-50" onClick={() => openCorrection([d])} disabled={saving}>
+                      <Undo2 className="h-3.5 w-3.5 mr-1"/>Send back to University
+                    </Button>
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markCorrectionChecked([d])} disabled={saving}>
+                      <ClipboardCheck className="h-3.5 w-3.5 mr-1"/>Correction Checked
+                    </Button>
+                  </div>
+                }
               />
             ))
           }
@@ -653,11 +917,13 @@ export default function DispatchPage() {
         {/* Upload Scan */}
         <TabsContent value="scan" className="space-y-2 mt-3">
           <p className="text-xs text-muted-foreground">Scan and upload the document. Goes to Counselor for review.</p>
+          {renderSelectBar(scanPending, 'documents to scan', deleteSelectedButton)}
           {scanPending.length === 0
             ? <div className="text-center py-10 text-muted-foreground">No documents to scan</div>
             : scanPending.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
-                onDelete={() => dismiss(`doc:${d._id}`)}
+                selectable selected={selectedIds.includes(String(d._id))} onToggle={() => toggleSelected(d._id)}
+                onDelete={() => openClose([d])}
                 action={
                   <Button size="sm" onClick={() => { setDialog({type:'scan', item:d}); setScanFile(null); if (fileRef.current) fileRef.current.value = ''; }}>
                     <Scan className="h-3.5 w-3.5 mr-1"/>Upload Scan
@@ -716,26 +982,54 @@ export default function DispatchPage() {
 
         {/* In Progress */}
         <TabsContent value="progress" className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">Waiting for center payment or accountant verification.</p>
+          <p className="text-xs text-muted-foreground">Scanned and with the counselor, waiting for the centre's payment, or the accountant's payment verification.</p>
           {inProgress.length === 0
             ? <div className="text-center py-10 text-muted-foreground">Nothing in progress</div>
             : inProgress.map(d => <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc} onDelete={() => dismiss(`doc:${d._id}`)} action={null}/>)
           }
         </TabsContent>
 
+        {/* Closed — old requests Dispatch closed; reopen puts them back where they were */}
+        <TabsContent value="closed" className="space-y-2 mt-3">
+          <p className="text-xs text-muted-foreground">Requests closed (deleted) from Dispatch. Nothing was removed — reopen one to put it back at the stage it was closed at.</p>
+          {renderSelectBar(closedDocs, 'closed requests', selected => (
+            <Button size="sm" onClick={() => reopenRequests(selected)} disabled={selected.length === 0 || saving}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1"/>Reopen ({selected.length})
+            </Button>
+          ))}
+          {closedDocs.length === 0
+            ? <div className="text-center py-10 text-muted-foreground"><XCircle className="h-10 w-10 mx-auto mb-3 opacity-40"/>No closed requests</div>
+            : closedDocs.map(d => (
+              <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
+                selectable selected={selectedIds.includes(String(d._id))} onToggle={() => toggleSelected(d._id)}
+                action={<Button size="sm" variant="outline" onClick={() => reopenRequests([d])} disabled={saving}><RotateCcw className="h-3.5 w-3.5 mr-1"/>Reopen</Button>}
+              />
+            ))
+          }
+        </TabsContent>
+
         {/* All Dispatched */}
         <TabsContent value="done" className="space-y-2 mt-3">
-          <p className="text-xs text-muted-foreground">Complete record of all dispatched documents. Click any record to view full details.</p>
+          <p className="text-xs text-muted-foreground">Complete record of all dispatched documents. Click any record to view full details. When a centre has its courier but has not confirmed it, mark it received here.</p>
+          {renderSelectBar(dispatched.filter(d => d.status === 'Dispatched'), 'sent, not yet confirmed by the centre', selected => (
+            <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markCentreReceived(selected)} disabled={selected.length === 0 || saving}>
+              <CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Received by Centre ({selected.length})
+            </Button>
+          ))}
           {dispatched.length === 0
             ? <div className="text-center py-10 text-muted-foreground"><History className="h-10 w-10 mx-auto mb-3 text-muted-foreground"/>No dispatched documents yet</div>
             : dispatched.map(d => (
               <Card key={d._id} className="cursor-pointer hover:border-primary/40 transition-colors" onClick={() => setDetailDoc(d)}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between gap-3">
+                    {d.status === 'Dispatched' && (
+                      <input type="checkbox" checked={selectedIds.includes(String(d._id))} onChange={() => toggleSelected(d._id)}
+                        onClick={e => e.stopPropagation()} aria-label={`Select ${d.name}`} className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"/>
+                    )}
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium">{d.name}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_INFO[d.status]?.color || 'bg-gray-100 text-gray-700'}`}>{STATUS_INFO[d.status]?.label || d.status}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_INFO[d.status]?.color || 'bg-gray-100 text-gray-700'}`}>{d.status === 'Delivered' ? 'Received by Centre' : STATUS_INFO[d.status]?.label || d.status}</span>
                       </div>
                       <div className="text-sm text-muted-foreground mt-0.5">
                         Student: <b>{d.student?.name}</b>
@@ -765,6 +1059,11 @@ export default function DispatchPage() {
                       <Button size="sm" variant="outline" onClick={() => dismiss(`doc:${d._id}`)} className="text-red-600 hover:text-red-700">
                         <Trash2 className="h-3.5 w-3.5 mr-1"/>Delete
                       </Button>
+                      {d.status === 'Dispatched' && (
+                        <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markCentreReceived([d])} disabled={saving}>
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Received by Centre
+                        </Button>
+                      )}
                       <Eye className="h-4 w-4 text-muted-foreground"/>
                     </div>
                   </div>
@@ -784,7 +1083,7 @@ export default function DispatchPage() {
             {dialog?.item?.courierInfo?.trackingNo && <div>Tracking: <b className="font-mono">{dialog.item.courierInfo.trackingNo}</b></div>}
           </div>
           <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded px-3 py-2">
-            After uploading, the scanned copy will be sent to the Counselor for review.
+            After uploading, the scanned copy will be sent to the Counselor for review. It is also kept with this document in the student's New Inventory, to download later.
           </p>
           <div>
             <Label>Scanned File *</Label>
@@ -834,6 +1133,122 @@ export default function DispatchPage() {
             <Button className="bg-green-600 hover:bg-green-700" onClick={dispatchToCenter} disabled={saving}>
               {saving && <Loader2 className="h-4 w-4 mr-1 animate-spin"/>}
               <Truck className="h-4 w-4 mr-1"/>Confirm Dispatch
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send back to the university for correction Dialog */}
+      <Dialog open={dialog?.type === 'correction'} onOpenChange={() => setDialog(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{dialog?.items?.length > 1 ? `Send ${dialog.items.length} documents back to the University for correction` : `Send back to the University for correction: ${dialog?.items?.[0]?.name || ''}`}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-44 overflow-y-auto rounded-lg border divide-y text-sm">
+            {(dialog?.items || []).map(d => (
+              <div key={d._id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                <span className="truncate font-medium">{d.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {d.student?.name}{d.student?.enrollmentNumber ? <span className="ml-1 font-mono text-emerald-700">{d.student.enrollmentNumber}</span> : null}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            The university gets {dialog?.items?.length > 1 ? 'them' : 'it'} in its <b>Correction Needed</b> tab with your note. Here {dialog?.items?.length > 1 ? 'they go' : 'it goes'} back to the request tabs marked <b>Sent for correction</b> — mark the corrected copy received when it comes, and check it again.
+          </p>
+          <div>
+            <Label>What needs to be corrected? *</Label>
+            <Input value={correctionNote} maxLength={500} onChange={e => setCorrectionNote(e.target.value)} placeholder="e.g. Father's name misspelt, wrong date of birth" className="mt-1"/>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700" onClick={sendForCorrection} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <Undo2 className="h-4 w-4 mr-1"/>}
+              Send back to University
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete (= close) requests Dialog */}
+      <Dialog open={dialog?.type === 'close'} onOpenChange={() => setDialog(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{dialog?.items?.length > 1 ? `Delete ${dialog.items.length} requests` : `Delete request: ${dialog?.items?.[0]?.name || ''}`}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-44 overflow-y-auto rounded-lg border divide-y text-sm">
+            {(dialog?.items || []).map(d => (
+              <div key={d._id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                <span className="truncate font-medium">{d.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {d.student?.name}{d.student?.enrollmentNumber ? <span className="ml-1 font-mono text-emerald-700">{d.student.enrollmentNumber}</span> : null}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+            {dialog?.items?.length > 1 ? 'These requests are' : 'This request is'} marked <b>Closed</b>: removed from Dispatch and from the university's pending list.
+            Nothing is erased — the history and payments stay, and Dispatch can reopen {dialog?.items?.length > 1 ? 'them' : 'it'} any time from the <b>Closed</b> tab.
+          </p>
+          <div>
+            <Label>Reason</Label>
+            <Input value={closeReason} maxLength={300} onChange={e => setCloseReason(e.target.value)} placeholder="Optional — e.g. very old request, not moving" className="mt-1"/>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button className="bg-red-600 hover:bg-red-700" onClick={closeSelected} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <Trash2 className="h-4 w-4 mr-1"/>}
+              {dialog?.items?.length > 1 ? `Delete ${dialog.items.length} requests` : 'Delete request'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark Received (from the university) Dialog */}
+      <Dialog open={dialog?.type === 'receive'} onOpenChange={() => setDialog(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{dialog?.items?.length > 1 ? `Mark ${dialog.items.length} documents received` : `Mark received: ${dialog?.items?.[0]?.name || ''}`}</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-44 overflow-y-auto rounded-lg border divide-y text-sm">
+            {(dialog?.items || []).map(d => (
+              <div key={d._id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                  <span className="truncate">{d.name}</span>
+                  {isUrgentDoc(d) && <span className="shrink-0 rounded-full bg-red-50 px-1.5 text-[10px] font-bold text-red-700 border border-red-200">Urgent</span>}
+                </span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {d.student?.name}{d.student?.enrollmentNumber ? <span className="ml-1 font-mono text-emerald-700">{d.student.enrollmentNumber}</span> : null}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+            Each document is added to the student's New Inventory, shows as Sent on the university portal and moves to Upload Scan.
+          </p>
+          <div className="space-y-3">
+            <div>
+              <Label>Received on *</Label>
+              <Input type="date" max={todayInput()} value={receiveForm.receivedAt} onChange={e => setReceiveForm(p => ({ ...p, receivedAt: e.target.value }))} className="mt-1"/>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Courier details <span className="normal-case font-normal">(optional{dialog?.items?.length > 1 ? ' — same for all selected' : ''})</span></p>
+              <div className="mt-1.5 grid grid-cols-2 gap-3">
+                <div><Label>Courier Company</Label><Input value={receiveForm.company} maxLength={80} onChange={e => setReceiveForm(p => ({ ...p, company: e.target.value }))} placeholder="BlueDart, DTDC…" className="mt-1"/></div>
+                <div><Label>Tracking No.</Label><Input value={receiveForm.trackingNo} maxLength={80} onChange={e => setReceiveForm(p => ({ ...p, trackingNo: e.target.value }))} placeholder="e.g. BD123456" className="mt-1"/></div>
+              </div>
+            </div>
+            <div>
+              <Label>Note</Label>
+              <Input value={receiveForm.note} maxLength={300} onChange={e => setReceiveForm(p => ({ ...p, note: e.target.value }))} placeholder="Optional" className="mt-1"/>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
+            <Button onClick={markReceived} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin"/> : <PackageCheck className="h-4 w-4 mr-1"/>}
+              Mark Received
             </Button>
           </DialogFooter>
         </DialogContent>
