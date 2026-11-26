@@ -167,6 +167,8 @@ router.get  ('/new-inventory/students',           protect, requireRole('Admin','
 router.get  ('/new-inventory/students/:id',       protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), newInvC.student);
 router.post ('/new-inventory/students/:id/items', protect, requireRole('Admin','Accountant','Counselor','Dispatch'), newInvC.addItem);
 router.patch('/new-inventory/items/:itemId/centre', protect, requireRole('Admin','Dispatch'), newInvC.setCentreState);
+router.get  ('/new-inventory/check-pending',      protect, requireRole('Admin','Dispatch'), newInvC.checkPending);
+router.post ('/new-inventory/correction-checked', protect, requireRole('Admin','Dispatch'), newInvC.correctionChecked);
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);

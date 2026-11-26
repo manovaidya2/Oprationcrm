@@ -52,7 +52,8 @@ function PaymentForm({ doc, accounts, onSubmit, onCancel, busy }) {
 // Documents of one student (degree, marksheets, other documents), each with a fee and its payments.
 // api = { list(id), add(id, body), update(id, docId, body), remove(id, docId), addPayment(id, docId, formData) }
 // category: 'Other' (degree / other documents) or 'Marksheet'. canEdit=false is the read-only view (the centre sees only what was shown to it).
-export default function StudentDocsPanel({ studentId, api, canEdit, onChange, category = 'Other', asCentre = false }) {
+// allowAdd=false: no form to add new ones (the student page only keeps the ones added earlier).
+export default function StudentDocsPanel({ studentId, api, canEdit, onChange, category = 'Other', asCentre = false, allowAdd = true }) {
   const isMarksheet = category === 'Marksheet';
   const options = DOCUMENT_OPTIONS.filter(o => /marksheet|transcript/i.test(o) === isMarksheet);
   const isAdmin = useAuth().user?.role === 'Admin';
@@ -78,7 +79,7 @@ export default function StudentDocsPanel({ studentId, api, canEdit, onChange, ca
 
   return (
     <div className="space-y-3">
-      {canEdit && (
+      {canEdit && allowAdd && (
         <div className="rounded-lg border bg-muted/30 p-3">
           <div className="grid gap-2 md:grid-cols-[1.6fr_160px_auto]">
             <div>

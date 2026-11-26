@@ -569,22 +569,24 @@ export default function UniversityPage() {
     const selected = pendingList.filter(d => selectedDocIds.includes(String(d._id)));
     const list = selected.length ? selected : pendingList;
     if (!list.length) return toast.error(`No ${kindNoun(kind)} requests to export`);
-    const grouped = new Map();   // one row per student and section
-    list.forEach(doc => {
+    const grouped = new Map();   // one row per student and section; documents oldest request first
+    [...list].sort((a, b) => new Date(requestedAt(a) || 0) - new Date(requestedAt(b) || 0)).forEach(doc => {
       const section = requestSection(doc);
       const sid = `${String(doc.student?._id || doc.student?.enrollmentNumber || doc.student?.name || doc._id)}|${section}`;
-      if (!grouped.has(sid)) grouped.set(sid, { student: doc.student || {}, section, urgent: false, docs: [] });
+      if (!grouped.has(sid)) grouped.set(sid, { student: doc.student || {}, section, urgent: false, docs: [], dates: [] });
       const g = grouped.get(sid);
       g.docs.push(doc.name);
+      g.dates.push(fmtDt(requestedAt(doc)));
       if (isUrgentDoc(doc)) g.urgent = true;
     });
-    const rows = [...grouped.values()].map(({ student, section, urgent, docs }) => ({
+    const rows = [...grouped.values()].map(({ student, section, urgent, docs, dates }) => ({
       'Student Name': student.name || '',
       'Enrollment Number': student.enrollmentNumber || '',
       'Course': student.courseName || '',
       'Section': SECTION_META[section].label,
       'Request Type': urgent ? 'Urgent' : 'Normal',
       'Requested Documents': docs.join(' | '),
+      'Requested On': dates.join(' | '),   // the date each document was requested, in the same order
     }));
     const headers = Object.keys(rows[0]);
     const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;

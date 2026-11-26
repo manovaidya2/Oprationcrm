@@ -55,6 +55,9 @@ const inventoryDocumentSchema = new mongoose.Schema({
   correctionCheckedAt: { type: Date },
   correctionCheckedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   correctionSentAt:    { type: Date },
+  // a marksheet added straight to the New Inventory (kept in the office) waits for Dispatch's correction check;
+  // checked, it just stays here until a centre requests it
+  correctionCheckPending: { type: Boolean, default: false },
   log: [logSchema],
   // requests this document answered
   matches: [matchSchema],

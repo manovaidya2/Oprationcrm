@@ -76,6 +76,8 @@ const studentDocSchema = new mongoose.Schema({
   // Other Documents request answered from the New Inventory when the accountant approved it (not asked of the university)
   inventoryItem:      { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryDocument' },
   inventoryMatchedAt: { type: Date },
+  // answered from a New Inventory document still waiting for its correction check: Dispatch checks it first
+  inventoryCheckPending: { type: Boolean, default: false },
   // Dispatch marked the document received from the university (the date it arrived, who marked it) and
   // the New Inventory entry it went into. The university portal lists it as Sent from then on.
   receivedFromUniversityAt: { type: Date },

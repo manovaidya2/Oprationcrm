@@ -19,7 +19,7 @@ import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centers
 import { useAuth } from '@/context/AuthContext';
 import StudentDocsPanel from '@/components/StudentDocsPanel';
 import { activeUniversities } from '@/lib/universities';
-import { DOCUMENT_OPTIONS } from '@/lib/documentOptions';
+import { DOCUMENT_OPTIONS, requestOptions, requestSection } from '@/lib/documentOptions';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -284,7 +284,8 @@ export default function StudentDetailPage() {
   const { user } = useAuth();
 
   const [student, setStudent] = useState(null);
-  const [centreDocs, setCentreDocs] = useState({ Other: [], Marksheet: [] });      // what was shown to the centre (centre login only)
+  // documents added by hand on this page earlier (no longer added here); the centre gets only what was shown to it
+  const [addedDocs, setAddedDocs] = useState({ Other: [], Marksheet: [] });
   const [payment, setPayment] = useState(null);
   const [docs,    setDocs]    = useState([]);
   const [centers, setCenters]  = useState([]);
@@ -318,6 +319,7 @@ export default function StudentDetailPage() {
   const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
 
   const [docOpen, setDocOpen] = useState(false);
+  const [docSection, setDocSection] = useState('Other');   // the tab a request is raised from
   const [docForm, setDocForm] = useState({ name:'', names:[], chargeFee:'', note:'' });
   const [docFile, setDocFile] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
@@ -329,8 +331,8 @@ export default function StudentDetailPage() {
   const [fwdDoc, setFwdDoc] = useState(null);
 
   useEffect(() => {
-    if (user?.role !== 'Center') return;
-    Promise.all([studentsApi.addedDocs.list(id, 'Other'), studentsApi.addedDocs.list(id, 'Marksheet')]).then(([o, m]) => setCentreDocs({ Other: o, Marksheet: m })).catch(() => {});
+    Promise.all([studentsApi.addedDocs.list(id, 'Other'), studentsApi.addedDocs.list(id, 'Marksheet')])
+      .then(([o, m]) => setAddedDocs({ Other: o || [], Marksheet: m || [] })).catch(() => {});
   }, [id, user?.role]);
 
   const load = useCallback(async () => {
@@ -400,7 +402,7 @@ export default function StudentDetailPage() {
     try {
       for (const name of names) {
         const fd = new FormData();
-        fd.append('studentId', id); fd.append('name', name);
+        fd.append('studentId', id); fd.append('name', name); fd.append('section', docSection);
         fd.append('note', docForm.note);
         fd.append('chargeFee', docForm.chargeFee||0);
         if (docFile) fd.append('file', docFile);
@@ -597,10 +599,9 @@ export default function StudentDetailPage() {
         <TabsList>
           <TabsTrigger value="info">Info</TabsTrigger>
           <TabsTrigger value="fees">Fees</TabsTrigger>
-          <TabsTrigger value="docs">Documents</TabsTrigger>
           <TabsTrigger value="payments">Payments</TabsTrigger>
-          {(!isCenter || centreDocs.Marksheet.length > 0) && <TabsTrigger value="marksheets">Marksheets</TabsTrigger>}
-          {(!isCenter || centreDocs.Other.length > 0) && <TabsTrigger value="univdocs">Other Documents</TabsTrigger>}
+          <TabsTrigger value="marksheets">Marksheets</TabsTrigger>
+          <TabsTrigger value="univdocs">Other Documents</TabsTrigger>
           {!isCenter && <TabsTrigger value="history">History</TabsTrigger>}
         </TabsList>
 
@@ -812,17 +813,25 @@ export default function StudentDetailPage() {
           )}
         </TabsContent>
 
-        {/* ── Docs Tab ── */}
-        <TabsContent value="docs" className="mt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">{docs.length} document{docs.length!==1?'s':''}</p>
-            {canManageDocs && (isAdmin || student.applicationStatus==='Enrolled') && (
-              <Button size="sm" onClick={()=>setDocOpen(true)}><Plus className="h-4 w-4 mr-1"/>Request Document</Button>
-            )}
-          </div>
-          {docs.length===0?(
-            <div className="text-center py-10 border border-dashed rounded-lg"><FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">No documents</p></div>
-          ):docs.map(d=>(
+        {/* ── Marksheets / Other Documents: the document requests of each tab (as the old Documents tab showed
+             them, with their history), and below, documents added by hand on this page earlier ── */}
+        {[['marksheets', 'Marksheet'], ['univdocs', 'Other']].map(([tabValue, section]) => {
+          const isMs = section === 'Marksheet';
+          const list = docs.filter(d => requestSection(d) === section);
+          const added = addedDocs[section] || [];
+          return (
+            <TabsContent key={tabValue} value={tabValue} className="mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{list.length} {isMs ? 'marksheet' : 'document'}{list.length!==1?'s':''}</p>
+                {canManageDocs && (isAdmin || student.applicationStatus==='Enrolled') && (
+                  <Button size="sm" onClick={()=>{ setDocSection(section); setDocForm({name:'',names:[],chargeFee:'',note:''}); setDocOpen(true); }}>
+                    <Plus className="h-4 w-4 mr-1"/>{isMs ? 'Request Marksheet' : 'Request Document'}
+                  </Button>
+                )}
+              </div>
+              {list.length===0?(
+                <div className="text-center py-10 border border-dashed rounded-lg"><FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">{isMs ? 'No marksheets' : 'No documents'}</p></div>
+              ):list.map(d=>(
             <Card key={d._id}>
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -887,16 +896,18 @@ export default function StudentDetailPage() {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </TabsContent>
-
-        {/* ── Degree / other documents with their fee and payments ── */}
-        <TabsContent value="univdocs" className="mt-4">
-          <StudentDocsPanel studentId={student._id} category="Other" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch'} />
-        </TabsContent>
-        <TabsContent value="marksheets" className="mt-4">
-          <StudentDocsPanel studentId={student._id} category="Marksheet" api={studentsApi.addedDocs} canEdit={isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch'} />
-        </TabsContent>
+              ))}
+              {added.length > 0 && (
+                <div className="space-y-2 border-t pt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{isCenter ? 'Shared with the centre' : 'Added manually earlier'} ({added.length})</p>
+                  <StudentDocsPanel studentId={student._id} category={section} api={studentsApi.addedDocs} allowAdd={false}
+                    canEdit={!isCenter && (isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch')}
+                    onChange={next => setAddedDocs(p => ({ ...p, [section]: next || [] }))} />
+                </div>
+              )}
+            </TabsContent>
+          );
+        })}
 
         {/* ── Payments Tab ── */}
         <TabsContent value="payments" className="mt-4 space-y-3">
@@ -1273,12 +1284,12 @@ export default function StudentDetailPage() {
       {/* Add Doc Dialog */}
       <Dialog open={docOpen} onOpenChange={setDocOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Request Document</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{docSection === 'Marksheet' ? 'Request Marksheet' : 'Request Other Document'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label>Document Names *</Label>
               <div className="mt-1 max-h-72 overflow-y-auto rounded-md border p-2">
-                {DOCUMENT_OPTIONS.map(name => {
+                {requestOptions(docSection).map(name => {
                   const checked = docForm.names.includes(name);
                   return (
                     <label key={name} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">

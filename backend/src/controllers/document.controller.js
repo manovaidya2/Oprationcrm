@@ -6,7 +6,7 @@ const User          = require('../models/User');
 const Counselor     = require('../models/Counselor');
 const PaymentAccount = require('../models/PaymentAccount');
 const InventoryDocument = require('../models/InventoryDocument');
-const { findOtherDocumentInStock } = require('./newInventory.controller');
+const { findDocumentInStock } = require('./newInventory.controller');
 const mongoose      = require('mongoose');
 const fs            = require('fs');
 const { audit, notify, notifyRole, notifyCounselors } = require('../utils/helpers');
@@ -561,22 +561,27 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     const e = new Error('Not in accountant queue'); e.status = 400; throw e;
   }
 
-  let inStock = null;   // the New Inventory document that answers an approved Other Documents request
+  let inStock = null;   // the New Inventory document (marksheet or other) that answers an approved request
   if (action === 'approve') {
     pushHistory(doc, 'Fee_Approved', req.user, note||'');
     const verifiedPayments = markDocPaymentsVerified(doc, req.user);
     const paidTotal = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     doc.totalPaid = paidTotal;
     const fullyPaid = doc.chargeFee <= 0 || paidTotal >= doc.chargeFee;
-    // An other document already held in the New Inventory for this student is not asked of the university:
-    // a soft copy goes straight to Dispatch to scan (a hard copy goes to Dispatch / the centre's payment as before).
-    inStock = sectionOf(doc.section, doc.name) === 'Other' ? await findOtherDocumentInStock(docStudentId(doc), doc.name) : null;
+    // A marksheet / other document already held in the New Inventory for this student is not asked of the
+    // university: a soft copy goes straight to Dispatch to scan (a hard copy goes to Dispatch / the centre's
+    // payment as before). One still waiting for its correction check goes to Dispatch's Correction Check first.
+    inStock = await findDocumentInStock(docStudentId(doc), sectionOf(doc.section, doc.name), doc.name);
     if (inStock) {
       doc.inventoryItem = inStock._id;
       doc.inventoryMatchedAt = new Date();
+      doc.inventoryCheckPending = !!inStock.correctionCheckPending;
       addHistoryOnly(doc, 'Inventory_Matched', req.user, 'Found in the New Inventory - not requested from the university');
     }
-    if (isHardCopyRequest(doc) && fullyPaid) {
+    if (inStock && doc.inventoryCheckPending) {
+      doc.status = 'Dispatch_Received';
+      doc.statusHistory.push({ status: 'Dispatch_Received', changedBy: req.user._id, at: new Date(), note: 'Document is in the New Inventory - Dispatch to check it for corrections' });
+    } else if (isHardCopyRequest(doc) && fullyPaid) {
       doc.status = 'Payment_Verified';
       doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: verifiedPayments > 0 ? 'Hard copy payment verified - ready for dispatch' : 'Hard copy has no pending fee - ready for dispatch' });
     } else if (isHardCopyRequest(doc)) {
@@ -591,13 +596,13 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     }
     // University portal is skipped for document requests; Dispatch owns receipt.
     // Also notify Dispatch — courier will arrive from university directly (or the document is already in the inventory)
-    if (!isHardCopyRequest(doc) || fullyPaid) await notifyRole('Dispatch', {
+    if (!isHardCopyRequest(doc) || fullyPaid || doc.inventoryCheckPending) await notifyRole('Dispatch', {
       message: inStock
-        ? `In the New Inventory: "${doc.name}" — Student: ${doc.student?.name}. ${isHardCopyRequest(doc) ? 'Ready to dispatch to the centre.' : 'Please scan and upload it.'}`
+        ? `In the New Inventory: "${doc.name}" — Student: ${doc.student?.name}. ${doc.inventoryCheckPending ? 'Please check it for corrections.' : isHardCopyRequest(doc) ? 'Ready to dispatch to the centre.' : 'Please scan and upload it.'}`
         : `Courier expected from University for \"${doc.name}\" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
       type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Dispatch',
     });
-    if (isHardCopyRequest(doc) && !fullyPaid) {
+    if (isHardCopyRequest(doc) && !fullyPaid && !doc.inventoryCheckPending) {   // (after the check, the check asks the centre)
       const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
       if (centerUser) await notify(centerUser._id, {
         message: `Payment required for hard copy document "${doc.name}" - ${doc.student?.name}`,
@@ -828,12 +833,13 @@ exports.dispatchReceiveMany = asyncHandler(async (req, res) => {
 exports.correctionChecked = asyncHandler(async (req, res) => {
   const next = {};
   const { done, failed } = await forEachRequest(req.body.ids, async doc => {
-    if (doc.status !== 'Dispatch_Received' || doc.inventoryItem) return 'Not waiting for a correction check';
+    if (doc.status !== 'Dispatch_Received' || (doc.inventoryItem && !doc.inventoryCheckPending)) return 'Not waiting for a correction check';
     if (doc.correctionCheckedAt) return 'Already checked';
     const corrected = doc.correctionOpen;
     doc.correctionCheckedAt = new Date();
     doc.correctionCheckedBy = req.user._id;
     doc.correctionOpen = false;
+    doc.inventoryCheckPending = false;
     addHistoryOnly(doc, 'Correction_Checked', req.user, corrected ? 'Corrected copy checked by Dispatch - no correction needed' : 'Checked by Dispatch - no correction needed');
     next[String(doc._id)] = 'scan';
     if (isHardCopyRequest(doc)) {
@@ -849,7 +855,7 @@ exports.correctionChecked = asyncHandler(async (req, res) => {
     const itemId = await inventoryEntryFor(doc, req.user, receivedAtOf(doc));
     await doc.save();
     if (itemId) await logInventory(itemId, corrected ? 'Corrected copy checked by Dispatch' : 'Correction checked by Dispatch', req.user, '',
-      { $set: { correctionCheckedAt: doc.correctionCheckedAt, correctionCheckedBy: req.user._id } });
+      { $set: { correctionCheckedAt: doc.correctionCheckedAt, correctionCheckedBy: req.user._id }, $unset: { correctionCheckPending: 1 } });
     if (next[String(doc._id)] === 'payment') {
       const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true }).select('_id').lean();
       if (centerUser) await notify(centerUser._id, { message: `Payment required for hard copy document "${doc.name}"`, type: 'doc_payment_required', documentId: doc._id, role: 'Center' });
@@ -866,7 +872,12 @@ exports.sendForCorrection = asyncHandler(async (req, res) => {
   if (!note) { const e = new Error('Write what needs to be corrected'); e.status = 400; throw e; }
   const sent = [];
   const { done, failed } = await forEachRequest(req.body.ids, async doc => {
-    if (doc.status !== 'Dispatch_Received' || doc.correctionCheckedAt || doc.inventoryItem) return 'Only documents waiting for the correction check can be sent back';
+    if (doc.status !== 'Dispatch_Received' || doc.correctionCheckedAt || (doc.inventoryItem && !doc.inventoryCheckPending)) return 'Only documents waiting for the correction check can be sent back';
+    if (doc.inventoryItem) {   // the held copy goes to the university: from now on a normal request for its corrected copy
+      doc.receivedIntoInventory = doc.inventoryItem;
+      doc.inventoryItem = undefined;
+      doc.inventoryCheckPending = false;
+    }
     doc.correctionOpen = true;
     doc.correctionCount = (doc.correctionCount || 0) + 1;
     doc.correctionSentAt = new Date();
@@ -876,7 +887,7 @@ exports.sendForCorrection = asyncHandler(async (req, res) => {
     pushHistory(doc, 'Sent_To_University', req.user, 'Waiting for the corrected copy from the university');
     const itemId = await inventoryEntryFor(doc, req.user, receivedAtOf(doc));
     await doc.save();
-    if (itemId) await logInventory(itemId, 'Sent back to the university for correction', req.user, note, { $set: { correctionSentAt: doc.correctionSentAt }, $unset: { correctionCheckedAt: 1, correctionCheckedBy: 1 } });
+    if (itemId) await logInventory(itemId, 'Sent back to the university for correction', req.user, note, { $set: { correctionSentAt: doc.correctionSentAt }, $unset: { correctionCheckedAt: 1, correctionCheckedBy: 1, correctionCheckPending: 1 } });
     await audit('doc_sent_for_correction', 'StudentDocument', doc._id, req.user, { note, count: doc.correctionCount }, `Sent for correction: ${doc.name}`);
     sent.push(doc);
     return null;
@@ -985,7 +996,7 @@ exports.uploadScan = asyncHandler(async (req, res) => {
   const doc = await loadDoc(req.params.id);
   if (doc.status !== 'Dispatch_Received') { const e = new Error('Must confirm receipt first'); e.status = 400; throw e; }
   // a copy from the university is checked for corrections first (one answered from the New Inventory was not sent for)
-  if (!doc.correctionCheckedAt && !doc.inventoryItem) { const e = new Error('Check the document for corrections first (Correction Check)'); e.status = 400; throw e; }
+  if (!doc.correctionCheckedAt && !(doc.inventoryItem && !doc.inventoryCheckPending)) { const e = new Error('Check the document for corrections first (Correction Check)'); e.status = 400; throw e; }
 
   if (req.file) { doc.scannedUrl = `/uploads/${req.file.filename}`; doc.scannedName = req.file.originalname; }
   if (req.body.scannedUrl) doc.scannedUrl = req.body.scannedUrl;

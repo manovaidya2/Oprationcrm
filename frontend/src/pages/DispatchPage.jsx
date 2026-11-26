@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { docsApi } from '@/lib/api';
+import { docsApi, newInventoryApi } from '@/lib/api';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 import { requestSection } from '@/lib/documentOptions';
@@ -353,6 +354,7 @@ export default function DispatchPage() {
   const { user } = useAuth();
   const { dismiss, isDismissed } = usePanelDismissals(user, 'dispatch');
   const [all,     setAll]     = useState([]);
+  const [invToCheck, setInvToCheck] = useState([]);   // marksheets added straight to the New Inventory, to check
   const [loading, setLoading] = useState(true);
   const [dialog,  setDialog]  = useState(null);
   const [detailDoc, setDetailDoc] = useState(null);
@@ -370,7 +372,12 @@ export default function DispatchPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      setAll(await docsApi.list({ all: '1' }));
+      const [docs, pendingInv] = await Promise.all([
+        docsApi.list({ all: '1' }),
+        newInventoryApi.checkPending().catch(() => ({ items: [] })),
+      ]);
+      setAll(docs);
+      setInvToCheck(pendingInv?.items || []);
     } catch (e) {
       console.error('DispatchPage load failed', e);
       toast.error(e?.message || 'Failed to load dispatch queue');
@@ -390,8 +397,12 @@ export default function DispatchPage() {
   const visibleAll = all.filter(d => !isDismissed(`doc:${d._id}`));
   const incoming    = visibleAll.filter(d => ['University_Dispatched', 'Sent_To_University'].includes(d.status)).filter(filter);
   // a copy received from the university is checked for corrections first; one answered from the New Inventory was not sent for
-  const checkPending = urgentFirst(visibleAll.filter(d => d.status === 'Dispatch_Received' && !d.correctionCheckedAt && !d.inventoryItem).filter(filter));
-  const scanPending = visibleAll.filter(d => d.status === 'Dispatch_Received' && (d.correctionCheckedAt || d.inventoryItem)).filter(filter);
+  // (answered from the New Inventory: no check, unless that document itself still waits for its check)
+  const checkPending = urgentFirst(visibleAll.filter(d => d.status === 'Dispatch_Received' && !d.correctionCheckedAt && (!d.inventoryItem || d.inventoryCheckPending)).filter(filter));
+  const scanPending = visibleAll.filter(d => d.status === 'Dispatch_Received' && (d.correctionCheckedAt || (d.inventoryItem && !d.inventoryCheckPending))).filter(filter);
+  // marksheets added straight to the New Inventory: checked, they stay there until a centre requests them
+  const invCheck = invToCheck.filter(i => !q || i.name?.toLowerCase().includes(q) || i.student?.name?.toLowerCase().includes(q)
+    || i.student?.enrollmentNumber?.toLowerCase().includes(q) || i.center?.name?.toLowerCase().includes(q));
   const closedDocs  = visibleAll.filter(d => d.status === 'Closed').filter(filter)
     .sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
 
@@ -537,6 +548,19 @@ export default function DispatchPage() {
   }
 
   // Correction check: fine -> soft copy to Upload Scan, hard copy to Ready to Dispatch (or the centre's payment)
+  async function markInventoryChecked(items) {
+    if (!items.length) return toast.error('Select the marksheets checked');
+    setSaving(true);
+    try {
+      const res = await newInventoryApi.correctionChecked({ ids: items.map(i => i._id) });
+      const done = res.checked || [];
+      if (done.length) toast.success(`${done.length === 1 ? items.find(i => String(i._id) === done[0])?.name || 'Marksheet' : `${done.length} marksheets`} checked — kept in the New Inventory`);
+      (res.failed || []).forEach(f => toast.error(`${f.name || 'A marksheet'}: ${f.error}`));
+      setSelectedIds(prev => prev.filter(id => !done.includes(id)));
+      load();
+    } catch (e) { toast.error(e.message); } finally { setSaving(false); }
+  }
+
   async function markCorrectionChecked(docs) {
     if (!docs.length) return toast.error('Select the documents checked');
     setSaving(true);
@@ -689,7 +713,7 @@ export default function DispatchPage() {
               const list = incomingBySection[t.key];
               return { val: t.val, label: t.label, count: list.length, urgent: list.filter(isUrgentDoc).length, dot: 'bg-blue-500', icon: <Icon className="h-3.5 w-3.5"/> };
             }),
-            { val:'check',    label:'Correction Check',   count: checkPending.length, dot:'bg-orange-500', icon: <ClipboardCheck className="h-3.5 w-3.5"/> },
+            { val:'check',    label:'Correction Check',   count: checkPending.length + invCheck.length, dot:'bg-orange-500', icon: <ClipboardCheck className="h-3.5 w-3.5"/> },
             { val:'scan',     label:'Upload Scan',        count: scanPending.length, dot:'bg-amber-500',  icon: null },
             { val:'ready',    label:'Ready to Dispatch',  count: ready.length,       dot:'bg-emerald-500',icon: null },
             { val:'progress', label:'In Progress',        count: inProgress.length,  dot:'bg-indigo-500', icon: null },
@@ -894,7 +918,7 @@ export default function DispatchPage() {
             </>
           ))}
           {checkPending.length === 0
-            ? <div className="text-center py-10 text-muted-foreground">No documents to check</div>
+            ? <div className="text-center py-10 text-muted-foreground">{invCheck.length ? 'No requested documents to check' : 'No documents to check'}</div>
             : checkPending.map(d => (
               <DocCard key={d._id} doc={d} onViewDetail={setDetailDoc}
                 selectable selected={selectedIds.includes(String(d._id))} onToggle={() => toggleSelected(d._id)}
@@ -912,6 +936,49 @@ export default function DispatchPage() {
               />
             ))
           }
+
+          {/* marksheets added straight to the New Inventory */}
+          {invCheck.length > 0 && (
+            <div className="space-y-2 border-t pt-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-violet-700">
+                <GraduationCap className="h-4 w-4"/>Marksheets added to the New Inventory ({invCheck.length})
+              </div>
+              <p className="text-xs text-muted-foreground">Marked received from the university when added. Once checked they stay in the New Inventory (correction checked) — they go on only when a centre requests them.</p>
+              {renderSelectBar(invCheck, 'marksheets', selected => (
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markInventoryChecked(selected)} disabled={selected.length === 0 || saving}>
+                  <ClipboardCheck className="h-3.5 w-3.5 mr-1"/>Correction Checked ({selected.length})
+                </Button>
+              ))}
+              {invCheck.map(i => (
+                <Card key={i._id} className={`border-violet-200 ${selectedIds.includes(String(i._id)) ? 'ring-2 ring-indigo-200' : ''}`}>
+                  <CardContent className="p-4 flex items-start justify-between gap-3">
+                    <input type="checkbox" checked={selectedIds.includes(String(i._id))} onChange={() => toggleSelected(i._id)} aria-label={`Select ${i.name}`} className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"/>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{i.name}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-violet-50 text-violet-700 border border-violet-200">Marksheet · New Inventory</span>
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700">Received from university</span>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-0.5">
+                        Student: <b>{i.student?.name}</b>
+                        {i.student?.enrollmentNumber && <span className="text-xs font-mono text-emerald-700 ml-2">{i.student.enrollmentNumber}</span>}
+                      </div>
+                      {i.center?.name && <div className="text-xs text-muted-foreground">Center: {i.center.name}</div>}
+                      <div className="text-xs text-muted-foreground mt-0.5">Added {fmtDt(i.createdAt)}{i.addedBy?.name ? ` by ${i.addedBy.name}` : ''}{i.note ? ` · “${i.note}”` : ''}</div>
+                    </div>
+                    <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">
+                      {i.student?._id && (
+                        <Button size="sm" variant="ghost" asChild><Link to={`/new-inventory/${i.student._id}`} title="Open in the New Inventory"><Eye className="h-3.5 w-3.5"/></Link></Button>
+                      )}
+                      <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => markInventoryChecked([i])} disabled={saving}>
+                        <ClipboardCheck className="h-3.5 w-3.5 mr-1"/>Correction Checked
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         {/* Upload Scan */}

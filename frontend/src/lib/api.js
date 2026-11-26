@@ -214,6 +214,9 @@ export const newInventoryApi = {
   addItem:  (id, data)         => request(`/new-inventory/students/${id}/items`, { method: 'POST', body: JSON.stringify(data) }),
   // where a document is now: 'office' | 'sent' | 'received' (by the centre)
   setCentreState: (itemId, state) => request(`/new-inventory/items/${itemId}/centre`, { method: 'PATCH', body: JSON.stringify({ state }) }),
+  // marksheets added straight to the inventory, waiting for Dispatch's correction check / checked { ids }
+  checkPending: () => request('/new-inventory/check-pending'),
+  correctionChecked: (data) => request('/new-inventory/correction-checked', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 export const chatApi = {

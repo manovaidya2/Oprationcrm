@@ -133,12 +133,13 @@ export default function NewInventoryStudentPage() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
         {/* Held documents */}
         <div className="space-y-2">
-          {tab === 'Other' && (
-            <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-xs text-sky-800">
-              <Send className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
-              When the accountant approves an other-document request for {student.name} and the document is here in the office, the request goes to Dispatch instead of the university.
-            </div>
-          )}
+          <div className="flex items-start gap-2 rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 text-xs text-sky-800">
+            <Send className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
+            <span>
+              When the accountant approves a {active.noun} request for {student.name} and the {active.noun} is here in the office, the request goes to Dispatch instead of the university.
+              {tab === 'Marksheet' && ' A marksheet added here as "In office" is marked received from the university and goes to Dispatch\'s Correction Check; checked, it stays here until a centre requests it.'}
+            </span>
+          </div>
           {shown.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white py-14 text-center">
               <Archive className="mx-auto mb-2 h-8 w-8 text-slate-300"/>
@@ -187,6 +188,11 @@ export default function NewInventoryStudentPage() {
                             <span className="shrink-0 text-slate-400">{f.sizeKb ? `${f.sizeKb} KB · ` : ''}{fmtDt(f.uploadedAt)}</span>
                           </a>
                         ))}
+                      </div>
+                    )}
+                    {item.correctionCheckPending && (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">
+                        <ClipboardCheck className="h-3 w-3"/>Waiting for Dispatch's correction check
                       </div>
                     )}
                     {item.correctionCheckedAt && (

@@ -6,7 +6,7 @@ const Student = require('../models/Student');
 const Counselor = require('../models/Counselor');
 const InventoryDocument = require('../models/InventoryDocument');
 const StudentDoc = require('../models/StudentDocument');
-const { audit, notifyCounselors } = require('../utils/helpers');
+const { audit, notifyCounselors, notifyRole } = require('../utils/helpers');
 
 const SECTIONS = ['Marksheet', 'Other'];
 // where a document is: 'office' (held here), 'sent' (couriered to the centre), 'received' (the centre has it)
@@ -96,18 +96,27 @@ exports.addItem = asyncHandler(async (req, res) => {
   if (!CENTRE_STATES.includes(state)) throw fail(400, 'Choose where the document is now');
   const exists = await InventoryDocument.exists({ student: student._id, section, nameKey: InventoryDocument.nameKeyOf(name) });
   if (exists) throw fail(409, `${name} is already in the inventory for ${student.name}`);
+  // a marksheet kept in the office: received from the university, to be checked for corrections by Dispatch
+  const toCheck = section === 'Marksheet' && state === 'office';
   let item;
   try {
     item = await InventoryDocument.create({
       student: student._id, center: student.center?._id || student.center, section, name,
       note: String(req.body.note || '').trim().slice(0, 300), addedBy: req.user._id,
       ...centreStateFields(state, req.user),
+      ...(toCheck ? {
+        receivedAt: new Date(), correctionCheckPending: true,
+        log: [{ action: 'Received from the university', at: new Date(), by: req.user._id, note: 'Added to the New Inventory' }],
+      } : {}),
     });
   } catch (e) {
     if (e?.code === 11000) throw fail(409, `${name} is already in the inventory for ${student.name}`);   // added at the same moment
     throw e;
   }
   await audit('new_inventory_added', 'Student', student._id, req.user, { section, name, state, itemId: item._id }, `${student.name}: ${name} added to New Inventory`);
+  if (toCheck && req.user.role !== 'Dispatch') {
+    await notifyRole('Dispatch', { message: `Marksheet added to the New Inventory - check it for corrections: "${name}" - ${student.name}`, type: 'doc_forwarded', studentId: student._id, role: 'Dispatch' });
+  }
   res.status(201).json({ student, items: await itemsOf(student._id) });
 });
 
@@ -152,8 +161,41 @@ exports.setCentreState = asyncHandler(async (req, res) => {
   res.json({ student, items: await itemsOf(student._id), delivered });
 });
 
+// GET /api/new-inventory/check-pending — marksheets added straight to the New Inventory, waiting for Dispatch's
+// correction check (shown in Dispatch's Correction Check tab)
+exports.checkPending = asyncHandler(async (req, res) => {
+  const items = await InventoryDocument.find({ correctionCheckPending: true })
+    .populate('student', 'name enrollmentNumber courseName').populate('center', 'name').populate('addedBy', 'name role')
+    .sort('createdAt').lean();
+  res.json({ items });
+});
+
+// POST /api/new-inventory/correction-checked { ids } — Dispatch checked them: they stay in the inventory, marked
+// correction checked, until a centre requests them
+exports.correctionChecked = asyncHandler(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(String))].filter(isId);
+  if (!ids.length) throw fail(400, 'Select the marksheets checked');
+  if (ids.length > 200) throw fail(400, 'At most 200 at a time');
+  const checked = [];
+  const failed = [];
+  for (const id of ids) {
+    const item = await InventoryDocument.findById(id).populate('student', 'name').lean();
+    if (!item) { failed.push({ id, error: 'Not found' }); continue; }
+    if (!item.correctionCheckPending) { failed.push({ id, name: item.name, error: 'Already checked' }); continue; }
+    const now = new Date();
+    await InventoryDocument.updateOne({ _id: id }, {
+      $set: { correctionCheckedAt: now, correctionCheckedBy: req.user._id },
+      $unset: { correctionCheckPending: 1 },
+      $push: { log: { action: 'Correction checked by Dispatch', at: now, by: req.user._id } },
+    });
+    await audit('new_inventory_correction_checked', 'Student', item.student?._id, req.user, { itemId: id, name: item.name }, `${item.student?.name || ''}: ${item.name} correction checked`);
+    checked.push(id);
+  }
+  res.json({ checked, failed });
+});
+
 // ── Used by the accountant's approval (document.controller) ──
-// A held Other document of the same name as the request, for the same student — still in the office
-// (one sent to or received by the centre, or back at the university for correction, is not here to give)
-exports.findOtherDocumentInStock = (studentId, docName) =>
-  InventoryDocument.findOne({ student: studentId, section: 'Other', nameKey: InventoryDocument.nameKeyOf(docName), sentToCentreAt: null, centreReceivedAt: null, correctionSentAt: null });
+// A held document of the same name and tab (Marksheet / Other) as the request, for the same student — still in
+// the office (one sent to or received by the centre, or back at the university for correction, is not here to give)
+exports.findDocumentInStock = (studentId, section, docName) =>
+  InventoryDocument.findOne({ student: studentId, section, nameKey: InventoryDocument.nameKeyOf(docName), sentToCentreAt: null, centreReceivedAt: null, correctionSentAt: null });
