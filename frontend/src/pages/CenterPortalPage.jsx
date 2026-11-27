@@ -1372,8 +1372,11 @@ const requestNameOf = f => (f.pick === OTHER_NAME ? f.customName.trim() : f.pick
 function DocsSection({ studentId, isEnrolled, isCancelled }) {
   const { user, switchedCenter } = useAuth();
   const isCounselorSwitch = !!(CENTRE_SWITCH_ROLES.includes(user?.role) && switchedCenter?._id);
+  // the Admission Marker requests other documents only (with their payment); the rest is the centre's / counselor's
+  const admissionOnly = user?.role === 'AdmissionMarker';
+  const shownTabs = REQUEST_TABS.filter(t => !admissionOnly || t.key === 'Other');
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
-  const [tab,setTab]=useState('Marksheet');
+  const [tab,setTab]=useState(admissionOnly ? 'Other' : 'Marksheet');
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
   const [editPay,setEditPay]=useState(null);
   const [editDoc,setEditDoc]=useState(null);
@@ -1411,14 +1414,15 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
     setAddOpen(true);
   }
 
-  // Other documents are requested only together with their payment (marksheets can be paid later)
+  // Other documents are requested only together with their full payment — the whole charge (marksheets can be paid later)
   const paymentRequired = tab === 'Other';
   const hasPayAccounts = Object.values(accMap).some(a => a.isActive !== false);
   function paymentProblem(){
-    const charge = Number(df.chargeFee) || 0, amount = Number(df.payAmount) || 0;
+    const charge = Number(df.chargeFee) || 0, amount = Number(paymentRequired ? df.chargeFee : df.payAmount) || 0;
     if(!(charge > 0)) return 'Enter the document charge';
     if(!(amount > 0)) return 'Enter the amount paid';
     if(amount > charge) return 'Amount paid is more than the charge';
+    if(amount < charge) return `Pay the full charge of ${fmt(charge)}`;
     if(!dfPay.mode) return 'Select payment mode';
     if(dfPay.mode==='UPI' && !dfPay.upiId.trim()) return 'UPI ID is required';
     if(dfPay.mode==='Bank Transfer' && !dfPay.bankName.trim()) return 'Bank name is required';
@@ -1434,6 +1438,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
     if(!name) return toast.error(df.pick === OTHER_NAME ? `Type the ${activeTab.noun} name` : `Choose a ${activeTab.noun}`);
     if(Number(df.chargeFee) < 0) return toast.error('Charge cannot be negative');
     if(paymentRequired){ const problem = paymentProblem(); if(problem) return toast.error(problem); }
+    const payAmount = paymentRequired ? df.chargeFee : df.payAmount;   // other documents: the whole charge
     setSaving(true);
     try{
       const fd=new FormData();
@@ -1442,8 +1447,8 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       fd.append('chargeFee',Number(df.chargeFee)||0);
       fd.append('requestType',df.requestType||'Soft Copy');
       if(isCounselorSwitch) fd.append('actingAsCenter','true');
-      if(df.payAmount&&Number(df.payAmount)>0){
-        fd.append('paymentAmount',df.payAmount);
+      if(payAmount&&Number(payAmount)>0){
+        fd.append('paymentAmount',payAmount);
         fd.append('paymentMode',dfPay.mode||'UPI');
         fd.append('paymentUpiId',dfPay.upiId||'');
         fd.append('paymentUtrRef',dfPay.utrRef||'');
@@ -1526,7 +1531,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   }
 
   function canEditDocRequest(doc) {
-    return !isCancelled && ['Requested', 'Changes_Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'].includes(doc.status) && !doc.scannedUrl;
+    return !isCancelled && !admissionOnly && ['Requested', 'Changes_Requested', 'Forwarded', 'Fee_Pending', 'Fee_Approved', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'].includes(doc.status) && !doc.scannedUrl;
   }
 
   function openEditDoc(doc) {
@@ -1563,8 +1568,8 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
 
   async function requestDispatch(docId){
     try{
-      await docsApi.requestDispatch(docId, { actingAsCenter: isCounselorSwitch });
-      toast.success('Dispatch requested! Counselor has been notified.');
+      const res = await docsApi.requestDispatch(docId, { actingAsCenter: isCounselorSwitch });
+      toast.success(res?.status === 'Payment_Verified' ? 'Dispatch requested — it is with Dispatch to courier to you.' : 'Dispatch requested! Counselor has been notified.');
       load();
     } catch(e){toast.error(e.message);}
   }
@@ -1587,7 +1592,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div role="tablist" aria-label="Document requests" className="inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1">
-          {REQUEST_TABS.map(t => {
+          {shownTabs.map(t => {
             const { icon: Icon } = t;
             const active = tab === t.key;
             return (
@@ -1734,7 +1739,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       <PaymentDetail tx={p} accMap={accMap} />
     </div>
 
-    {p.verificationStatus !== 'verified' && (
+    {p.verificationStatus !== 'verified' && !admissionOnly && (
       <button
         onClick={() =>
           setEditPay({
@@ -1763,17 +1768,17 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                   <Pencil className="h-3.5 w-3.5 mr-1"/>Edit
                 </Button>
               )}
-              {d.chargeFee > 0 && d.totalPaid < d.chargeFee && (
+              {!admissionOnly && d.chargeFee > 0 && d.totalPaid < d.chargeFee && (
                 <Button size="sm" onClick={()=>{setPayDoc(d);setPf({...EMPTY_PF});}} className="bg-amber-500 hover:bg-amber-600 text-white text-xs h-8">
                   <CreditCard className="h-3.5 w-3.5 mr-1"/>Pay {fmt(d.chargeFee - d.totalPaid)}
                 </Button>
               )}
-              {d.status === 'Center_Notified' && (d.chargeFee <= 0 || d.totalPaid >= d.chargeFee) && (
-                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8" onClick={()=>requestDispatch(d._id)}>
+              {!admissionOnly && d.status === 'Center_Notified' && (d.chargeFee <= 0 || d.totalPaid >= d.chargeFee) && (
+                <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-xs h-8" title="Get the document couriered — it goes to Dispatch" onClick={()=>requestDispatch(d._id)}>
                   <Send className="h-3.5 w-3.5 mr-1"/>Request Dispatch
                 </Button>
               )}
-              {d.status === 'Dispatched' && (
+              {!admissionOnly && d.status === 'Dispatched' && (
   <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-xs h-8" onClick={()=>handleConfirmDelivery(d._id)}>
     <CheckCircle2 className="h-3.5 w-3.5 mr-1"/>Confirm Receipt
   </Button>
@@ -1818,13 +1823,13 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                   <CreditCard className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600"/>
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Payment *</p>
-                    <p className="text-xs text-slate-500">Other documents are requested together with their payment. Fill the payment details and attach the screenshot.</p>
+                    <p className="text-xs text-slate-500">Other documents are requested together with their full payment. Fill the payment details and attach the screenshot.</p>
                   </div>
                 </div>
                 <div>
-                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Amount Paid (₹) *</Label>
-                  <Input type="number" min="0" value={df.payAmount} onChange={e=>setDf(p=>({...p,payAmount:e.target.value}))} placeholder="0" className="mt-1 h-10 border-slate-200 bg-white"/>
-                  {Number(df.chargeFee) > 0 && Number(df.payAmount) > Number(df.chargeFee) && <p className="mt-1 text-xs text-red-600">More than the charge of {fmt(df.chargeFee)}</p>}
+                  <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Amount Paid (₹) — full charge</Label>
+                  <Input type="number" value={df.chargeFee} readOnly tabIndex={-1} placeholder="Enter the charge above" className="mt-1 h-10 border-slate-200 bg-slate-50 text-slate-700"/>
+                  <p className="mt-1 text-xs text-slate-500">Other documents are requested only when the whole charge is paid.</p>
                 </div>
                 <PaymentFields form={dfPay} setForm={setDfPay} showAmount={false} showDate={true}/>
               </div>
@@ -2374,9 +2379,8 @@ function StudentDetail({ student, onBack, onRefresh, onStudentUpdated }) {
               </div>
             </div>
           )}
-          {admissionOnly
-            ? <p className="text-xs text-slate-400 italic">Document requests are handled by the centre and counselor.</p>
-            : <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'} isCancelled={isCancelled}/>}
+          {/* the Admission Marker sees and requests other documents only */}
+          <DocsSection studentId={s._id} isEnrolled={s.applicationStatus==='Enrolled'} isCancelled={isCancelled}/>
         </TabsContent>
         <TabsContent value="payments" className="mt-4"><PaymentsSection studentId={s._id}/></TabsContent>
       </Tabs>

@@ -173,7 +173,7 @@ router.post ('/new-inventory/correction-checked', protect, requireRole('Admin','
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);
-router.post  ('/documents',                       protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), upload.fields([{ name: 'file', maxCount: 1 }, { name: 'paymentScreenshot', maxCount: 1 }]), docC.create);
+router.post  ('/documents',                       protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator','AdmissionMarker'), upload.fields([{ name: 'file', maxCount: 1 }, { name: 'paymentScreenshot', maxCount: 1 }]), docC.create);
 router.patch ('/documents/:id',                   protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator'), upload.single('file'), docC.update);
 router.delete('/documents/:id',                   protect, requireRole('Admin','Counselor'), docC.remove);
 

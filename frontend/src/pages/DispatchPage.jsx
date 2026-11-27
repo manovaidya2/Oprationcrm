@@ -70,7 +70,7 @@ const STAGE_NOTE = {
   requests:   "Waiting for the university's courier. When it arrives, mark it received: it goes into the student's New Inventory and on to the correction check.",
   check:      'Check each copy from the university. Correct: a soft copy goes to Upload Scan, a hard copy goes to Dispatch (Ready to dispatch). Wrong: send it back to the university.',
   scan:       'Scan and upload. The scan goes straight to the counselor and is kept with the document in the New Inventory.',
-  progress:   'Scanned — now with the counselor, the centre (payment) or the accountant (payment check). Once the payment is verified it goes to Dispatch.',
+  progress:   'Scanned — with the counselor, then the centre. It goes to Dispatch when the centre requests the courier.',
   ready:      'Payment verified — courier it to the centre.',
   dispatched: "Couriered to the centre. If the centre has it but hasn't confirmed, mark it received by the centre.",
   closed:     'Requests closed here. Nothing was erased — reopen one to put it back where it was.',
@@ -93,6 +93,7 @@ const lastAt = (d, status) => [...(d.statusHistory || [])].reverse().find(h => h
 const stageSince = d => lastAt(d, d.status) || d.updatedAt || d.createdAt;
 const inInventory = d => !!(d.receivedIntoInventory || d.inventoryItem);
 const isHard = d => d.requestType === 'Hard Copy';
+const isPaid = d => Number(d.chargeFee || 0) <= 0 || (d.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0) >= Number(d.chargeFee);
 // waiting for its correction check (answered from the New Inventory: only if that document itself is not checked yet)
 const needsCheck = d => d.status === 'Dispatch_Received' && !d.correctionCheckedAt && (!d.inventoryItem || d.inventoryCheckPending);
 
@@ -105,7 +106,7 @@ function whereText(d) {
     case 'Scanned':
     case 'Counselor_Received':    return 'With the counselor';
     case 'Accountant_Received':   return 'With the accountant (older scan)';
-    case 'Center_Notified':       return "Waiting for the centre's payment";
+    case 'Center_Notified':       return isPaid(d) ? 'With the centre — courier when it asks' : "Waiting for the centre's payment";
     case 'Payment_Submitted':     return 'Payment being verified';
     case 'Payment_Verified':      return 'Ready to dispatch';
     case 'Dispatched':            return 'Couriered — the centre to confirm';
@@ -793,7 +794,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
               <div className="border-t pt-3"><CloseForm key={`c-${d._id}`} count={1} busy={busy} onSubmit={reason => closeDocs([d], reason)}/></div>
             </>
           )}
-          {stage === 'progress' && <p className="text-sm text-slate-600">{whereText(d)} — nothing to do here yet. Once the payment is verified it goes to Dispatch to courier.</p>}
+          {stage === 'progress' && <p className="text-sm text-slate-600">{whereText(d)} — nothing to do here. It goes to Dispatch when the centre requests the courier.</p>}
           {stage === 'ready' && <DispatchForm key={`d-${d._id}`} docs={[d]} busy={busy} onSubmit={f => dispatchDocs([d], f)}/>}
           {stage === 'dispatched' && (d.status === 'Dispatched'
             ? <Button className="h-11 bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => centreReceived([d])}><CheckCircle2 className="mr-2 h-4 w-4"/>Received by centre</Button>

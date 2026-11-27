@@ -1,6 +1,6 @@
 import { MEDIA } from '../lib/api';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowLeft, Loader2, Lock, Edit2, IndianRupee, FileText, CreditCard, Search,
   History, PlusCircle, Plus, Trash2, Download, Send, CheckCircle2, XCircle,
@@ -15,11 +15,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi, counselorsApi, universitiesApi } from '@/lib/api';
+import { studentsApi, paymentsApi, docsApi, authApi, paymentAccountsApi, centersApi, counselorsApi, universitiesApi, newInventoryApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import StudentDocsPanel from '@/components/StudentDocsPanel';
 import { activeUniversities } from '@/lib/universities';
-import { DOCUMENT_OPTIONS, requestOptions, requestSection } from '@/lib/documentOptions';
+import { DOCUMENT_OPTIONS, requestSection } from '@/lib/documentOptions';
 
 const fmt   = n => `₹${(Number(n)||0).toLocaleString('en-IN')}`;
 const fmtDt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -278,6 +278,14 @@ function AdminTxEditDialog({ tx, studentId, payAccounts, onDone, onClose }) {
   );
 }
 
+// who can see the New Inventory (as the API allows)
+const INVENTORY_VIEW_ROLES = ['Admin', 'Accountant', 'Counselor', 'ViewerCounselor', 'Dispatch', 'Inventory', 'PaymentCoordinator'];
+// where a New Inventory document is now
+const invPlace = i => i.correctionSentAt ? { label: 'At university (correction)', tone: 'bg-orange-50 text-orange-700' }
+  : i.centreReceivedAt ? { label: 'With the centre', tone: 'bg-emerald-50 text-emerald-700' }
+  : i.sentToCentreAt ? { label: 'Sent to the centre', tone: 'bg-sky-50 text-sky-700' }
+  : { label: 'In the office', tone: 'bg-indigo-50 text-indigo-700' };
+
 export default function StudentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -318,17 +326,22 @@ export default function StudentDetailPage() {
   const [feeOpen, setFeeOpen] = useState(false);
   const [ff, setFf] = useState({ totalFee:'', discount:'', notes:'' });
 
-  const [docOpen, setDocOpen] = useState(false);
-  const [docSection, setDocSection] = useState('Other');   // the tab a request is raised from
-  const [docForm, setDocForm] = useState({ name:'', names:[], chargeFee:'', note:'' });
-  const [docFile, setDocFile] = useState(null);
   const [editDoc, setEditDoc] = useState(null);
   const [editDocForm, setEditDocForm] = useState({ name:'', chargeFee:'', note:'', status:'Requested', verifyPayments:false });
   const [editDocFile, setEditDocFile] = useState(null);
-  const fileRef = useRef();
   const editDocFileRef = useRef();
 
   const [fwdDoc, setFwdDoc] = useState(null);
+
+  // the student's documents held in the New Inventory (staff only — the centre sees a document through its request)
+  const [invItems, setInvItems] = useState(null);
+  const canSeeInventory = INVENTORY_VIEW_ROLES.includes(user?.role);
+  useEffect(() => {
+    if (!canSeeInventory) return undefined;
+    let off = false;
+    newInventoryApi.student(id).then(r => { if (!off) setInvItems(r?.items || []); }).catch(() => { if (!off) setInvItems(null); });
+    return () => { off = true; };
+  }, [id, canSeeInventory, docs]);
 
   useEffect(() => {
     Promise.all([studentsApi.addedDocs.list(id, 'Other'), studentsApi.addedDocs.list(id, 'Marksheet')])
@@ -393,26 +406,6 @@ export default function StudentDetailPage() {
     if (!confirm('Delete this transaction? This cannot be undone.')) return;
     try { await paymentsApi.deleteTransaction(id, txId); toast.success('Deleted'); load(); }
     catch(e) { toast.error(e.message); }
-  }
-
-  async function addDoc() {
-    const names = docForm.names?.length ? docForm.names : (docForm.name?.trim() ? [docForm.name.trim()] : []);
-    if (!names.length) return toast.error('Select at least one document');
-    setSaving(true);
-    try {
-      for (const name of names) {
-        const fd = new FormData();
-        fd.append('studentId', id); fd.append('name', name); fd.append('section', docSection);
-        fd.append('note', docForm.note);
-        fd.append('chargeFee', docForm.chargeFee||0);
-        if (docFile) fd.append('file', docFile);
-        await docsApi.create(fd);
-      }
-      toast.success(names.length > 1 ? `${names.length} documents added` : 'Document added'); setDocOpen(false);
-      setDocForm({name:'',names:[],chargeFee:'',note:''}); setDocFile(null);
-      if (fileRef.current) fileRef.current.value='';
-      load();
-    } catch(e) { toast.error(e.message); } finally { setSaving(false); }
   }
 
   async function forwardDoc(docId) {
@@ -822,15 +815,11 @@ export default function StudentDetailPage() {
           return (
             <TabsContent key={tabValue} value={tabValue} className="mt-4 space-y-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">{list.length} {isMs ? 'marksheet' : 'document'}{list.length!==1?'s':''}</p>
-                {canManageDocs && (isAdmin || student.applicationStatus==='Enrolled') && (
-                  <Button size="sm" onClick={()=>{ setDocSection(section); setDocForm({name:'',names:[],chargeFee:'',note:''}); setDocOpen(true); }}>
-                    <Plus className="h-4 w-4 mr-1"/>{isMs ? 'Request Marksheet' : 'Request Document'}
-                  </Button>
-                )}
+                <p className="text-sm text-muted-foreground">{list.length} {isMs ? 'marksheet' : 'document'} request{list.length!==1?'s':''}</p>
+                {!isCenter && <p className="text-xs text-muted-foreground">Requests are raised from the centre panel</p>}
               </div>
               {list.length===0?(
-                <div className="text-center py-10 border border-dashed rounded-lg"><FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">{isMs ? 'No marksheets' : 'No documents'}</p></div>
+                <div className="text-center py-10 border border-dashed rounded-lg"><FileText className="h-8 w-8 mx-auto text-muted-foreground mb-2"/><p className="text-sm text-muted-foreground">{isMs ? 'No marksheet requests' : 'No document requests'}</p></div>
               ):list.map(d=>(
             <Card key={d._id}>
               <CardContent className="p-4">
@@ -897,6 +886,48 @@ export default function StudentDetailPage() {
               </CardContent>
             </Card>
               ))}
+              {canSeeInventory && invItems && (() => {
+                const inv = invItems.filter(i => i.section === section);
+                return (
+                  <div className="space-y-2 border-t pt-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">In the New Inventory ({inv.length})</p>
+                      <Link to={`/new-inventory/${student._id}`} className="text-xs font-semibold text-indigo-600 hover:underline">Open New Inventory</Link>
+                    </div>
+                    {inv.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Nothing held for this student yet — {isMs ? 'marksheets' : 'documents'} show here once received from the university.</p>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        {inv.map(i => {
+                          const place = invPlace(i);
+                          return (
+                            <div key={i._id} className="rounded-lg border bg-white p-3 text-sm">
+                              <div className="flex items-start justify-between gap-2">
+                                <span className="font-medium">{i.name}</span>
+                                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${place.tone}`}>{place.label}</span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                {(i.receivedAt || i.createdAt) && <span>{i.receivedAt ? 'Received' : 'Added'} {fmtDt(i.receivedAt || i.createdAt)}</span>}
+                                {i.correctionCheckPending ? <span className="text-orange-700">To check for corrections</span>
+                                  : i.correctionCheckedAt ? <span className="text-emerald-700">Correction checked</span> : null}
+                              </div>
+                              {i.files?.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap gap-2">
+                                  {i.files.map(f => (
+                                    <a key={f._id || f.url} href={`${MEDIA}${f.url}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-teal-600 underline">
+                                      <Download className="h-3 w-3"/>{f.name || 'Scan'}
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {added.length > 0 && (
                 <div className="space-y-2 border-t pt-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{isCenter ? 'Shared with the centre' : 'Added manually earlier'} ({added.length})</p>
@@ -1277,48 +1308,6 @@ export default function StudentDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={()=>setTxOpen(false)}>Cancel</Button>
             <Button onClick={addTx} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Record</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Doc Dialog */}
-      <Dialog open={docOpen} onOpenChange={setDocOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{docSection === 'Marksheet' ? 'Request Marksheet' : 'Request Other Document'}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Document Names *</Label>
-              <div className="mt-1 max-h-72 overflow-y-auto rounded-md border p-2">
-                {requestOptions(docSection).map(name => {
-                  const checked = docForm.names.includes(name);
-                  return (
-                    <label key={name} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => setDocForm(p => ({
-                          ...p,
-                          name: '',
-                          names: checked ? p.names.filter(x => x !== name) : [...p.names, name],
-                        }))}
-                        className="h-4 w-4 accent-indigo-600"
-                      />
-                      <span>{name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">{docForm.names.length} selected</div>
-            </div>
-            <div className="grid grid-cols-1 gap-3">
-              <div><Label>Charge (₹)</Label><Input type="number" value={docForm.chargeFee} onChange={e=>setDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
-            </div>
-            <div><Label>Note</Label><Input value={docForm.note} onChange={e=>setDocForm(p=>({...p,note:e.target.value}))}/></div>
-            <div><Label>Upload File</Label><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" onChange={e=>setDocFile(e.target.files[0])} className="block w-full text-sm mt-1 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-muted"/></div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={()=>setDocOpen(false)}>Cancel</Button>
-            <Button onClick={addDoc} disabled={saving}>{saving&&<Loader2 className="h-4 w-4 mr-1 animate-spin"/>}Request</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

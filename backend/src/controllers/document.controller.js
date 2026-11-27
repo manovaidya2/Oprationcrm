@@ -64,7 +64,7 @@ function wantsCenterFlow(req) {
 
 async function canUseCenterFlow(req, centerId) {
   if (req.user.role === 'Center') return String(centerId) === String(req.user.centerId);
-  if (req.user.role === 'PaymentCoordinator' && wantsCenterFlow(req)) return true;
+  if (['PaymentCoordinator', 'AdmissionMarker'].includes(req.user.role) && wantsCenterFlow(req)) return true;
   if (!['Counselor', 'ViewerCounselor'].includes(req.user.role) || !wantsCenterFlow(req)) return false;
   const counselor = await Counselor.findById(req.user.counselorId).select('centers').lean();
   return (counselor?.centers || []).some(id => String(id) === String(centerId));
@@ -300,7 +300,7 @@ exports.get = asyncHandler(async (req, res) => {
   res.json(await loadDoc(req.params.id));
 });
 
-// A centre's "Other Documents" request must carry its full payment: amount, mode, UTR, UPI / bank details,
+// A centre's "Other Documents" request must carry its full payment (the whole charge): amount, mode, UTR, UPI / bank details,
 // the account it was paid into (when accounts are set up) and the screenshot. Returns the account label.
 async function assertOtherDocPayment(body, screenshot) {
   const bad = msg => { const e = new Error(msg); e.status = 400; throw e; };
@@ -310,6 +310,7 @@ async function assertOtherDocPayment(body, screenshot) {
   if (!(charge > 0)) bad('Enter the document charge');
   if (!(amount > 0)) bad('Other documents can be requested only with their payment — enter the amount paid');
   if (amount > charge + 0.01) bad('Amount paid is more than the document charge');
+  if (amount < charge - 0.01) bad(`Pay the full charge of ₹${charge} — other documents are requested only when fully paid`);
   if (!['UPI', 'Bank Transfer'].includes(body.paymentMode)) bad('Choose the payment mode');
   if (!utr) bad('UTR / reference number is required');
   if (body.paymentMode === 'UPI' && !String(body.paymentUpiId || '').trim()) bad('UPI ID is required');
@@ -360,6 +361,13 @@ async function createDocRequest(req, res, docFile, screenshot) {
 
   if ((req.user.role === 'Center' || wantsCenterFlow(req)) && !centerOriginated) {
     const e = new Error('Forbidden'); e.status = 403; throw e;
+  }
+  if (req.user.role === 'AdmissionMarker' && sectionOf(section, name) !== 'Other') {
+    const e = new Error('Admission Marker can request other documents only'); e.status = 403; throw e;
+  }
+  // other documents are requested from the centre panel only (with their payment) — not from the student page
+  if (sectionOf(section, name) === 'Other' && !centerOriginated && req.user.role !== 'Admin') {
+    const e = new Error('Other documents are requested from the centre panel, together with their full payment'); e.status = 403; throw e;
   }
   if (centerOriginated && student.applicationStatus === 'Cancelled') {
     const e = new Error('This application has been cancelled. No document requests are allowed.'); e.status = 403; throw e;
@@ -545,6 +553,12 @@ exports.forward = asyncHandler(async (req, res) => {
   if (doc.status !== 'Requested') {
     const e = new Error('Document must be in Requested status to forward'); e.status = 400; throw e;
   }
+  // an other document goes ahead only with its whole charge paid
+  const paidSoFar = (doc.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  if (sectionOf(doc.section, doc.name) === 'Other' && Number(doc.chargeFee) > 0 && paidSoFar < Number(doc.chargeFee) - 0.01) {
+    const e = new Error(`Not fully paid (₹${paidSoFar} of ₹${doc.chargeFee}). Other documents go ahead only when the full charge is paid — send it back to the centre to pay the rest.`);
+    e.status = 400; throw e;
+  }
   pushHistory(doc, 'Forwarded', req.user, 'Forwarded to accountant for fee check');
   await doc.save();
   const hasPrepayment = doc.payments.length > 0;
@@ -569,9 +583,10 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     const paidTotal = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
     doc.totalPaid = paidTotal;
     const fullyPaid = doc.chargeFee <= 0 || paidTotal >= doc.chargeFee;
-    // A marksheet / other document already held in the New Inventory for this student is not asked of the
-    // university: a soft copy goes straight to the Inventory team to scan (a hard copy goes to Dispatch / the centre's
-    // payment as before). One still waiting for its correction check goes to Inventory's Correction Check first.
+    // Soft and hard copy go the same way up to the correction check. Held in the New Inventory for this student:
+    // not asked of the university — one still waiting for its correction check goes to Inventory's Correction Check,
+    // a checked one straight on (soft copy: Upload Scan; hard copy: Ready to dispatch). Not held: asked of the
+    // university, and it comes to Inventory's request tabs.
     inStock = await findDocumentInStock(docStudentId(doc), sectionOf(doc.section, doc.name), doc.name);
     if (inStock) {
       doc.inventoryItem = inStock._id;
@@ -582,18 +597,18 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     if (inStock && doc.inventoryCheckPending) {
       doc.status = 'Dispatch_Received';
       doc.statusHistory.push({ status: 'Dispatch_Received', changedBy: req.user._id, at: new Date(), note: 'Document is in the New Inventory - Inventory to check it for corrections' });
-    } else if (isHardCopyRequest(doc) && fullyPaid) {
+    } else if (inStock && isHardCopyRequest(doc) && fullyPaid) {
       doc.status = 'Payment_Verified';
-      doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: verifiedPayments > 0 ? 'Hard copy payment verified - ready for dispatch' : 'Hard copy has no pending fee - ready for dispatch' });
-    } else if (isHardCopyRequest(doc)) {
+      doc.statusHistory.push({ status: 'Payment_Verified', changedBy: req.user._id, at: new Date(), note: `Hard copy in the New Inventory (correction checked)${verifiedPayments > 0 ? ', payment verified' : ''} - ready for dispatch` });
+    } else if (inStock && isHardCopyRequest(doc)) {   // older requests not paid in full: the centre pays first
       doc.status = 'Center_Notified';
-      doc.statusHistory.push({ status: 'Center_Notified', changedBy: req.user._id, at: new Date(), note: 'Hard copy fee approved - payment required before dispatch' });
+      doc.statusHistory.push({ status: 'Center_Notified', changedBy: req.user._id, at: new Date(), note: 'Hard copy in the New Inventory - payment required before dispatch' });
     } else if (inStock) {
       doc.status = 'Dispatch_Received';
       doc.statusHistory.push({ status: 'Dispatch_Received', changedBy: req.user._id, at: new Date(), note: 'Document is in the New Inventory - Inventory to scan and upload' });
     } else {
       doc.status = 'Sent_To_University';
-      doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: 'Requested from dispatch inventory - external courier expected' });
+      doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: `Requested from the university (${isHardCopyRequest(doc) ? 'hard' : 'soft'} copy) - Inventory to receive it` });
     }
     // Ready to dispatch: Dispatch hears. Coming from the university, or in the New Inventory to check / scan: the
     // Inventory team hears (it confirms receipt). Waiting for the centre's payment: nobody yet.
@@ -607,7 +622,7 @@ exports.accountantAction = asyncHandler(async (req, res) => {
         : `Courier expected from University for "${doc.name}" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
       type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Inventory',
     });
-    if (isHardCopyRequest(doc) && !fullyPaid && !doc.inventoryCheckPending) {   // (after the check, the check asks the centre)
+    if (doc.status === 'Center_Notified') {   // (after a correction check, the check asks the centre)
       const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
       if (centerUser) await notify(centerUser._id, {
         message: `Payment required for hard copy document "${doc.name}" - ${doc.student?.name}`,
@@ -1056,58 +1071,25 @@ exports.counselorForwardToCenter = asyncHandler(async (req, res) => {
   // Recalculate totalPaid from payments array
   const totalPaid = doc.payments.reduce((sum, p) => sum + (p.amount || 0), 0);
   doc.totalPaid = totalPaid;
+  const fullyPaid = doc.chargeFee <= 0 || totalPaid >= doc.chargeFee;
 
-  // If already fully paid — skip Center_Notified
-  if (doc.chargeFee > 0 && totalPaid >= doc.chargeFee) {
-    const allVerified = doc.payments.length > 0 && doc.payments.every(p => p.verified);
-    if (allVerified) {
-      // Upfront payment was already verified by the accountant before the doc went to
-      // the university. Scan is back, nothing left to pay — straight to dispatch.
-      pushHistory(doc, 'Payment_Verified', req.user, 'Scan received — payment already verified, ready for dispatch');
-      await doc.save();
-      await notifyRole('Dispatch', { message: `Payment verified - send courier to center for: "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
-      const centerUserPaid = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
-      if (centerUserPaid) {
-        await notify(centerUserPaid._id, {
-          message: `Your document "${doc.name}" is verified — dispatch will courier it to you soon`,
-          type: 'doc_scanned', documentId: doc._id, role: 'Center',
-        });
-      }
-      await audit('counselor_forwarded_to_center_prepaid', 'StudentDocument', doc._id, req.user, {}, `Forwarded to dispatch (pre-paid & verified)`);
-      return res.json(doc);
-    }
-    pushHistory(doc, 'Payment_Submitted', req.user, 'Forwarded to center — payment already complete, auto-forwarded to accountant');
-    await doc.save();
-    // Notify accountant directly
-    await notifyRole('Accountant', {
-      message: `Doc payment ready for verification (pre-paid): "${doc.name}" - ${doc.student?.name}`,
-      type: 'doc_payment_received', documentId: doc._id, role: 'Accountant',
-    });
-    // Also notify center that doc is in progress
-    const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
-    if (centerUser) {
-      await notify(centerUser._id, {
-        message: `Your document "${doc.name}" payment is verified — dispatch will send courier soon`,
-        type: 'doc_scanned', documentId: doc._id, role: 'Center',
-      });
-    }
-    await audit('counselor_forwarded_to_center_prepaid', 'StudentDocument', doc._id, req.user, {}, `Forwarded to accountant (pre-paid)`);
-    return res.json(doc);
-  }
-
-  // Normal flow — payment pending
-  pushHistory(doc, 'Center_Notified', req.user, 'Counselor forwarded to center - payment required');
+  // The scanned copy goes to the centre. It reaches Dispatch (Ready to dispatch) only when the centre asks for the
+  // document to be couriered (Request Dispatch). Older requests not paid in full: the centre pays first.
+  pushHistory(doc, 'Center_Notified', req.user, fullyPaid
+    ? 'Counselor sent the scanned copy to the centre - courier on the centre\'s request'
+    : 'Counselor forwarded to center - payment required');
   await doc.save();
 
-  // Notify center
   const centerUser = await User.findOne({ centerId: doc.center, role: 'Center', isActive: true });
   if (centerUser) {
     await notify(centerUser._id, {
-      message: `Document ready: "${doc.name}" — please complete payment`,
+      message: fullyPaid
+        ? `Scanned copy ready: "${doc.name}" - ${doc.student?.name}. Download it from the request; use Request Dispatch if you need the document couriered.`
+        : `Document ready: "${doc.name}" — please complete payment`,
       type: 'doc_scanned', documentId: doc._id, role: 'Center',
     });
   }
-  await audit('counselor_forwarded_to_center', 'StudentDocument', doc._id, req.user, {}, `Forwarded to center`);
+  await audit('counselor_forwarded_to_center', 'StudentDocument', doc._id, req.user, { fullyPaid }, `Forwarded to center`);
   res.json(doc);
 });
 
@@ -1215,7 +1197,21 @@ exports.requestDispatch = asyncHandler(async (req, res) => {
   const fullyPaid = doc.chargeFee <= 0 || doc.totalPaid >= doc.chargeFee;
   if (!fullyPaid) { const e = new Error('Payment not complete yet'); e.status = 400; throw e; }
 
-  // Same as addPayment flow — move to Payment_Submitted so counselor can forward
+  // Paid in full and already verified (other documents are paid when requested): straight to Ready to dispatch
+  const verified = doc.payments.length ? doc.payments.every(p => p.verified) : doc.chargeFee <= 0;
+  if (verified) {
+    pushHistory(doc, 'Payment_Verified', req.user, 'Centre requested dispatch - payment already verified, ready for dispatch');
+    await doc.save();
+    await notifyRole('Dispatch', { message: `Ready to dispatch to the centre (centre requested): "${doc.name}" - ${doc.student?.name}`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
+    await notifyCounselors({ counselorId: doc.counselor, centerId: doc.center }, {
+      message: `Centre requested dispatch for "${doc.name}" — ${doc.student?.name}. It is with Dispatch to courier.`,
+      type: 'doc_forwarded', documentId: doc._id,
+    });
+    await audit('request_dispatch', 'StudentDocument', doc._id, req.user, { direct: true }, `Center requested dispatch for ${doc.name} (to Dispatch)`);
+    return res.json(await loadDoc(doc._id));
+  }
+
+  // Not verified yet — move to Payment_Submitted so counselor can forward
   pushHistory(doc, 'Payment_Submitted', req.user, 'Center requested dispatch — payment already complete');
   await doc.save();
 
