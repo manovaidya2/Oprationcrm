@@ -746,7 +746,7 @@ exports.accountantHistory = asyncHandler(async (req, res) => {
         .select('name center courseName university universityName enrollmentNumber statusHistory applicationStatus updatedAt rejectionReason changesRequested')
         .populate('center', 'name')
         .lean(),
-      StudentDoc.find({ origin: { $ne: 'Inventory' } })
+      StudentDoc.find({ origin: { $nin: ['Inventory', 'Counselor'] } })
         .select('name student center type chargeFee totalPaid status statusHistory payments updatedAt')
         .populate('student', 'name')
         .populate('center', 'name')

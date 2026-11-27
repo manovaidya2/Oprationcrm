@@ -400,6 +400,7 @@ const DOC_STATUS = {
   Forwarded:{label:'Forwarded',color:'bg-indigo-50 text-indigo-700 border border-indigo-200'},
   Fee_Approved:{label:'Fee Approved',color:'bg-green-50 text-green-700 border border-green-200'},
   Fee_Rejected:{label:'Fee Rejected',color:'bg-red-50 text-red-600 border border-red-200'},
+  With_Inventory:{label:'With Inventory',color:'bg-sky-50 text-sky-700 border border-sky-200'},
   Sent_To_University:{label:'At University',color:'bg-purple-50 text-purple-700 border border-purple-200'},
   University_Dispatched:{label:'Uni Dispatched',color:'bg-violet-50 text-violet-700 border border-violet-200'},
   Dispatch_Received:{label:'Received in Inventory',color:'bg-teal-50 text-teal-700 border border-teal-200'},
@@ -1375,6 +1376,8 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
   // the Admission Marker requests other documents only (with their payment); the rest is the centre's / counselor's
   const admissionOnly = user?.role === 'AdmissionMarker';
   const shownTabs = REQUEST_TABS.filter(t => !admissionOnly || t.key === 'Other');
+  // a marksheet is requested only by the counselor, switched into the centre panel
+  const canRequestMarksheet = user?.role === 'Counselor' && isCounselorSwitch;
   const [docs,setDocs]=useState([]); const [loading,setLoading]=useState(true);
   const [tab,setTab]=useState(admissionOnly ? 'Other' : 'Marksheet');
   const [addOpen,setAddOpen]=useState(false); const [payDoc,setPayDoc]=useState(null);
@@ -1604,7 +1607,10 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
             );
           })}
         </div>
-        {isEnrolled && !isCancelled &&(
+        {isEnrolled && !isCancelled && tab === 'Marksheet' && !canRequestMarksheet && (
+          <span className="text-xs text-slate-500">Marksheets are requested by the counselor</span>
+        )}
+        {isEnrolled && !isCancelled && (tab !== 'Marksheet' || canRequestMarksheet) &&(
           <Button size="sm" onClick={openAdd} className="bg-indigo-600 hover:bg-indigo-700 h-8 text-xs">
             <Plus className="h-3.5 w-3.5 mr-1.5"/>{tab === 'Marksheet' ? 'Request Marksheet' : 'Request Document'}
           </Button>

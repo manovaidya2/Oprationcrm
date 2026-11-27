@@ -153,7 +153,7 @@ async function buildRows(students) {
       .populate('transactions.centerSettlement', 'billingMonth')
       .populate('transactions.paidToAccount', 'label mode upiId upiName bankName accountHolder accountNumber ifscCode branch')
       .lean(),
-    StudentDocument.find({ student: { $in: studentIds }, origin: { $ne: 'Inventory' } })
+    StudentDocument.find({ student: { $in: studentIds }, origin: { $nin: ['Inventory', 'Counselor'] } })
       .select('student name requestType status chargeFee payments createdAt')
       .populate('payments.paidToAccount', 'label mode upiId upiName bankName accountHolder accountNumber ifscCode branch')
       .lean(),
@@ -265,7 +265,7 @@ exports.centers = asyncHandler(async (req, res) => {
     Payment.find({ center: { $in: centerIds } })
       .select('center totalFee discount transactions')
       .lean(),
-    StudentDocument.find({ center: { $in: centerIds }, origin: { $ne: 'Inventory' } })
+    StudentDocument.find({ center: { $in: centerIds }, origin: { $nin: ['Inventory', 'Counselor'] } })
       .select('center chargeFee payments status origin')
       .lean(),
   ]);

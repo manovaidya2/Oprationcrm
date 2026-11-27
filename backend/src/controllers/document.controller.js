@@ -211,13 +211,14 @@ function mergeInventoryDispatchStatus(inventoryDoc, requestDoc) {
 // GET /api/documents
 exports.list = asyncHandler(async (req, res) => {
   // documents added from the student page (origin 'Added') have their own tabs and are not part of the request / dispatch flow
-  const filter = req.user.role === 'University' ? { origin: { $ne: 'Added' } } : { origin: { $nin: ['Inventory', 'Added'] } };
+  // a counselor's direct marksheet requests (origin 'Counselor') have their own pages; the university sees them as requests
+  const filter = req.user.role === 'University' ? { origin: { $ne: 'Added' } } : { origin: { $nin: ['Inventory', 'Added', 'Counselor'] } };
   // requests made from the old Document Inventory page (now removed) that still wait for the university:
   // the Inventory team marks them received (into the New Inventory) or closes them
   if (['Dispatch', 'Inventory'].includes(req.user.role)) {
     delete filter.origin;
     filter.$or = [
-      { origin: { $nin: ['Inventory', 'Added'] } },
+      { origin: { $nin: ['Inventory', 'Added', 'Counselor'] } },
       { origin: 'Inventory', status: { $in: ['Sent_To_University', 'University_Dispatched', 'Closed'] } },
     ];
   }
@@ -244,8 +245,8 @@ exports.list = asyncHandler(async (req, res) => {
   if (role === 'University' && universityId) {
     filter.university = universityId;
   }
-  // a request answered from the New Inventory never went to the university
-  if (role === 'University') filter.inventoryItem = null;
+  // a request answered from the New Inventory never went to the university, nor one the Inventory team has not asked for yet
+  if (role === 'University') { filter.inventoryItem = null; filter.status = { $ne: 'With_Inventory' }; }
 
   const bypassStatus = req.query.all && ['Admin','Counselor','ViewerCounselor','Accountant','Dispatch','Inventory','University'].includes(role);
 
@@ -290,8 +291,10 @@ exports.list = asyncHandler(async (req, res) => {
     return acc;
   }, {});
 
-  res.json(docs.map(doc => ({
+  // the university gets only the document asked for — not whether the centre wants a soft or hard copy
+  res.json(docs.map(({ requestType, ...doc }) => ({
     ...doc,
+    ...(role === 'University' ? {} : { requestType }),
     courseFeeSummary: paymentMap[docStudentId(doc)] || null,
   })));
 });
@@ -365,6 +368,10 @@ async function createDocRequest(req, res, docFile, screenshot) {
   if (req.user.role === 'AdmissionMarker' && sectionOf(section, name) !== 'Other') {
     const e = new Error('Admission Marker can request other documents only'); e.status = 403; throw e;
   }
+  // marksheets: only the counselor, from the centre panel
+  if (sectionOf(section, name) === 'Marksheet' && !(req.user.role === 'Counselor' && centerOriginated) && req.user.role !== 'Admin') {
+    const e = new Error('Marksheets are requested by the counselor only, from the centre panel'); e.status = 403; throw e;
+  }
   // other documents are requested from the centre panel only (with their payment) — not from the student page
   if (sectionOf(section, name) === 'Other' && !centerOriginated && req.user.role !== 'Admin') {
     const e = new Error('Other documents are requested from the centre panel, together with their full payment'); e.status = 403; throw e;
@@ -434,14 +441,17 @@ async function createDocRequest(req, res, docFile, screenshot) {
 exports.setUrgent = asyncHandler(async (req, res) => {
   const urgent = req.body.urgent === true || req.body.urgent === 'true';
   const doc = await StudentDoc.findById(req.params.id);
-  if (!doc || doc.origin !== 'Request') { const e = new Error('Document request not found'); e.status = 404; throw e; }
-  if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId)) {
+  // a centre's request, or a counselor's direct marksheet request to the Inventory team
+  if (!doc || !['Request', 'Counselor'].includes(doc.origin)) { const e = new Error('Document request not found'); e.status = 404; throw e; }
+  const direct = doc.origin === 'Counselor';
+  if (req.user.role === 'Counselor' && String(doc.counselor) !== String(req.user.counselorId) && !(direct && String(doc.uploadedBy) === String(req.user._id))) {
     // any counselor working on the document's centre
     const me = await Counselor.findById(req.user.counselorId).select('centers').lean();
     if (!(me?.centers || []).some(id => String(id) === String(doc.center))) { const e = new Error('Forbidden'); e.status = 403; throw e; }
   }
-  if (sectionOf(doc.section, doc.name) !== 'Other') { const e = new Error('Only other document requests can be marked urgent'); e.status = 400; throw e; }
+  if (!direct && sectionOf(doc.section, doc.name) !== 'Other') { const e = new Error('Only other document requests can be marked urgent'); e.status = 400; throw e; }
   if (doc.status === 'Delivered') { const e = new Error('This document is already delivered'); e.status = 400; throw e; }
+  if (direct && ['In_Inventory', 'Closed'].includes(doc.status)) { const e = new Error(doc.status === 'Closed' ? 'This request is closed' : 'This marksheet is already in the New Inventory'); e.status = 400; throw e; }
   if (!!doc.urgent === urgent) return res.json(await loadDoc(doc._id));
 
   doc.urgent = urgent;
@@ -451,6 +461,13 @@ exports.setUrgent = asyncHandler(async (req, res) => {
   await doc.save();
   await audit(urgent ? 'doc_marked_urgent' : 'doc_marked_normal', 'StudentDocument', doc._id, req.user, { urgent }, `${doc.name}: ${urgent ? 'marked urgent' : 'urgent mark removed'}`);
   const fresh = await loadDoc(doc._id);
+  // a counselor's direct marksheet request: the Inventory team hears it is urgent
+  if (urgent && direct) {
+    await notifyRole('Inventory', {
+      message: `Urgent marksheet request: "${doc.name}" - ${fresh.student?.name || ''} (marked by ${req.user.name || 'the counselor'})`,
+      type: 'doc_forwarded', documentId: doc._id, studentId: fresh.student?._id, role: 'Inventory',
+    });
+  }
   // already waiting at the university: tell them it moved to their Urgent Requests
   if (urgent && doc.status === 'Sent_To_University' && !doc.inventoryItem && doc.university) {
     const uniUsers = await User.find({ role: 'University', universityId: doc.university, isActive: true }).select('_id').lean();
@@ -606,6 +623,9 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     } else if (inStock) {
       doc.status = 'Dispatch_Received';
       doc.statusHistory.push({ status: 'Dispatch_Received', changedBy: req.user._id, at: new Date(), note: 'Document is in the New Inventory - Inventory to scan and upload' });
+    } else if (sectionOf(doc.section, doc.name) === 'Marksheet') {
+      doc.status = 'With_Inventory';
+      doc.statusHistory.push({ status: 'With_Inventory', changedBy: req.user._id, at: new Date(), note: 'Marksheet not in the New Inventory - Inventory to request it from the university' });
     } else {
       doc.status = 'Sent_To_University';
       doc.statusHistory.push({ status: 'Sent_To_University', changedBy: req.user._id, at: new Date(), note: `Requested from the university (${isHardCopyRequest(doc) ? 'hard' : 'soft'} copy) - Inventory to receive it` });
@@ -619,7 +639,9 @@ exports.accountantAction = asyncHandler(async (req, res) => {
     else if (doc.status !== 'Center_Notified') await notifyRole('Inventory', {
       message: inStock
         ? `In the New Inventory: "${doc.name}" — Student: ${doc.student?.name}. ${doc.inventoryCheckPending ? 'Please check it for corrections.' : 'Please scan and upload it.'}`
-        : `Courier expected from University for "${doc.name}" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
+        : doc.status === 'With_Inventory'
+          ? `Marksheet to request from the university: "${doc.name}" — Student: ${doc.student?.name} (not in the New Inventory)`
+          : `Courier expected from University for "${doc.name}" — Student: ${doc.student?.name}. Please confirm receipt when it arrives.`,
       type: 'doc_forwarded', documentId: doc._id, studentId: doc.student?._id, role: 'Inventory',
     });
     if (doc.status === 'Center_Notified') {   // (after a correction check, the check asks the centre)
@@ -844,6 +866,39 @@ exports.dispatchReceiveMany = asyncHandler(async (req, res) => {
   res.json({ received: received.map(d => String(d._id)), failed });
 });
 
+// ── Inventory: ask the university for marksheets not in the New Inventory ──
+// POST /documents/request-from-university { ids } — With_Inventory -> Sent_To_University (the university's Marksheet
+// Requests tab). The university hears once per batch; a counselor's direct request tells that counselor too.
+exports.requestFromUniversity = asyncHandler(async (req, res) => {
+  const asked = [];
+  const { done, failed } = await forEachRequest(req.body.ids, async doc => {
+    if (doc.status !== 'With_Inventory') return 'Not waiting to be requested from the university';
+    if (!doc.university) return 'The student has no university';
+    pushHistory(doc, 'Sent_To_University', req.user, 'Requested from the university by Inventory');
+    await doc.save();
+    await audit('doc_requested_from_university', 'StudentDocument', doc._id, req.user, {}, `Requested from the university: ${doc.name}`);
+    asked.push(doc);
+    return null;
+  });
+  const byUniversity = new Map();
+  asked.forEach(doc => {
+    const uniId = String(doc.university);
+    if (!byUniversity.has(uniId)) byUniversity.set(uniId, []);
+    byUniversity.get(uniId).push(doc);
+  });
+  for (const [uniId, docs] of byUniversity) {
+    const uniUsers = await User.find({ role: 'University', universityId: uniId, isActive: true }).select('_id').lean();
+    if (!uniUsers.length) continue;
+    await notify(uniUsers.map(u => u._id), docs.length === 1
+      ? { message: `Marksheet requested: "${docs[0].name}"`, type: 'doc_forwarded', documentId: docs[0]._id, studentId: docs[0].student, role: 'University' }
+      : { message: `${docs.length} marksheets requested`, type: 'doc_forwarded', role: 'University' });
+  }
+  for (const doc of asked.filter(d => d.origin === 'Counselor' && d.uploadedBy)) {
+    await notify(doc.uploadedBy, { message: `Inventory requested "${doc.name}" from the university`, type: 'doc_forwarded', documentId: doc._id, studentId: doc.student });
+  }
+  res.json({ requested: done, failed });
+});
+
 // ── Inventory: correction check of a document received from the university ──
 // Checked: a soft copy goes on to Upload Scan; a hard copy to Ready to Dispatch (paid) or to the centre's payment.
 // Sent back: it goes to the university's Correction Needed tab and back to Inventory's request tabs, and the corrected
@@ -862,7 +917,10 @@ exports.correctionChecked = asyncHandler(async (req, res) => {
     doc.inventoryCheckPending = false;
     addHistoryOnly(doc, 'Correction_Checked', req.user, corrected ? 'Corrected copy checked by Inventory - no correction needed' : 'Checked by Inventory - no correction needed');
     next[String(doc._id)] = 'scan';
-    if (isHardCopyRequest(doc)) {
+    if (doc.origin === 'Counselor') {   // a counselor's direct marksheet request: done, it stays in the New Inventory
+      pushHistory(doc, 'In_Inventory', req.user, 'Correction checked - kept in the New Inventory');
+      next[String(doc._id)] = 'inventory';
+    } else if (isHardCopyRequest(doc)) {
       const paid = (doc.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
       if ((doc.chargeFee || 0) <= 0 || paid >= doc.chargeFee) {
         pushHistory(doc, 'Payment_Verified', req.user, 'Correction checked - hard copy ready to dispatch');
@@ -876,6 +934,10 @@ exports.correctionChecked = asyncHandler(async (req, res) => {
     await doc.save();
     if (itemId) await logInventory(itemId, corrected ? 'Corrected copy checked by Inventory' : 'Correction checked by Inventory', req.user, '',
       { $set: { correctionCheckedAt: doc.correctionCheckedAt, correctionCheckedBy: req.user._id }, $unset: { correctionCheckPending: 1 } });
+    if (next[String(doc._id)] === 'inventory' && doc.uploadedBy) {
+      const student = await Student.findById(doc.student).select('name').lean();
+      await notify(doc.uploadedBy, { message: `Marksheet in the New Inventory (correction checked): "${doc.name}" - ${student?.name || ''}`, type: 'doc_forwarded', documentId: doc._id, studentId: doc.student });
+    }
     if (next[String(doc._id)] === 'dispatch') {   // a checked hard copy, paid: Dispatch couriers it
       await notifyRole('Dispatch', { message: `Ready to dispatch to the centre: "${doc.name}" (correction checked)`, type: 'payment_verified', documentId: doc._id, role: 'Dispatch' });
     }
@@ -937,7 +999,7 @@ exports.sendForCorrection = asyncHandler(async (req, res) => {
 // ── Inventory: close old requests that are not moving / reopen them ──
 // Closing does not delete: the request keeps its history and payments, leaves the Inventory and university
 // lists (status 'Closed'), and Reopen puts it back at the stage it was closed at.
-const CLOSABLE_STATUSES = ['Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
+const CLOSABLE_STATUSES = ['With_Inventory', 'Sent_To_University', 'University_Dispatched', 'Dispatch_Received'];
 
 async function forEachRequest(ids, work) {
   const unique = [...new Set((Array.isArray(ids) ? ids : []).map(String))].filter(isValidObjectId);

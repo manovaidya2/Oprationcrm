@@ -15,6 +15,8 @@ const UniversityPage       = lazy(() => import('@/pages/UniversityPage'));
 const UniversityManagePage = lazy(() => import('@/pages/UniversityManagePage'));
 const DispatchPage         = lazy(() => import('@/pages/DispatchPage'));
 const NewInventoryPage     = lazy(() => import('@/pages/NewInventoryPage'));
+const RequestMarksheetsPage = lazy(() => import('@/pages/RequestMarksheetsPage'));
+const PaymentQueriesPage   = lazy(() => import('@/pages/PaymentQueriesPage'));
 const NewInventoryStudentPage = lazy(() => import('@/pages/NewInventoryStudentPage'));
 const StudentsPage         = lazy(() => import('@/pages/StudentsPage'));
 const CentersPage          = lazy(() => import('@/pages/CentersPage'));
@@ -60,13 +62,13 @@ const ROLE_ALLOWED = {
   Accountant: ['/admission-timeline', '/accountant','/students', '/students/', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
   University: ['/university', '/students/'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/new-inventory', '/chat'],
-  Inventory:  ['/inventory-desk', '/students', '/students/', '/new-inventory', '/chat'],
+  Inventory:  ['/inventory-desk', '/marksheet-requests', '/students', '/students/', '/new-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/new-inventory', '/chat'],
   Payment:    ['/payment-desk', '/chat'],
   // Adds admissions inside a centre's panel (/center); students and centres are view-only
   AdmissionMarker: ['/admissions', '/center', '/students', '/students/', '/centers', '/chat'],
-  Counselor:  ['/admission-timeline', '/counselor', '/center', '/students', '/centers', '/dashboard', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
-  ViewerCounselor: ['/admission-timeline', '/counselor', '/center', '/students', '/students/', '/centers', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  Counselor:  ['/admission-timeline', '/counselor', '/request-marksheets', '/payment-queries', '/center', '/students', '/centers', '/dashboard', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
+  ViewerCounselor: ['/admission-timeline', '/counselor', '/payment-queries', '/center', '/students', '/students/', '/centers', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/chat'],
 };
 
 function ProtectedRoute({ children }) {
@@ -108,6 +110,11 @@ export default function App() {
           {/* Inventory team: documents from the university (receive, check, scan); Dispatch: courier to centres */}
           <Route path="inventory-desk"      element={<W><DispatchPage key="inventory" mode="inventory" /></W>} />
           <Route path="dispatch"            element={<W><DispatchPage key="dispatch" mode="dispatch" /></W>} />
+          {/* counselors' marksheet requests straight to the Inventory team (its page / the counselor's) */}
+          <Route path="marksheet-requests"  element={<W><DispatchPage key="marksheet" mode="marksheet" /></W>} />
+          <Route path="request-marksheets"  element={<W><RequestMarksheetsPage /></W>} />
+          {/* course fee queries: counselor -> the centre's Viewer Counselor */}
+          <Route path="payment-queries"     element={<W><PaymentQueriesPage /></W>} />
           <Route path="new-inventory"       element={<W><NewInventoryPage /></W>} />
           <Route path="new-inventory/:studentId" element={<W><NewInventoryStudentPage /></W>} />
           {/* Admin / Counselor shared */}

@@ -100,6 +100,7 @@ const ADMIN_DOC_STATUSES = [
 const DOC_STATUS_COLORS = {
   Requested:'bg-blue-100 text-blue-700', Forwarded:'bg-indigo-100 text-indigo-700',
   Fee_Approved:'bg-green-100 text-green-700', Fee_Rejected:'bg-red-100 text-red-700',
+  With_Inventory:'bg-sky-100 text-sky-700', In_Inventory:'bg-emerald-100 text-emerald-700',
   Sent_To_University:'bg-purple-100 text-purple-700', Center_Notified:'bg-amber-100 text-amber-700',
   Payment_Submitted:'bg-blue-100 text-blue-700', Payment_Verified:'bg-green-100 text-green-700',
   Dispatched:'bg-teal-100 text-teal-700', Delivered:'bg-emerald-100 text-emerald-700',

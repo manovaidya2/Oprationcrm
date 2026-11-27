@@ -5,12 +5,15 @@ import {
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
   Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
   CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive, PanelLeftClose, PanelLeftOpen, ClipboardCheck,
+  ScrollText, MessageSquareWarning,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
-import { notifApi } from '@/lib/api';
+import { notifApi, navApi } from '@/lib/api';
+import { NAV_COUNTS_EVENT } from '@/lib/navCounts';
+import { connectRealtime, disconnectRealtime, onRealtime } from '@/lib/realtime';
 import { toast } from 'sonner';
 import { clearStudentListFilters } from '@/lib/studentListState';
 
@@ -23,7 +26,9 @@ const NAV_CONFIG = {
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/inventory-desk', label: 'Inventory Desk', icon: ClipboardCheck },
+    { to: '/marksheet-requests', label: 'Marksheet Requests', icon: ScrollText },
     { to: '/dispatch',     label: 'Dispatch',     icon: Truck },
+    { to: '/payment-queries', label: 'Payment Queries', icon: MessageSquareWarning },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
@@ -37,6 +42,8 @@ const NAV_CONFIG = {
   Counselor: [
     { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
+    { to: '/request-marksheets', label: 'Request Marksheets', icon: ScrollText },
+    { to: '/payment-queries', label: 'Payment Queries', icon: MessageSquareWarning },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
@@ -48,6 +55,7 @@ const NAV_CONFIG = {
   ViewerCounselor: [
     { to: '/admission-timeline', label: 'Admission Timeline', icon: CalendarClock },
     { to: '/counselor', label: 'Applications', icon: LayoutDashboard },
+    { to: '/payment-queries', label: 'Payment Queries', icon: MessageSquareWarning },
     { to: '/students',  label: 'Students',     icon: GraduationCap },
     { to: '/centers',   label: 'Centers',      icon: Building2 },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
@@ -84,6 +92,7 @@ const NAV_CONFIG = {
   // the Inventory team: documents from the university — receive, correction check, scan — and the New Inventory
   Inventory: [
     { to: '/inventory-desk', label: 'Inventory Desk', icon: ClipboardCheck },
+    { to: '/marksheet-requests', label: 'Marksheet Requests', icon: ScrollText },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
     { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
@@ -170,12 +179,29 @@ export function AppLayout() {
   const navItems = user?.role && !['Center', 'University'].includes(user.role) && !baseNavItems.some(item => item.to === '/chat')
     ? [...baseNavItems, { to: '/chat', label: 'Team Chat', icon: MessageSquare }]
     : baseNavItems;
+  // what is open on each work page (badge next to its name): refreshed every 30 s, on a page change and after actions
+  // live updates (socket.io) while logged in
+  useEffect(() => {
+    connectRealtime();
+    return () => disconnectRealtime();
+  }, [user?._id]);
+  const [navCounts, setNavCounts] = useState({});
+  useEffect(() => {
+    let alive = true;
+    let timer = null;
+    const load = () => navApi.counts().then(c => { if (alive) setNavCounts(c || {}); }).catch(() => {});
+    load();
+    const iv = setInterval(load, 60000);   // live through the socket; this is only a fallback
+    window.addEventListener(NAV_COUNTS_EVENT, load);
+    const off = onRealtime('changed', () => { clearTimeout(timer); timer = setTimeout(load, 400); });
+    return () => { alive = false; clearInterval(iv); clearTimeout(timer); off(); window.removeEventListener(NAV_COUNTS_EVENT, load); };
+  }, [user?._id, location.pathname]);
   const unread = notifs.filter(n => !n.read).length;
   const chatUnread = notifs.filter(n => !n.read && ['help_ticket', 'ticket_message', 'chat_message'].includes(n.type)).length;
 
   useEffect(() => {
     notifApi.list().then(setNotifs).catch(() => {});
-    const iv = setInterval(() => {
+    const check = () => {
       notifApi.list().then(newNotifs => {
         setNotifs(prev => {
           // Check for genuinely new unread notifications
@@ -190,8 +216,10 @@ export function AppLayout() {
           return newNotifs;
         });
       }).catch(() => {});
-    }, 10000); // poll every 10 seconds
-    return () => clearInterval(iv);
+    };
+    const iv = setInterval(check, 30000);   // a new notification arrives at once through the socket; this is a fallback
+    const off = onRealtime('notification', check);
+    return () => { clearInterval(iv); off(); };
   }, []);
 
   async function markAllRead() {
@@ -235,7 +263,7 @@ export function AppLayout() {
             const active = item.to === '/' ? location.pathname === '/' : location.pathname.startsWith(item.to);
             return (
               <NavTip key={item.to} show={collapsed} label={item.label}>
-                <Link to={item.to} onClick={() => setOpen(false)} aria-label={collapsed ? item.label : undefined}
+                <Link to={item.to} onClick={() => setOpen(false)} aria-label={collapsed ? (navCounts[item.to] > 0 ? `${item.label} (${navCounts[item.to]} open)` : item.label) : undefined}
                   className={cn(
                     'relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
                     collapsed && 'lg:justify-center lg:px-0 lg:py-2.5',
@@ -252,7 +280,16 @@ export function AppLayout() {
                       {chatUnread > 9 ? '9+' : chatUnread}
                     </span>
                   )}
-                  {active && <ChevronRight className={cn('h-3.5 w-3.5 ml-auto', collapsed && 'lg:hidden')} />}
+                  {navCounts[item.to] > 0 && (
+                    <span title={`${navCounts[item.to]} open`} className={cn(
+                      'ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums',
+                      collapsed && 'lg:absolute lg:right-1 lg:top-0.5 lg:ml-0 lg:h-4 lg:min-w-4 lg:px-1',
+                      active ? 'bg-white text-primary' : 'bg-violet-600 text-white'
+                    )}>
+                      {navCounts[item.to] > 99 ? '99+' : navCounts[item.to]}
+                    </span>
+                  )}
+                  {active && <ChevronRight className={cn('h-3.5 w-3.5', !(navCounts[item.to] > 0) && 'ml-auto', collapsed && 'lg:hidden')} />}
                 </Link>
               </NavTip>
             );

@@ -172,6 +172,7 @@ const DOC_COLORS = {
   Forwarded:          'bg-indigo-50 text-indigo-700 border border-indigo-200',
   Fee_Approved:       'bg-green-50 text-green-700 border border-green-200',
   Fee_Rejected:       'bg-red-50 text-red-600 border border-red-200',
+  With_Inventory:     'bg-sky-50 text-sky-700 border border-sky-200',
   Sent_To_University: 'bg-purple-50 text-purple-700 border border-purple-200',
   University_Dispatched:'bg-violet-50 text-violet-700 border border-violet-200',
   Counselor_Received: 'bg-amber-50 text-amber-700 border border-amber-300',

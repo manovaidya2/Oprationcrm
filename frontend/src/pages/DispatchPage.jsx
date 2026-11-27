@@ -3,22 +3,26 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Archive, Building2, CheckCircle2, ClipboardCheck, Download, Eye, EyeOff, Hash, History,
-  Loader2, Package, PackageCheck, RotateCcw, Search, Trash2, Truck, Undo2, Upload, User, X,
+  Loader2, Package, PackageCheck, RotateCcw, Search, Send, Trash2, Truck, Undo2, Upload, User, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { docsApi, newInventoryApi } from '@/lib/api';
+import { docsApi, newInventoryApi, marksheetRequestsApi } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 import { requestSection } from '@/lib/documentOptions';
+import { refreshNavCounts } from '@/lib/navCounts';
+import { useLiveRefresh } from '@/lib/realtime';
 
 // One page for two desks: a list of the documents at one stage on the left, the chosen one (or the selected ones)
 // on the right with what to do next.
-//   Inventory Desk (/inventory-desk): Requests (waiting for the university's courier) → Correction check → Upload scan
-//     → In progress (counselor / centre payment) · Closed
+//   Inventory Desk (/inventory-desk): To request (marksheets not in the New Inventory: ask the university) → Requests
+//     (waiting for the university's courier) → Correction check → Upload scan → In progress (counselor / centre) · Closed
+//   Marksheet Requests (/marksheet-requests): counselors' marksheet requests straight to the Inventory team —
+//     To request → Requests → Correction check → In inventory · Closed
 //   Dispatch (/dispatch): Ready to dispatch → Dispatched
 
 const fmtDt   = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
@@ -30,7 +34,9 @@ const todayInput = () => {
 };
 
 const STATUS_INFO = {
+  With_Inventory:        { label:'To request from university', color:'bg-sky-100 text-sky-700' },
   Sent_To_University:    { label:'Requested / Awaiting Receipt', color:'bg-amber-100 text-amber-700' },
+  In_Inventory:          { label:'In the New Inventory',      color:'bg-emerald-100 text-emerald-700' },
   University_Dispatched: { label:'Incoming Courier',         color:'bg-purple-100 text-purple-700' },
   Dispatch_Received:     { label:'Receipt Confirmed',         color:'bg-blue-100 text-blue-700' },
   Scanned:               { label:'Scanned',                   color:'bg-indigo-100 text-indigo-700' },
@@ -46,19 +52,25 @@ const STATUS_INFO = {
 
 // one colour per stage (the same on every page)
 const STAGES = [
+  { key: 'ask',        label: 'To request',        dot: 'bg-sky-500',    count: 'bg-sky-50 text-sky-700' },
   { key: 'requests',   label: 'Requests',          dot: 'bg-blue-600',   count: 'bg-blue-50 text-blue-700' },
   { key: 'check',      label: 'Correction check',  dot: 'bg-orange-600', count: 'bg-orange-50 text-orange-700' },
   { key: 'scan',       label: 'Upload scan',       dot: 'bg-violet-600', count: 'bg-violet-50 text-violet-700' },
   { key: 'progress',   label: 'In progress',       dot: 'bg-teal-600',   count: 'bg-teal-50 text-teal-700' },
   { key: 'ready',      label: 'Ready to dispatch', dot: 'bg-green-600',  count: 'bg-green-50 text-green-700' },
   { key: 'dispatched', label: 'Dispatched',        dot: 'bg-slate-500',  count: 'bg-slate-100 text-slate-700' },
+  { key: 'done',       label: 'In inventory',      dot: 'bg-emerald-600', count: 'bg-emerald-50 text-emerald-700' },
   { key: 'closed',     label: 'Closed',            dot: 'bg-zinc-400',   count: 'bg-zinc-100 text-zinc-600' },
 ];
 // which stages each desk works (Admin can open both pages)
 const DESKS = {
   inventory: {
     title: 'Inventory Desk', sub: 'Documents from the university — mark received, check for corrections, upload the scan',
-    stages: ['requests', 'check', 'scan', 'progress', 'closed'], dismissKey: 'inventory-desk',
+    stages: ['ask', 'requests', 'check', 'scan', 'progress', 'closed'], dismissKey: 'inventory-desk',
+  },
+  marksheet: {
+    title: 'Marksheet Requests', sub: "Counselors' marksheet requests — ask the university, mark received, check for corrections",
+    stages: ['ask', 'requests', 'check', 'done', 'closed'], dismissKey: 'marksheet-requests',
   },
   dispatch: {
     title: 'Dispatch', sub: 'Payment verified documents — courier them to the centres',
@@ -67,6 +79,8 @@ const DESKS = {
 };
 
 const STAGE_NOTE = {
+  ask:        'Not in the New Inventory — request it from the university. It then waits in Requests for the courier.',
+  done:       'Received from the university and correction checked — kept in the New Inventory. The counselor has been told.',
   requests:   "Waiting for the university's courier. When it arrives, mark it received: it goes into the student's New Inventory and on to the correction check.",
   check:      'Check each copy from the university. Correct: a soft copy goes to Upload Scan, a hard copy goes to Dispatch (Ready to dispatch). Wrong: send it back to the university.',
   scan:       'Scan and upload. The scan goes straight to the counselor and is kept with the document in the New Inventory.',
@@ -93,6 +107,7 @@ const lastAt = (d, status) => [...(d.statusHistory || [])].reverse().find(h => h
 const stageSince = d => lastAt(d, d.status) || d.updatedAt || d.createdAt;
 const inInventory = d => !!(d.receivedIntoInventory || d.inventoryItem);
 const isHard = d => d.requestType === 'Hard Copy';
+const isDirect = d => d.origin === 'Counselor';   // a counselor's marksheet request straight to the Inventory team
 const isPaid = d => Number(d.chargeFee || 0) <= 0 || (d.payments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0) >= Number(d.chargeFee);
 // waiting for its correction check (answered from the New Inventory: only if that document itself is not checked yet)
 const needsCheck = d => d.status === 'Dispatch_Received' && !d.correctionCheckedAt && (!d.inventoryItem || d.inventoryCheckPending);
@@ -100,6 +115,8 @@ const needsCheck = d => d.status === 'Dispatch_Received' && !d.correctionChecked
 // where a document is, in words
 function whereText(d) {
   switch (d.status) {
+    case 'With_Inventory':        return 'To request from the university';
+    case 'In_Inventory':          return 'In the New Inventory (checked)';
     case 'Sent_To_University':    return d.correctionOpen ? 'At the university for correction' : "Waiting for the university's courier";
     case 'University_Dispatched': return 'Courier on the way from the university';
     case 'Dispatch_Received':     return needsCheck(d) ? (d.correctionOpen ? 'Corrected copy — check it again' : 'Check it for corrections') : 'Ready to scan';
@@ -119,7 +136,7 @@ function whereText(d) {
 function docTags(d) {
   const tags = [];
   tags.push(requestSection(d) === 'Marksheet' ? { k: 'sec', tone: TAG.marksheet, label: 'Marksheet' } : { k: 'sec', tone: TAG.other, label: 'Other' });
-  tags.push(isHard(d) ? { k: 'copy', tone: TAG.hard, label: 'Hard copy' } : { k: 'copy', tone: TAG.soft, label: 'Soft copy' });
+  if (!isDirect(d)) tags.push(isHard(d) ? { k: 'copy', tone: TAG.hard, label: 'Hard copy' } : { k: 'copy', tone: TAG.soft, label: 'Soft copy' });
   if (isUrgentDoc(d)) tags.push({ k: 'urgent', tone: TAG.urgent, label: 'Urgent' });
   if (d.correctionOpen && ['Sent_To_University', 'University_Dispatched'].includes(d.status)) tags.push({ k: 'corr', tone: TAG.correction, label: `Sent for correction${d.correctionCount > 1 ? ` ×${d.correctionCount}` : ''}` });
   if (d.correctionOpen && d.status === 'Dispatch_Received') tags.push({ k: 'corr', tone: TAG.correction, label: 'Corrected copy' });
@@ -162,9 +179,15 @@ function stepKey(d) {
     default: return 'req';
   }
 }
+const DIRECT_STEPS = [
+  { key: 'req',   label: 'Requested',     at: d => d.createdAt },
+  { key: 'uni',   label: 'At university', at: d => lastAt(d, 'Sent_To_University') },
+  { key: 'check', label: 'Check',         at: d => lastAt(d, 'Dispatch_Received') },
+  { key: 'inv',   label: 'In inventory',  at: d => lastAt(d, 'In_Inventory') },
+];
 function Progress({ doc }) {
-  const steps = STEPS.filter(s => !(s.key === 'scan' && isHard(doc)));   // a hard copy is not scanned
-  const cur = stepKey(doc);
+  const steps = isDirect(doc) ? DIRECT_STEPS : STEPS.filter(s => !(s.key === 'scan' && isHard(doc)));   // a hard copy is not scanned
+  const cur = (doc.status === 'Closed' ? doc.closedFromStatus : doc.status) === 'In_Inventory' ? 'done' : stepKey(doc);
   const idx = cur === 'done' ? steps.length : steps.findIndex(s => s.key === cur);
   return (
     <ol className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
@@ -466,6 +489,7 @@ function ListRow({ entry, active, selectable, selected, onToggle, onOpen, now })
 export default function DispatchPage({ mode = 'dispatch' }) {
   const desk = DESKS[mode] || DESKS.dispatch;
   const isInventoryDesk = desk === DESKS.inventory;
+  const isMarksheetDesk = desk === DESKS.marksheet;
   const { user } = useAuth();
   const { dismiss, isDismissed } = usePanelDismissals(user, desk.dismissKey);
   const [now] = useState(() => Date.now());
@@ -481,21 +505,23 @@ export default function DispatchPage({ mode = 'dispatch' }) {
   const [focusId, setFocusId] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {   // quiet: a live refresh, no spinner
     try {
-      setLoading(true);
+      if (quiet !== true) setLoading(true);
       const [docs, pendingInv] = await Promise.all([
-        docsApi.list({ all: '1' }),
+        isMarksheetDesk ? marksheetRequestsApi.list() : docsApi.list({ all: '1' }),
         isInventoryDesk ? newInventoryApi.checkPending().catch(() => ({ items: [] })) : { items: [] },
       ]);
       setAll(docs);
       setInvToCheck(pendingInv?.items || []);
+      refreshNavCounts();   // the sidebar badges follow what was just done
     } catch (e) {
       console.error('DispatchPage load failed', e);
       toast.error(e?.message || 'Failed to load the documents');
     } finally { setLoading(false); }
-  }, [isInventoryDesk]);
+  }, [isInventoryDesk, isMarksheetDesk]);
   useEffect(() => { load(); }, [load]);
+  useLiveRefresh(['documents'], () => load(true));   // changed by another login: refresh quietly
 
   // ── the lists ──
   const q = search.trim().toLowerCase();
@@ -506,7 +532,9 @@ export default function DispatchPage({ mode = 'dispatch' }) {
   const urgentThenOldest = (a, b) => (Number(isUrgentDoc(b)) - Number(isUrgentDoc(a))) || oldestFirst(a, b);
   const asDocs = list => list.map(item => ({ kind: 'doc', id: String(item._id), item }));
 
+  const ask        = visible.filter(d => d.status === 'With_Inventory').sort(urgentThenOldest);
   const requests   = visible.filter(d => ['Sent_To_University', 'University_Dispatched'].includes(d.status)).sort(urgentThenOldest);
+  const done       = visible.filter(d => d.status === 'In_Inventory').sort((a, b) => new Date(lastAt(b, 'In_Inventory') || 0) - new Date(lastAt(a, 'In_Inventory') || 0));
   const checkDocs  = visible.filter(needsCheck).sort(urgentThenOldest);
   const invCheck   = invToCheck.filter(i => !q || [i.name, i.student?.name, i.student?.enrollmentNumber, i.center?.name].some(v => String(v || '').toLowerCase().includes(q)));
   const scanDocs   = visible.filter(d => d.status === 'Dispatch_Received' && !needsCheck(d)).sort(urgentThenOldest);
@@ -517,6 +545,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
   const closed     = visible.filter(d => d.status === 'Closed').sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
 
   const counts = {
+    ask: ask.length, done: 0,
     requests: requests.length, check: checkDocs.length + invCheck.length, scan: scanDocs.length, progress: progress.length,
     ready: ready.length, dispatched: dispatched.filter(d => d.status === 'Dispatched').length, closed: 0,
   };
@@ -524,6 +553,8 @@ export default function DispatchPage({ mode = 'dispatch' }) {
 
   const listFor = key => {
     switch (key) {
+      case 'ask':      return asDocs(ask);
+      case 'done':     return asDocs(done);
       case 'requests': return asDocs(requests.filter(d => reqFilter === 'all' || (reqFilter === 'urgent' ? isUrgentDoc(d) : requestSection(d) === reqFilter)));
       case 'check':    return [...asDocs(checkDocs), ...invCheck.map(item => ({ kind: 'inv', id: String(item._id), item }))];
       case 'scan':     return asDocs(scanDocs);
@@ -536,7 +567,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
   };
   const list = listFor(stage);
   // which rows can be ticked for a bulk action
-  const canSelect = e => stage !== 'progress' && !(stage === 'dispatched' && e.item.status !== 'Dispatched');
+  const canSelect = e => !['progress', 'done'].includes(stage) && !(stage === 'dispatched' && e.item.status !== 'Dispatched');
   const selectable = list.filter(canSelect);
   const selected = selectable.filter(e => selectedIds.includes(e.id));
   const focused = list.find(e => e.id === focusId) || list[0] || null;
@@ -570,6 +601,10 @@ export default function DispatchPage({ mode = 'dispatch' }) {
     });
     report(docs, res.received || [], res.failed, 'received — in the New Inventory, now in Correction check', 'received — in the New Inventory, now in Correction check');
   });
+  const askUniversity = docs => run(async () => {
+    const res = await docsApi.requestFromUniversity({ ids: docs.map(d => d._id) });
+    report(docs, res.requested || [], res.failed, 'requested from the university — now in Requests', 'requested from the university — now in Requests');
+  });
   const closeDocs = (docs, reason) => run(async () => {
     const res = await docsApi.closeRequests({ ids: docs.map(d => d._id), reason });
     report(docs, res.closed || [], res.failed, 'closed — it is under Closed', 'closed — they are under Closed');
@@ -582,7 +617,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
     const res = await docsApi.correctionChecked({ ids: docs.map(d => d._id) });
     const where = Object.values(res.next || {});
     const n = k => where.filter(x => x === k).length;
-    const parts = [n('scan') && `${n('scan')} to Upload scan`, n('dispatch') && `${n('dispatch')} to Dispatch (ready to dispatch)`, n('payment') && `${n('payment')} waiting for the centre's payment`].filter(Boolean).join(', ');
+    const parts = [n('inventory') && `${n('inventory')} kept in the New Inventory`, n('scan') && `${n('scan')} to Upload scan`, n('dispatch') && `${n('dispatch')} to Dispatch (ready to dispatch)`, n('payment') && `${n('payment')} waiting for the centre's payment`].filter(Boolean).join(', ');
     report(docs, res.checked || [], res.failed, `checked — ${parts}`, `checked — ${parts}`);
   });
   const checkInventory = items => run(async () => {
@@ -637,6 +672,12 @@ export default function DispatchPage({ mode = 'dispatch' }) {
             </li>
           ))}
         </ul>
+        {stage === 'ask' && (
+          <div className="space-y-3">
+            <Button className="h-11 bg-sky-600 hover:bg-sky-700" disabled={busy} onClick={() => askUniversity(docs)}><Send className="mr-2 h-4 w-4"/>Request from University ({n})</Button>
+            <div className="border-t pt-3"><CloseForm key={`c-${key}`} count={n} busy={busy} onSubmit={reason => closeDocs(docs, reason)}/></div>
+          </div>
+        )}
         {stage === 'requests' && (
           <>
             <ReceiveForm key={`r-${key}`} count={n} busy={busy} onSubmit={f => receive(docs, f)}/>
@@ -734,6 +775,13 @@ export default function DispatchPage({ mode = 'dispatch' }) {
               <div className="text-sm text-slate-600">{[d.student?.enrollmentNumber, d.student?.courseName, d.center?.name].filter(Boolean).join(' · ')}</div>
               {cf && <div className="text-xs text-slate-500">Course fee: paid {fmtMoney(cf.paidAmount)} of {fmtMoney(cf.netFee)} · balance <b className={Number(cf.dueAmount) > 0 ? 'text-amber-700' : 'text-emerald-700'}>{fmtMoney(cf.dueAmount)}</b></div>}
             </div>
+            {isDirect(d) ? (
+              <div className="space-y-1 rounded-xl bg-slate-50 p-3.5">
+                <div className="text-xs font-semibold text-slate-500">Requested by the counselor</div>
+                <div className="font-semibold">{d.uploadedBy?.name || '—'}</div>
+                <div className="text-sm text-slate-600">{fmtFull(d.createdAt)} · no charge</div>
+              </div>
+            ) : (
             <div className="space-y-1 rounded-xl bg-slate-50 p-3.5">
               <div className="text-xs font-semibold text-slate-500">Document fee</div>
               {charge > 0 || paid > 0 ? (
@@ -743,6 +791,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
                 </>
               ) : <div className="text-sm text-slate-500">No charge</div>}
             </div>
+            )}
           </div>
 
           {d.correctionOpen && d.correctionNote && (
@@ -772,6 +821,19 @@ export default function DispatchPage({ mode = 'dispatch' }) {
 
         {/* what to do next */}
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          {stage === 'ask' && (
+            <>
+              <p className="text-sm text-slate-600">Not in the New Inventory. Request it from the university — it shows in the university's Marksheet requests.</p>
+              <Button className="h-11 bg-sky-600 hover:bg-sky-700" disabled={busy} onClick={() => askUniversity([d])}><Send className="mr-2 h-4 w-4"/>Request from University</Button>
+              <div className="border-t pt-3"><CloseForm key={`c-${d._id}`} count={1} busy={busy} onSubmit={reason => closeDocs([d], reason)}/></div>
+            </>
+          )}
+          {stage === 'done' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-medium text-emerald-700">In the New Inventory since {fmtDt(lastAt(d, 'In_Inventory'))} — correction checked.</p>
+              {d.student?._id && <Button asChild variant="outline" size="sm"><Link to={`/new-inventory/${d.student._id}`}><Archive className="mr-1.5 h-4 w-4"/>Open in New Inventory</Link></Button>}
+            </div>
+          )}
           {stage === 'requests' && (
             <>
               <ReceiveForm key={`r-${d._id}`} count={1} busy={busy} onSubmit={f => receive([d], f)}/>
@@ -780,7 +842,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
           )}
           {stage === 'check' && (
             <>
-              <p className="text-sm text-slate-600">{isHard(d) ? 'Correct: this hard copy goes to Dispatch to courier (or the centre pays first).' : 'Correct: this soft copy goes to Upload scan.'}</p>
+              <p className="text-sm text-slate-600">{isDirect(d) ? 'Correct: it is kept in the New Inventory and the counselor is told.' : isHard(d) ? 'Correct: this hard copy goes to Dispatch to courier (or the centre pays first).' : 'Correct: this soft copy goes to Upload scan.'}</p>
               <div className="flex flex-wrap items-start gap-2">
                 <Button className="h-10 bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => checkDocsDone([d])}><ClipboardCheck className="mr-1.5 h-4 w-4"/>Correction checked</Button>
                 <SendBackForm key={`s-${d._id}`} count={1} busy={busy} onSubmit={note => sendBack([d], note)}/>
@@ -862,12 +924,14 @@ export default function DispatchPage({ mode = 'dispatch' }) {
           );
         })}
       </nav>
-      <p className="text-xs text-slate-500">{STAGE_NOTE[stage]}</p>
+      <p className="text-xs text-slate-500">{isMarksheetDesk && stage === 'check'
+        ? 'Check each marksheet from the university. Correct: it is kept in the New Inventory and the counselor is told. Wrong: send it back to the university.'
+        : STAGE_NOTE[stage]}</p>
 
       <div className="flex flex-wrap items-start gap-4">
         {/* the list */}
         <section aria-label={stageInfo?.label} className="min-w-0 max-w-full flex-[1_1_340px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:max-w-[440px]">
-          {(stage === 'requests' || stage === 'dispatched') && (
+          {((stage === 'requests' && !isMarksheetDesk) || stage === 'dispatched') && (
             <div className="flex flex-wrap gap-1.5 border-b border-slate-100 p-3">
               {(stage === 'requests'
                 ? [['all', `All ${requests.length}`], ['Marksheet', `Marksheet ${requests.filter(d => requestSection(d) === 'Marksheet').length}`], ['Other', `Other ${requests.filter(d => requestSection(d) === 'Other').length}`], ['urgent', `Urgent ${urgentRequests}`]]

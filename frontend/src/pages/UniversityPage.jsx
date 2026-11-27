@@ -18,6 +18,7 @@ const DOC_STATUS = {
   Sent_To_University:   { label:'Pending Action',     color:'bg-amber-100 text-amber-700',    dot:'bg-amber-500' },
   University_Dispatched:{ label:'Sent to Inventory',  color:'bg-teal-100 text-teal-700',      dot:'bg-teal-500' },
   Dispatch_Received:    { label:'Inventory Received', color:'bg-blue-100 text-blue-700',      dot:'bg-blue-500' },
+  In_Inventory:         { label:'Inventory Received', color:'bg-blue-100 text-blue-700',      dot:'bg-blue-500' },
   Scanned:              { label:'Scanned',             color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
   Accountant_Received:  { label:'With Accountant',    color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
   Counselor_Received:   { label:'With Counselor',     color:'bg-purple-100 text-purple-700',  dot:'bg-purple-500' },
@@ -33,6 +34,7 @@ const DOC_STATUS = {
 const DISPATCHED_STATUSES = [
   'University_Dispatched',
   'Dispatch_Received',
+  'In_Inventory',
   'Scanned',
   'Accountant_Received',
   'Counselor_Received',
@@ -55,11 +57,6 @@ const requestedAt = d => [...(d.statusHistory || [])].reverse().find(h => h.stat
 const receivedOn = d => d.receivedFromUniversityAt || [...(d.statusHistory || [])].reverse().find(h => h.status === 'Dispatch_Received')?.at || null;
 const hasCourier = c => c && (c.dispatchDate || c.documentsDesc || c.trackingNo || c.company);
 const docStatusInfo = d => DOC_STATUS[d.status] || { label: String(d.status || '').replace(/_/g, ' '), color: 'bg-gray-100 text-gray-700' };
-
-function SectionBadge({ d }) {
-  const meta = SECTION_META[requestSection(d)];
-  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${meta.badge}`}>{meta.label}</span>;
-}
 
 function UrgentBadge() {
   return (
@@ -182,7 +179,6 @@ function StudentModal({ student, docs, onClose, onAssign, onReject }) {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-sm">{d.name}</span>
                           <span className={`text-xs px-1.5 py-0.5 rounded-full ${si.color}`}>{si.label}</span>
-                          <SectionBadge d={d}/>
                           {isUrgentDoc(d) && <UrgentBadge/>}
                         </div>
                         {d.courierInfo && (d.courierInfo.dispatchDate || d.courierInfo.documentsDesc || d.courierInfo.trackingNo || d.courierInfo.company) && (
@@ -404,7 +400,6 @@ export default function UniversityPage() {
       'Enrollment Number': d.student?.enrollmentNumber || '',
       'Course': d.student?.courseName || '',
       'Document': d.name || '',
-      'Copy': d.requestType || '',
       'Urgent': isUrgentDoc(d) ? 'Yes' : 'No',
       'Requested On': fmtDt(requestedAt(d)),
       'Received On': receivedOn(d) ? fmtDt(receivedOn(d)) : 'On the way',
@@ -480,7 +475,6 @@ export default function UniversityPage() {
   const emptyRow = (cols, text) => (
     <tr><td colSpan={cols} className="px-3 py-14 text-center text-sm text-slate-500">{text}</td></tr>
   );
-  const copyTag = d => d.requestType && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{d.requestType}</span>;
 
   // Document requests waiting for the university: one row per document, oldest first
   function renderRequestTab(kind) {
@@ -516,7 +510,7 @@ export default function UniversityPage() {
                       <td className={`${tdCls} text-slate-600`}>{d.student?.courseName || '—'}</td>
                       <td className={tdCls}>
                         <div className="font-medium text-slate-900">{d.name}</div>
-                        <div className="mt-1 flex flex-wrap gap-1">{(isUrgentTab || kind === 'all') && <SectionBadge d={d}/>}{isUrgentDoc(d) && <UrgentBadge/>}{copyTag(d)}</div>
+                        {isUrgentDoc(d) && <div className="mt-1 flex flex-wrap gap-1"><UrgentBadge/></div>}
                       </td>
                       <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(requestedAt(d))}</td>
                       <td className={tdCls}>{waitBadge(requestedAt(d))}</td>
@@ -578,7 +572,7 @@ export default function UniversityPage() {
               : list.map(d => (
                 <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
                   <td className={`${tdCls} pl-4`}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
-                  <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1"><SectionBadge d={d}/>{isUrgentDoc(d) && <UrgentBadge/>}{copyTag(d)}</div></td>
+                  <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div>{isUrgentDoc(d) && <div className="mt-1 flex flex-wrap gap-1"><UrgentBadge/></div>}</td>
                   <td className={tdCls}><div className="rounded-lg border border-orange-200 bg-orange-50 px-2.5 py-1.5 text-orange-900">{d.correctionNote || '—'}</div></td>
                   <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(d.correctionSentAt)}{d.correctionCount > 1 && <div className="text-xs font-semibold text-orange-700">{d.correctionCount} times</div>}</td>
                 </tr>
@@ -613,7 +607,7 @@ export default function UniversityPage() {
                 return (
                   <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
                     <td className={`${tdCls} pl-4`}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
-                    <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1">{isUrgentDoc(d) && <UrgentBadge/>}{d.correctionCount > 0 && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">Corrected copy</span>}{copyTag(d)}</div></td>
+                    <td className={tdCls}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1">{isUrgentDoc(d) && <UrgentBadge/>}{d.correctionCount > 0 && <span className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">Corrected copy</span>}</div></td>
                     <td className={`${tdCls} whitespace-nowrap text-slate-600`}>{fmtDt(requestedAt(d))}</td>
                     <td className={tdCls}>{received
                       ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5"/>{fmtDt(received)}</span>
@@ -764,7 +758,7 @@ export default function UniversityPage() {
                 const si = docStatusInfo(d);
                 return (
                   <tr key={d._id} className="border-t border-slate-100 hover:bg-slate-50/70">
-                    <td className={`${tdCls} pl-4`}><div className="font-medium text-slate-900">{d.name}</div><div className="mt-1 flex flex-wrap gap-1"><SectionBadge d={d}/>{isUrgentDoc(d) && <UrgentBadge/>}</div></td>
+                    <td className={`${tdCls} pl-4`}><div className="font-medium text-slate-900">{d.name}</div>{isUrgentDoc(d) && <div className="mt-1 flex flex-wrap gap-1"><UrgentBadge/></div>}</td>
                     <td className={tdCls}><StudentLink student={d.student} onOpen={openDocStudent}/><div className="mt-0.5"><EnrollmentChip student={d.student}/></div></td>
                     <td className={tdCls}><span className={`rounded-full px-2 py-0.5 text-xs ${si.color}`}>{si.label}</span></td>
                     <td className={`${tdCls} text-xs text-slate-600`}>{hasCourier(d.courierInfo) ? <>{d.courierInfo.company}{d.courierInfo.trackingNo && <span className="ml-1 font-mono">{d.courierInfo.trackingNo}</span>}{d.courierInfo.dispatchDate && <span> · {fmtDt(d.courierInfo.dispatchDate)}</span>}</> : '—'}</td>

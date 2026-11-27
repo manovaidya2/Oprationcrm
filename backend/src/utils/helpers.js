@@ -23,7 +23,10 @@ exports.notify = async (userIdOrIds, { message, type = 'general', role = '', stu
       studentId:  studentId  || undefined,
       documentId: documentId || undefined,
     }));
-    if (docs.length) await Notification.insertMany(docs);
+    if (docs.length) {
+      await Notification.insertMany(docs);
+      require('./realtime').emitNotification(docs.map(d => d.userId));   // the bell updates at once
+    }
   } catch (e) { console.error('notify failed', e.message); }
 };
 

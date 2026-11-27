@@ -191,6 +191,8 @@ export const docsApi = {
   correctionChecked: (data)     => request('/documents/correction-checked', { method: 'POST', body: JSON.stringify(data) }),
   sendForCorrection: (data)     => request('/documents/send-for-correction', { method: 'POST', body: JSON.stringify(data) }),
   reopenRequests: (data)        => request('/documents/reopen', { method: 'POST', body: JSON.stringify(data) }),
+  // marksheets not in the New Inventory: the Inventory team asks the university { ids } -> { requested, failed }
+  requestFromUniversity: (data) => request('/documents/request-from-university', { method: 'POST', body: JSON.stringify(data) }),
   uploadScan:     (id, fd)      => uploadRequest(`/documents/${id}/upload-scan`, 'PATCH', fd),
   addPayment:     (id, data)    => request(`/documents/${id}/payments`, { method: 'POST', body: JSON.stringify(data) }),
   verifyPayment:  (id, approved, note) => request(`/documents/${id}/verify-payment`, { method: 'PATCH', body: JSON.stringify({ approved, note }) }),
@@ -217,6 +219,26 @@ export const newInventoryApi = {
   // marksheets added straight to the inventory, waiting for Dispatch's correction check / checked { ids }
   checkPending: () => request('/new-inventory/check-pending'),
   correctionChecked: (data) => request('/new-inventory/correction-checked', { method: 'POST', body: JSON.stringify(data) }),
+};
+
+// A counselor's marksheet requests straight to the Inventory team (enrolled students with part of the fee paid)
+export const marksheetRequestsApi = {
+  students: (params = {}) => request(`/marksheet-requests/students?${new URLSearchParams(params)}`),
+  list:     ()            => request('/marksheet-requests'),
+  create:   (data)        => request('/marksheet-requests', { method: 'POST', body: JSON.stringify(data) }),   // { studentId, names }
+};
+
+// what is open on each work page of this login: { '/payment-queries': 3, ... } (sidebar badges)
+export const navApi = {
+  counts: () => request('/nav-counts'),
+};
+
+// Payment queries: counselor -> the centre's Viewer Counselors, to get the course fee from the centre
+export const paymentQueriesApi = {
+  list:      (status = 'Open') => request(`/payment-queries?status=${status}`),
+  create:    (data)            => request('/payment-queries', { method: 'POST', body: JSON.stringify(data) }),   // { studentId, message }
+  addUpdate: (id, text)        => request(`/payment-queries/${id}/updates`, { method: 'POST', body: JSON.stringify({ text }) }),
+  close:     (id, note)        => request(`/payment-queries/${id}/close`, { method: 'POST', body: JSON.stringify({ confirm: true, note }) }),
 };
 
 export const chatApi = {

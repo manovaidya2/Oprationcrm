@@ -6,6 +6,7 @@ const path    = require('path');
 
 const errorHandler = require('./middleware/error');
 const routes       = require('./routes/index');
+const { announceChanges } = require('./utils/realtime');
 
 const app = express();
 
@@ -20,8 +21,8 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Health check
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// All API routes
-app.use('/api', routes);
+// All API routes (a successful change is announced live to the pages that show it)
+app.use('/api', announceChanges, routes);
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));

@@ -19,6 +19,7 @@ const notificationSchema = new mongoose.Schema({
       // used by the code but missing here before, so these alerts were silently dropped
       'settlement_requested', 'settlement_forwarded', 'amount_settled',
       'fee_payment_rejected', 'fee_payment_resubmitted', 'doc_changes_requested', 'installment_timeline',
+      'payment_query',
       'general',
     ],
     default: 'general',

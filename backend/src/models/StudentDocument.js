@@ -59,7 +59,9 @@ const studentDocSchema = new mongoose.Schema({
   name:      { type: String, required: true, trim: true },  // e.g. "Migration Certificate Sem1"
   type:      { type: String, trim: true },                  // Identity, Academic, Other
   note:      { type: String, trim: true },
-  origin:    { type: String, enum: ['Request', 'Inventory', 'Added'], default: 'Request' },
+  // 'Counselor': a counselor's marksheet request straight to the Inventory team (no centre, accountant or payment);
+  // it lives on the Inventory's Marksheet Requests page and ends in the New Inventory (In_Inventory)
+  origin:    { type: String, enum: ['Request', 'Inventory', 'Added', 'Counselor'], default: 'Request' },
   // origin 'Added' only: which student-page tab it belongs to, and whether the centre may see it
   category:        { type: String, enum: ['Other', 'Marksheet'], default: 'Other' },
   visibleToCenter: { type: Boolean, default: false },
@@ -123,6 +125,7 @@ const studentDocSchema = new mongoose.Schema({
       'Fee_Pending',        // accountant checking fees
       'Fee_Rejected',       // accountant rejected
       'Fee_Approved',       // accountant approved → sent to university
+      'With_Inventory',     // a marksheet not in the New Inventory: the Inventory team asks the university for it
       'Sent_To_University', // university notified
       'Dispatch_Received',  // dispatch got courier from university
       'Scanned',            // dispatch uploaded scan
@@ -135,6 +138,7 @@ const studentDocSchema = new mongoose.Schema({
       'Dispatched',         // dispatch sent courier to center
       'Delivered',          // center confirmed receipt
       'Closed',             // Dispatch closed an old request that was not moving (kept with its history and payments; can be reopened)
+      'In_Inventory',       // a counselor's direct marksheet request: received and correction checked — kept in the New Inventory
     ],
     default: 'Requested',
   },

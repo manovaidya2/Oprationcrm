@@ -808,7 +808,7 @@ async function buildLedger(q) {
   const ids = students.map(s => s._id);
   const [payments, docs] = await Promise.all([
     Payment.find({ student: { $in: ids } }).select('student totalFee discount transactions').lean(),
-    StudentDocument.find({ student: { $in: ids }, origin: { $ne: 'Inventory' } }).select('student name status chargeFee payments.amount payments.verified createdAt').sort('createdAt').lean(),
+    StudentDocument.find({ student: { $in: ids }, origin: { $nin: ['Inventory', 'Counselor'] } }).select('student name status chargeFee payments.amount payments.verified createdAt').sort('createdAt').lean(),
   ]);
   const payBy = new Map(payments.map(p => [String(p.student), p]));
   // Documents (requests and the ones added on the student page) are kept apart from the course fee:

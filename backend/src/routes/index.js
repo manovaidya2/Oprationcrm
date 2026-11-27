@@ -18,6 +18,9 @@ const payAccC = require('../controllers/paymentaccount.controller');
 const chatC   = require('../controllers/chat.controller');
 const accountLedgerC = require('../controllers/accountLedger.controller');
 const newInvC = require('../controllers/newInventory.controller');
+const marksheetReqC = require('../controllers/marksheetRequest.controller');
+const payQueryC = require('../controllers/paymentQuery.controller');
+const navCountsC = require('../controllers/navCounts.controller');
 
 // ── Validation schemas ───────────────────────────────────────
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
@@ -190,6 +193,7 @@ router.post ('/documents/reopen',                   protect, requireRole('Admin'
 // Dispatch couriers what is ready to the centre and can mark it received there
 router.post ('/documents/centre-received',          protect, requireRole('Admin','Dispatch'), docC.centreReceivedMany);
 router.post ('/documents/correction-checked',       protect, requireRole('Admin','Inventory'), docC.correctionChecked);
+router.post ('/documents/request-from-university',  protect, requireRole('Admin','Inventory'), docC.requestFromUniversity);
 router.post ('/documents/send-for-correction',      protect, requireRole('Admin','Inventory'), docC.sendForCorrection);
 router.patch('/documents/:id/upload-scan',          protect, requireRole('Admin','Inventory'), upload.single('file'), docC.uploadScan);
 router.patch('/documents/:id/accountant-forward-scan', protect, requireRole('Admin','Accountant'), docC.accountantForwardScan);
@@ -202,6 +206,20 @@ router.patch('/documents/:id/payments/:payId',      protect, requireRole('Admin'
 router.patch('/documents/:id/verify-payment',       protect, requireRole('Admin','Accountant'), docC.verifyPayment);
 router.patch('/documents/:id/dispatch-to-center',   protect, requireRole('Admin','Dispatch'), docC.dispatchToCenter);
 router.patch('/documents/:id/confirm-delivery', protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), docC.centerConfirmDelivery);
+
+// ── Counselors' marksheet requests straight to the Inventory team ──
+router.get  ('/marksheet-requests/students', protect, requireRole('Admin','Counselor'), marksheetReqC.students);
+router.get  ('/marksheet-requests',          protect, requireRole('Admin','Counselor','Inventory'), marksheetReqC.list);
+router.post ('/marksheet-requests',          protect, requireRole('Admin','Counselor'), marksheetReqC.create);
+
+// ── Payment queries: counselor -> the centre's Viewer Counselors (course fee not in) ──
+router.get  ('/payment-queries',            protect, requireRole('Admin','Counselor','ViewerCounselor'), payQueryC.list);
+router.post ('/payment-queries',            protect, requireRole('Admin','Counselor'), payQueryC.create);
+router.post ('/payment-queries/:id/updates', protect, requireRole('Admin','Counselor','ViewerCounselor'), payQueryC.addUpdate);
+router.post ('/payment-queries/:id/close',  protect, requireRole('Admin','Counselor','ViewerCounselor'), payQueryC.close);
+
+// what is open on each work page of this login (sidebar badges)
+router.get  ('/nav-counts',                 protect, navCountsC.counts);
 
 // ── NOTIFICATIONS ─────────────────────────────────────────────
 router.get   ('/notifications',          protect, misc.listNotifications);
