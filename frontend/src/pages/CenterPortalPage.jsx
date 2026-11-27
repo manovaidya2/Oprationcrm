@@ -1447,7 +1447,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
       const fd=new FormData();
       fd.append('studentId',studentId); fd.append('name',name); fd.append('section',tab);
       fd.append('note',df.note);
-      fd.append('chargeFee',Number(df.chargeFee)||0);
+      fd.append('chargeFee',tab === 'Marksheet' ? 0 : (Number(df.chargeFee)||0));   // a marksheet has no charge
       fd.append('requestType',df.requestType||'Soft Copy');
       if(isCounselorSwitch) fd.append('actingAsCenter','true');
       if(payAmount&&Number(payAmount)>0){
@@ -1805,7 +1805,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
           <DialogHeader><DialogTitle className="text-slate-800">{tab === 'Marksheet' ? 'Request Marksheet' : 'Request Document'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <DocNameField section={tab} value={df} onChange={patch=>setDf(p=>({...p,...patch}))}/>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className={`grid grid-cols-1 gap-3 ${tab === 'Marksheet' ? '' : 'sm:grid-cols-2'}`}>
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Request Type *</Label>
                 <Select value={df.requestType} onValueChange={v=>setDf(p=>({...p,requestType:v}))}>
@@ -1816,12 +1816,14 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                   </SelectContent>
                 </Select>
               </div>
+              {tab !== 'Marksheet' && (   /* a marksheet has no charge */
               <div>
                 <Label className="text-xs font-semibold text-slate-600">Charge (₹){paymentRequired && ' *'}</Label>
                 {/* the amount paid follows the charge until it is changed by hand */}
                 <Input type="number" min="0" value={df.chargeFee} placeholder="0" className="mt-1 border-slate-200 h-10"
                   onChange={e=>{ const v=e.target.value; setDf(p=>({...p,chargeFee:v,payAmount:(p.payAmount===''||p.payAmount===p.chargeFee)?v:p.payAmount})); }}/>
               </div>
+              )}
             </div>
             {paymentRequired && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 space-y-3">
@@ -1871,7 +1873,7 @@ function DocsSection({ studentId, isEnrolled, isCancelled }) {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={editDf.chargeFee} onChange={e=>setEditDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
+            {editDf.section !== 'Marksheet' && <div><Label className="text-xs font-semibold text-slate-600">Charge (₹)</Label><Input type="number" value={editDf.chargeFee} onChange={e=>setEditDf(p=>({...p,chargeFee:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>}
             <div><Label className="text-xs font-semibold text-slate-600">Note</Label><Input value={editDf.note} onChange={e=>setEditDf(p=>({...p,note:e.target.value}))} className="mt-1 border-slate-200 h-10"/></div>
             <div>
               <Label className="text-xs font-semibold text-slate-600">Replace File</Label>

@@ -163,11 +163,23 @@ exports.setCentreState = asyncHandler(async (req, res) => {
 
 // GET /api/new-inventory/check-pending — marksheets added straight to the New Inventory, waiting for the Inventory
 // team's correction check (shown in its Correction Check tab)
+// New Inventory documents waiting for their correction check that no request waits on — those are checked from the
+// request (one check does both): marksheets added straight to the inventory, or ones whose request was closed
+async function itemsToCheckAlone(populate = false) {
+  let q = InventoryDocument.find({ correctionCheckPending: true });
+  if (populate) q = q.populate('student', 'name enrollmentNumber courseName').populate('center', 'name').populate('addedBy', 'name role');
+  const items = await q.sort('createdAt').lean();
+  if (!items.length) return items;
+  const ids = items.map(i => i._id);
+  const linked = await StudentDoc.find({ status: 'Dispatch_Received', correctionCheckedAt: null, $or: [{ inventoryItem: { $in: ids } }, { receivedIntoInventory: { $in: ids } }] })
+    .select('inventoryItem receivedIntoInventory').lean();
+  const busy = new Set(linked.flatMap(d => [d.inventoryItem, d.receivedIntoInventory].filter(Boolean).map(String)));
+  return items.filter(i => !busy.has(String(i._id)));
+}
+exports.itemsToCheckAlone = itemsToCheckAlone;
+
 exports.checkPending = asyncHandler(async (req, res) => {
-  const items = await InventoryDocument.find({ correctionCheckPending: true })
-    .populate('student', 'name enrollmentNumber courseName').populate('center', 'name').populate('addedBy', 'name role')
-    .sort('createdAt').lean();
-  res.json({ items });
+  res.json({ items: await itemsToCheckAlone(true) });
 });
 
 // POST /api/new-inventory/correction-checked { ids } — the Inventory team checked them: they stay in the inventory, marked
@@ -188,6 +200,8 @@ exports.correctionChecked = asyncHandler(async (req, res) => {
       $unset: { correctionCheckPending: 1 },
       $push: { log: { action: 'Correction checked by Inventory', at: now, by: req.user._id } },
     });
+    // requests waiting on this document go on with it (one check for both places)
+    await require('./document.controller').checkWaitingOn(id, req.user, `"${item.name}" in the New Inventory`);
     await audit('new_inventory_correction_checked', 'Student', item.student?._id, req.user, { itemId: id, name: item.name }, `${item.student?.name || ''}: ${item.name} correction checked`);
     checked.push(id);
   }

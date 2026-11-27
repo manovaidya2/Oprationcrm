@@ -1330,7 +1330,7 @@ export default function StudentDetailPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Charge (₹)</Label><Input type="number" value={editDocForm.chargeFee} onChange={e=>setEditDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>
+            {(isAdmin || requestSection(editDoc || {}) !== 'Marksheet') && <div><Label>Charge (₹)</Label><Input type="number" value={editDocForm.chargeFee} onChange={e=>setEditDocForm(p=>({...p,chargeFee:e.target.value}))}/></div>}
             <div><Label>Note</Label><Input value={editDocForm.note} onChange={e=>setEditDocForm(p=>({...p,note:e.target.value}))}/></div>
             {isAdmin && (
               <div className="rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 space-y-3">

@@ -619,6 +619,8 @@ export default function DispatchPage({ mode = 'dispatch' }) {
     const n = k => where.filter(x => x === k).length;
     const parts = [n('inventory') && `${n('inventory')} kept in the New Inventory`, n('scan') && `${n('scan')} to Upload scan`, n('dispatch') && `${n('dispatch')} to Dispatch (ready to dispatch)`, n('payment') && `${n('payment')} waiting for the centre's payment`].filter(Boolean).join(', ');
     report(docs, res.checked || [], res.failed, `checked — ${parts}`, `checked — ${parts}`);
+    // the same document was waited on by other requests too (e.g. the counselor's own and the centre's): done with it
+    if (res.alsoChecked?.length) toast.info(`${res.alsoChecked.length} other request${res.alsoChecked.length === 1 ? '' : 's'} for the same document checked too`);
   });
   const checkInventory = items => run(async () => {
     const res = await newInventoryApi.correctionChecked({ ids: items.map(i => i._id) });
@@ -627,6 +629,7 @@ export default function DispatchPage({ mode = 'dispatch' }) {
   const sendBack = (docs, note) => run(async () => {
     const res = await docsApi.sendForCorrection({ ids: docs.map(d => d._id), note });
     report(docs, res.sent || [], res.failed, 'sent back to the university for correction', 'sent back to the university for correction');
+    if (res.alsoSent?.length) toast.info(`${res.alsoSent.length} other request${res.alsoSent.length === 1 ? '' : 's'} for the same document sent back too`);
   });
   const uploadScan = (doc, file) => run(async () => {
     const fd = new FormData();

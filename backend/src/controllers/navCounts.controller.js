@@ -1,6 +1,6 @@
 const asyncHandler = require('express-async-handler');
 const StudentDoc = require('../models/StudentDocument');
-const InventoryDocument = require('../models/InventoryDocument');
+const { itemsToCheckAlone } = require('./newInventory.controller');
 const PaymentQuery = require('../models/PaymentQuery');
 const { scopeFilter } = require('./paymentQuery.controller');
 
@@ -24,7 +24,7 @@ exports.counts = asyncHandler(async (req, res) => {
         status: { $in: FROM_UNIVERSITY },
         $or: [{ origin: { $nin: ['Inventory', 'Added', 'Counselor'] } }, { origin: 'Inventory', status: { $in: ['Sent_To_University', 'University_Dispatched'] } }],
       }),
-      InventoryDocument.countDocuments({ correctionCheckPending: true }),
+      itemsToCheckAlone().then(items => items.length),
     ]).then(([a, b]) => a + b);
   }
   if (['Admin', 'Dispatch'].includes(role)) {
