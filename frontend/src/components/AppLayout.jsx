@@ -3,8 +3,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   LayoutDashboard, Building2, GraduationCap, UserCog, Settings, Activity,
   Bell, LogOut, Menu, X, ChevronRight, IndianRupee,
-  Package, Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
-  CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive, PanelLeftClose, PanelLeftOpen,
+  Truck, BookOpen, University, XCircle, MessageSquare, LifeBuoy,
+  CalendarClock, Check, FileSpreadsheet, FileText, Landmark, Archive, PanelLeftClose, PanelLeftOpen, ClipboardCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -22,6 +22,8 @@ const NAV_CONFIG = {
     { to: '/students',     label: 'Students',     icon: GraduationCap },
     { to: '/centers',      label: 'Centers',      icon: Building2 },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
+    { to: '/inventory-desk', label: 'Inventory Desk', icon: ClipboardCheck },
+    { to: '/dispatch',     label: 'Dispatch',     icon: Truck },
     { to: '/centre-billing', label: 'Centre Billing', icon: FileSpreadsheet },
     { to: '/account-ledger', label: 'Account Ledger', icon: FileSpreadsheet },
     { to: '/payment-desk', label: 'Payment Desk', icon: Landmark },
@@ -72,10 +74,18 @@ const NAV_CONFIG = {
   University: [
     { to: '/university', label: 'Student Records', icon: BookOpen },
   ],
+  // Dispatch couriers what is ready to the centres; the New Inventory is view-only for it
   Dispatch: [
-    { to: '/dispatch', label: 'Documents', icon: Package },
+    { to: '/dispatch', label: 'Dispatch', icon: Truck },
     { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/new-inventory', label: 'New Inventory', icon: Archive },
+    { to: '/chat', label: 'Team Chat', icon: MessageSquare },
+  ],
+  // the Inventory team: documents from the university — receive, correction check, scan — and the New Inventory
+  Inventory: [
+    { to: '/inventory-desk', label: 'Inventory Desk', icon: ClipboardCheck },
+    { to: '/new-inventory', label: 'New Inventory', icon: Archive },
+    { to: '/students', label: 'Students', icon: GraduationCap },
     { to: '/chat', label: 'Team Chat', icon: MessageSquare },
   ],
   Payment: [
@@ -104,6 +114,7 @@ const ROLE_COLORS = {
   Accountant: 'bg-amber-500',
   University: 'bg-purple-500',
   Dispatch:   'bg-teal-500',
+  Inventory:  'bg-violet-500',
   PaymentCoordinator: 'bg-cyan-500',
   Payment: 'bg-sky-500',
   AdmissionMarker: 'bg-lime-500',

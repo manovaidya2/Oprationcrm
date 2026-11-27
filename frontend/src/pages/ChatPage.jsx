@@ -322,7 +322,7 @@ export default function ChatPage() {
             {isCenter ? 'Help & Tickets' : 'Team Chat'}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {isCenter ? 'Raise issues and chat with your assigned counselor.' : 'Internal chat for admin, counselors, accountant, university and dispatch teams.'}
+            {isCenter ? 'Raise issues and chat with your assigned counselor.' : 'Internal chat for admin, counselors, accountant, inventory and dispatch teams.'}
           </p>
         </div>
         {isCenter ? (

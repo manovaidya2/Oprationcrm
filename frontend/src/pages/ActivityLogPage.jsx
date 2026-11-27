@@ -12,7 +12,7 @@ import { auditApi } from '@/lib/api';
 import { toast } from 'sonner';
 
 // ── Config ───────────────────────────────────────────────────
-const ROLES = ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Dispatch', 'PaymentCoordinator', 'Payment'];
+const ROLES = ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Inventory', 'Dispatch', 'PaymentCoordinator', 'Payment'];
 
 const ACTION_LABELS = {
   student_created:             { label: 'Student Added',            color: 'bg-sky-100 text-sky-700' },
@@ -27,7 +27,7 @@ const ACTION_LABELS = {
   doc_forwarded:               { label: 'Document Forwarded',       color: 'bg-purple-100 text-purple-700' },
   accountant_doc_action:       { label: 'Doc Fee Reviewed',         color: 'bg-orange-100 text-orange-700' },
   university_dispatched:       { label: 'University Dispatched',    color: 'bg-teal-100 text-teal-700' },
-  dispatch_received:           { label: 'Dispatch Received',        color: 'bg-cyan-100 text-cyan-700' },
+  dispatch_received:           { label: 'Received from University', color: 'bg-cyan-100 text-cyan-700' },
   scan_uploaded:               { label: 'Scan Uploaded',            color: 'bg-teal-100 text-teal-700' },
   counselor_forwarded_to_center:{ label: 'Forwarded to Center',     color: 'bg-indigo-100 text-indigo-700' },
   doc_payment_added:           { label: 'Doc Payment Added',        color: 'bg-emerald-100 text-emerald-700' },

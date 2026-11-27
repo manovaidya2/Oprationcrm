@@ -15,8 +15,8 @@ const TABS = [
   { key: 'Marksheet', label: 'Marksheets',      icon: GraduationCap, noun: 'marksheet' },
   { key: 'Other',     label: 'Other documents', icon: FileText,      noun: 'document' },
 ];
-const CAN_ADD = ['Admin', 'Accountant', 'Counselor', 'Dispatch'];
-const CAN_MARK = ['Admin', 'Dispatch'];   // who marks where a document is now
+const CAN_ADD = ['Admin', 'Accountant', 'Counselor', 'Inventory'];
+const CAN_MARK = ['Admin', 'Inventory'];   // who marks where a document is now (Dispatch only looks)
 const EMPTY_FORM = { pick: '', customName: '', note: '', state: 'office' };
 // where a document is: held in the office, sent to the centre, received by the centre, or back at the
 // university for correction (until the corrected copy is received)
@@ -156,7 +156,7 @@ export default function NewInventoryStudentPage() {
           <Input value={form.note} maxLength={300} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="e.g. Shelf 3, file 12" className="mt-1 h-10 border-slate-200"/>
         </div>
         {tab === 'Marksheet' && form.state === 'office' && (
-          <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">It is marked received from the university and goes to Dispatch's Correction Check. Checked, it stays here until a centre requests it.</p>
+          <p className="rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">It is marked received from the university and goes to the Inventory Desk's Correction check. Checked, it stays here until a centre requests it.</p>
         )}
         <Button className="h-11 w-full bg-indigo-600 hover:bg-indigo-700" disabled={saving} onClick={add}>
           {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin"/> : <Plus className="mr-1.5 h-4 w-4"/>}Add to inventory
@@ -174,7 +174,7 @@ export default function NewInventoryStudentPage() {
           <h2 className="text-lg font-bold text-slate-900">{item.name}</h2>
           <div className="flex flex-wrap gap-1.5">
             <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${p.pill}`}><PlaceIcon className="h-3.5 w-3.5"/>{p.label}</span>
-            {item.correctionCheckPending && <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700"><ClipboardCheck className="h-3.5 w-3.5"/>Waiting for Dispatch's correction check</span>}
+            {item.correctionCheckPending && <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700"><ClipboardCheck className="h-3.5 w-3.5"/>Waiting for the correction check</span>}
             {item.correctionCheckedAt && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"><ClipboardCheck className="h-3.5 w-3.5"/>Correction checked</span>}
           </div>
           <p className="text-xs text-slate-500">
@@ -182,7 +182,7 @@ export default function NewInventoryStudentPage() {
             {item.addedBy?.name && <> · {item.fromRequest ? 'marked by' : 'added by'} <span className="font-medium text-slate-700">{byLine(item.addedBy)}</span></>}
             {item.fromRequest?.requestType && <> · {item.fromRequest.requestType} request</>}
           </p>
-          {item.correctionCheckedAt && <p className="text-xs text-emerald-700">Checked by {byLine(item.correctionCheckedBy) || 'Dispatch'} · {fmtDt(item.correctionCheckedAt)}</p>}
+          {item.correctionCheckedAt && <p className="text-xs text-emerald-700">Checked by {byLine(item.correctionCheckedBy) || 'Inventory'} · {fmtDt(item.correctionCheckedAt)}</p>}
           {item.note && !item.fromRequest && <p className="text-xs italic text-slate-500">“{item.note}”</p>}
         </div>
 
@@ -308,7 +308,7 @@ export default function NewInventoryStudentPage() {
         <section aria-label={active.label} className="min-w-0 flex-[999_1_520px]">
           <p className="mb-3 flex items-start gap-2 text-xs text-slate-500">
             <Send className="mt-0.5 h-3.5 w-3.5 shrink-0"/>
-            When the accountant approves a {active.noun} request for {student.name} and the {active.noun} is here in the office, the request goes to Dispatch instead of the university.
+            When the accountant approves a {active.noun} request for {student.name} and the {active.noun} is here in the office, the request goes to the Inventory Desk instead of the university.
           </p>
           {shown.length === 0 ? (
             <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white py-14 text-center">

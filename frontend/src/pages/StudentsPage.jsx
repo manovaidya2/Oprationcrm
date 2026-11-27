@@ -978,7 +978,7 @@ export default function StudentsPage() {
                       <SelectContent>
                         <SelectItem value="Requested">Requested</SelectItem>
                         <SelectItem value="Sent_To_University">Sent To University</SelectItem>
-                        <SelectItem value="Dispatch_Received">Dispatch Received</SelectItem>
+                        <SelectItem value="Dispatch_Received">Inventory Received</SelectItem>
                         <SelectItem value="Payment_Verified">Payment Verified</SelectItem>
                         <SelectItem value="Dispatched">Dispatched</SelectItem>
                         <SelectItem value="Delivered">Delivered</SelectItem>

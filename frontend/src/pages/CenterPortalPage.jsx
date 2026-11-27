@@ -402,7 +402,7 @@ const DOC_STATUS = {
   Fee_Rejected:{label:'Fee Rejected',color:'bg-red-50 text-red-600 border border-red-200'},
   Sent_To_University:{label:'At University',color:'bg-purple-50 text-purple-700 border border-purple-200'},
   University_Dispatched:{label:'Uni Dispatched',color:'bg-violet-50 text-violet-700 border border-violet-200'},
-  Dispatch_Received:{label:'Dispatch Received',color:'bg-teal-50 text-teal-700 border border-teal-200'},
+  Dispatch_Received:{label:'Received in Inventory',color:'bg-teal-50 text-teal-700 border border-teal-200'},
   Counselor_Received:{label:'With Counselor',color:'bg-indigo-50 text-indigo-700 border border-indigo-200'},
   Center_Notified:{label:'⚡ Pay Required',color:'bg-amber-50 text-amber-700 border border-amber-300'},
   Payment_Submitted:{label:'Payment Sent',color:'bg-blue-50 text-blue-700 border border-blue-200'},

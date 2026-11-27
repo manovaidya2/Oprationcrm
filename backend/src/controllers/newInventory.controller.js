@@ -96,7 +96,7 @@ exports.addItem = asyncHandler(async (req, res) => {
   if (!CENTRE_STATES.includes(state)) throw fail(400, 'Choose where the document is now');
   const exists = await InventoryDocument.exists({ student: student._id, section, nameKey: InventoryDocument.nameKeyOf(name) });
   if (exists) throw fail(409, `${name} is already in the inventory for ${student.name}`);
-  // a marksheet kept in the office: received from the university, to be checked for corrections by Dispatch
+  // a marksheet kept in the office: received from the university, to be checked for corrections by the Inventory team
   const toCheck = section === 'Marksheet' && state === 'office';
   let item;
   try {
@@ -114,13 +114,13 @@ exports.addItem = asyncHandler(async (req, res) => {
     throw e;
   }
   await audit('new_inventory_added', 'Student', student._id, req.user, { section, name, state, itemId: item._id }, `${student.name}: ${name} added to New Inventory`);
-  if (toCheck && req.user.role !== 'Dispatch') {
-    await notifyRole('Dispatch', { message: `Marksheet added to the New Inventory - check it for corrections: "${name}" - ${student.name}`, type: 'doc_forwarded', studentId: student._id, role: 'Dispatch' });
+  if (toCheck && req.user.role !== 'Inventory') {
+    await notifyRole('Inventory', { message: `Marksheet added to the New Inventory - check it for corrections: "${name}" - ${student.name}`, type: 'doc_forwarded', studentId: student._id, role: 'Inventory' });
   }
   res.status(201).json({ student, items: await itemsOf(student._id) });
 });
 
-// PATCH /api/new-inventory/items/:itemId/centre { state } — Dispatch marks where the document is now.
+// PATCH /api/new-inventory/items/:itemId/centre { state } — the Inventory team marks where the document is now.
 // 'received': the centre has it; a request for it that was couriered (Dispatched) is marked Delivered too.
 // 'office': back to held here (a mistake undone; requests are not changed).
 exports.setCentreState = asyncHandler(async (req, res) => {
@@ -161,8 +161,8 @@ exports.setCentreState = asyncHandler(async (req, res) => {
   res.json({ student, items: await itemsOf(student._id), delivered });
 });
 
-// GET /api/new-inventory/check-pending — marksheets added straight to the New Inventory, waiting for Dispatch's
-// correction check (shown in Dispatch's Correction Check tab)
+// GET /api/new-inventory/check-pending — marksheets added straight to the New Inventory, waiting for the Inventory
+// team's correction check (shown in its Correction Check tab)
 exports.checkPending = asyncHandler(async (req, res) => {
   const items = await InventoryDocument.find({ correctionCheckPending: true })
     .populate('student', 'name enrollmentNumber courseName').populate('center', 'name').populate('addedBy', 'name role')
@@ -170,7 +170,7 @@ exports.checkPending = asyncHandler(async (req, res) => {
   res.json({ items });
 });
 
-// POST /api/new-inventory/correction-checked { ids } — Dispatch checked them: they stay in the inventory, marked
+// POST /api/new-inventory/correction-checked { ids } — the Inventory team checked them: they stay in the inventory, marked
 // correction checked, until a centre requests them
 exports.correctionChecked = asyncHandler(async (req, res) => {
   const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(String))].filter(isId);
@@ -186,7 +186,7 @@ exports.correctionChecked = asyncHandler(async (req, res) => {
     await InventoryDocument.updateOne({ _id: id }, {
       $set: { correctionCheckedAt: now, correctionCheckedBy: req.user._id },
       $unset: { correctionCheckPending: 1 },
-      $push: { log: { action: 'Correction checked by Dispatch', at: now, by: req.user._id } },
+      $push: { log: { action: 'Correction checked by Inventory', at: now, by: req.user._id } },
     });
     await audit('new_inventory_correction_checked', 'Student', item.student?._id, req.user, { itemId: id, name: item.name }, `${item.student?.name || ''}: ${item.name} correction checked`);
     checked.push(id);

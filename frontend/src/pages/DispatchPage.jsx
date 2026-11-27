@@ -15,9 +15,11 @@ import { useAuth } from '@/context/AuthContext';
 import { usePanelDismissals } from '@/lib/usePanelDismissals';
 import { requestSection } from '@/lib/documentOptions';
 
-// Dispatch: a list of the documents at one stage on the left, the chosen one (or the selected ones) on the right
-// with what to do next. Stages: Requests (waiting for the university's courier) → Correction check → Upload scan
-// → In progress (counselor / centre / accountant) → Ready to dispatch → Dispatched → Closed.
+// One page for two desks: a list of the documents at one stage on the left, the chosen one (or the selected ones)
+// on the right with what to do next.
+//   Inventory Desk (/inventory-desk): Requests (waiting for the university's courier) → Correction check → Upload scan
+//     → In progress (counselor / centre payment) · Closed
+//   Dispatch (/dispatch): Ready to dispatch → Dispatched
 
 const fmtDt   = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 const fmtFull = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
@@ -52,14 +54,26 @@ const STAGES = [
   { key: 'dispatched', label: 'Dispatched',        dot: 'bg-slate-500',  count: 'bg-slate-100 text-slate-700' },
   { key: 'closed',     label: 'Closed',            dot: 'bg-zinc-400',   count: 'bg-zinc-100 text-zinc-600' },
 ];
+// which stages each desk works (Admin can open both pages)
+const DESKS = {
+  inventory: {
+    title: 'Inventory Desk', sub: 'Documents from the university — mark received, check for corrections, upload the scan',
+    stages: ['requests', 'check', 'scan', 'progress', 'closed'], dismissKey: 'inventory-desk',
+  },
+  dispatch: {
+    title: 'Dispatch', sub: 'Payment verified documents — courier them to the centres',
+    stages: ['ready', 'dispatched'], dismissKey: 'dispatch',
+  },
+};
+
 const STAGE_NOTE = {
   requests:   "Waiting for the university's courier. When it arrives, mark it received: it goes into the student's New Inventory and on to the correction check.",
-  check:      'Check each copy from the university. Correct: a soft copy goes to Upload Scan, a hard copy to Ready to Dispatch. Wrong: send it back to the university.',
+  check:      'Check each copy from the university. Correct: a soft copy goes to Upload Scan, a hard copy goes to Dispatch (Ready to dispatch). Wrong: send it back to the university.',
   scan:       'Scan and upload. The scan goes straight to the counselor and is kept with the document in the New Inventory.',
-  progress:   'Scanned — now with the counselor, the centre (payment) or the accountant (payment check). Nothing to do here yet.',
+  progress:   'Scanned — now with the counselor, the centre (payment) or the accountant (payment check). Once the payment is verified it goes to Dispatch.',
   ready:      'Payment verified — courier it to the centre.',
   dispatched: "Couriered to the centre. If the centre has it but hasn't confirmed, mark it received by the centre.",
-  closed:     'Requests closed from Dispatch. Nothing was erased — reopen one to put it back where it was.',
+  closed:     'Requests closed here. Nothing was erased — reopen one to put it back where it was.',
 };
 
 const TAG = {
@@ -374,7 +388,7 @@ function CloseForm({ count, busy, onSubmit }) {
     <form onSubmit={e => { e.preventDefault(); onSubmit(reason.trim()); }} className="w-full space-y-2 rounded-xl border border-red-200 bg-red-50/50 p-3">
       <Label className="text-xs font-semibold text-red-800">Reason (optional)</Label>
       <Input autoFocus value={reason} maxLength={300} onChange={e => setReason(e.target.value)} placeholder="e.g. very old request, not moving" className="h-10 border-red-200 bg-white"/>
-      <p className="text-xs text-red-800">Marked Closed: it leaves Dispatch and the university's list. History and payments stay; reopen it any time from Closed.</p>
+      <p className="text-xs text-red-800">Marked Closed: it leaves this desk and the university's list. History and payments stay; reopen it any time from Closed.</p>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={busy} className="bg-red-600 hover:bg-red-700">{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin"/>}{count > 1 ? `Close ${count} requests` : 'Close request'}</Button>
         <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
@@ -448,9 +462,11 @@ function ListRow({ entry, active, selectable, selected, onToggle, onOpen, now })
 }
 
 // ── Main Page ─────────────────────────────────────────────────
-export default function DispatchPage() {
+export default function DispatchPage({ mode = 'dispatch' }) {
+  const desk = DESKS[mode] || DESKS.dispatch;
+  const isInventoryDesk = desk === DESKS.inventory;
   const { user } = useAuth();
-  const { dismiss, isDismissed } = usePanelDismissals(user, 'dispatch');
+  const { dismiss, isDismissed } = usePanelDismissals(user, desk.dismissKey);
   const [now] = useState(() => Date.now());
   const [all,     setAll]     = useState([]);
   const [invToCheck, setInvToCheck] = useState([]);   // marksheets added straight to the New Inventory, to check
@@ -458,7 +474,7 @@ export default function DispatchPage() {
   const [busy,    setBusy]    = useState(false);
   const [detailDoc, setDetailDoc] = useState(null);
   const [search,  setSearch]  = useState('');
-  const [stage,   setStage]   = useState('requests');
+  const [stage,   setStage]   = useState(desk.stages[0]);
   const [reqFilter, setReqFilter] = useState('all');        // Requests: all | Marksheet | Other | urgent
   const [dispFilter, setDispFilter] = useState('awaiting');  // Dispatched: awaiting the centre's receipt | all
   const [focusId, setFocusId] = useState('');
@@ -469,15 +485,15 @@ export default function DispatchPage() {
       setLoading(true);
       const [docs, pendingInv] = await Promise.all([
         docsApi.list({ all: '1' }),
-        newInventoryApi.checkPending().catch(() => ({ items: [] })),
+        isInventoryDesk ? newInventoryApi.checkPending().catch(() => ({ items: [] })) : { items: [] },
       ]);
       setAll(docs);
       setInvToCheck(pendingInv?.items || []);
     } catch (e) {
       console.error('DispatchPage load failed', e);
-      toast.error(e?.message || 'Failed to load dispatch queue');
+      toast.error(e?.message || 'Failed to load the documents');
     } finally { setLoading(false); }
-  }, []);
+  }, [isInventoryDesk]);
   useEffect(() => { load(); }, [load]);
 
   // ── the lists ──
@@ -565,7 +581,7 @@ export default function DispatchPage() {
     const res = await docsApi.correctionChecked({ ids: docs.map(d => d._id) });
     const where = Object.values(res.next || {});
     const n = k => where.filter(x => x === k).length;
-    const parts = [n('scan') && `${n('scan')} to Upload scan`, n('dispatch') && `${n('dispatch')} to Ready to dispatch`, n('payment') && `${n('payment')} waiting for the centre's payment`].filter(Boolean).join(', ');
+    const parts = [n('scan') && `${n('scan')} to Upload scan`, n('dispatch') && `${n('dispatch')} to Dispatch (ready to dispatch)`, n('payment') && `${n('payment')} waiting for the centre's payment`].filter(Boolean).join(', ');
     report(docs, res.checked || [], res.failed, `checked — ${parts}`, `checked — ${parts}`);
   });
   const checkInventory = items => run(async () => {
@@ -702,7 +718,7 @@ export default function DispatchPage() {
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               {hideable && (
-                <Button variant="ghost" size="sm" className="text-slate-500" title="Hide it from your Dispatch list (on this browser)" onClick={() => { dismiss(`doc:${d._id}`); setFocusId(''); }}>
+                <Button variant="ghost" size="sm" className="text-slate-500" title="Hide it from your list (on this browser)" onClick={() => { dismiss(`doc:${d._id}`); setFocusId(''); }}>
                   <EyeOff className="mr-1 h-4 w-4"/>Hide
                 </Button>
               )}
@@ -763,7 +779,7 @@ export default function DispatchPage() {
           )}
           {stage === 'check' && (
             <>
-              <p className="text-sm text-slate-600">{isHard(d) ? 'Correct: this hard copy goes to Ready to dispatch (or the centre pays first).' : 'Correct: this soft copy goes to Upload scan.'}</p>
+              <p className="text-sm text-slate-600">{isHard(d) ? 'Correct: this hard copy goes to Dispatch to courier (or the centre pays first).' : 'Correct: this soft copy goes to Upload scan.'}</p>
               <div className="flex flex-wrap items-start gap-2">
                 <Button className="h-10 bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => checkDocsDone([d])}><ClipboardCheck className="mr-1.5 h-4 w-4"/>Correction checked</Button>
                 <SendBackForm key={`s-${d._id}`} count={1} busy={busy} onSubmit={note => sendBack([d], note)}/>
@@ -777,7 +793,7 @@ export default function DispatchPage() {
               <div className="border-t pt-3"><CloseForm key={`c-${d._id}`} count={1} busy={busy} onSubmit={reason => closeDocs([d], reason)}/></div>
             </>
           )}
-          {stage === 'progress' && <p className="text-sm text-slate-600">{whereText(d)} — nothing for Dispatch to do yet. It comes to Ready to dispatch once the payment is verified.</p>}
+          {stage === 'progress' && <p className="text-sm text-slate-600">{whereText(d)} — nothing to do here yet. Once the payment is verified it goes to Dispatch to courier.</p>}
           {stage === 'ready' && <DispatchForm key={`d-${d._id}`} docs={[d]} busy={busy} onSubmit={f => dispatchDocs([d], f)}/>}
           {stage === 'dispatched' && (d.status === 'Dispatched'
             ? <Button className="h-11 bg-emerald-600 hover:bg-emerald-700" disabled={busy} onClick={() => centreReceived([d])}><CheckCircle2 className="mr-2 h-4 w-4"/>Received by centre</Button>
@@ -810,6 +826,7 @@ export default function DispatchPage() {
     </div>
   );
 
+  const stages = STAGES.filter(s => desk.stages.includes(s.key));
   const stageInfo = STAGES.find(s => s.key === stage);
   const allSelected = selectable.length > 0 && selected.length === selectable.length;
 
@@ -817,8 +834,8 @@ export default function DispatchPage() {
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dispatch</h1>
-          <p className="text-sm text-slate-500">Documents from the university — check, scan and courier to centres</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">{desk.title}</h1>
+          <p className="text-sm text-slate-500">{desk.sub}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex h-10 min-w-[260px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-slate-400">
@@ -831,7 +848,7 @@ export default function DispatchPage() {
       </header>
 
       <nav aria-label="Stages" className="flex flex-wrap gap-1.5">
-        {STAGES.map(s => {
+        {stages.map(s => {
           const on = stage === s.key;
           return (
             <button key={s.key} type="button" onClick={() => goStage(s.key)} aria-pressed={on}

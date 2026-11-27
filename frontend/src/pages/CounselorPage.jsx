@@ -1231,7 +1231,7 @@ export default function CounselorPage() {
           { label:'Pending Review',  value: pending.length,        color:'text-blue-600',   bg:'bg-blue-50 border-blue-200',    dot:'bg-blue-400'   },
           { label:'Acct Rejected',   value: acctRejected.length,   color:'text-red-600',    bg:'bg-red-50 border-red-200',      dot:'bg-red-400'    },
           { label:'Fee Payments',    value: visibleFeePayments.length,    color:'text-orange-600', bg:'bg-orange-50 border-orange-200',dot:'bg-orange-400' },
-          { label:'From Dispatch',   value: fromDisp.length,       color:'text-violet-600', bg:'bg-violet-50 border-violet-200',dot:'bg-violet-400' },
+          { label:'From Inventory',  value: fromDisp.length,       color:'text-violet-600', bg:'bg-violet-50 border-violet-200',dot:'bg-violet-400' },
           { label:'Delivery Pending',value: deliveryPending.length, color:'text-rose-600',   bg:'bg-rose-50 border-rose-200',    dot:'bg-rose-400'   },
         ].map(({ label, value, color, bg, dot }) => (
           <div key={label} className={`rounded-xl border p-4 ${bg}`}>
@@ -1255,7 +1255,7 @@ export default function CounselorPage() {
             { val:'marksheetreq', label:'Marksheet Requests', count: marksheetRequests.length, dot:'bg-violet-500'},
             { val:'docreq',    label:'Other Doc Requests', count: otherDocRequests.length, dot: otherDocRequests.some(d => d.urgent) ? 'bg-red-500' : 'bg-indigo-500'},
             { val:'feepay',    label:'Fee Payments',      count: visibleFeePayments.length,      dot:'bg-orange-500'},
-            { val:'dispatch',  label:'From Dispatch',     count: fromDisp.length,         dot:'bg-violet-500'},
+            { val:'dispatch',  label:'From Inventory',    count: fromDisp.length,         dot:'bg-violet-500'},
             { val:'delipend',  label:'Delivery Pending',  count: deliveryPending.length,  dot:'bg-rose-500'},
             { val:'settlement',label:'Settlement',        count: visibleSettlementQueue.length,  dot:'bg-amber-500'},
             { val:'students',  label:'All Students',      count: allStudents.length,      dot:'' },
@@ -1427,7 +1427,7 @@ export default function CounselorPage() {
 
         {/* ── From Dispatch Tab ──────────────────────────── */}
         <TabsContent value="dispatch" className="space-y-2 mt-4">
-          <TabHint>Scanned documents from Dispatch — review and forward to center.</TabHint>
+          <TabHint>Scanned documents from the Inventory Desk — review and forward to center.</TabHint>
           {!isViewerCounselor && fromDisp.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
               <label className="flex items-center gap-2 text-sm">
@@ -1444,7 +1444,7 @@ export default function CounselorPage() {
               </Button>
             </div>
           )}
-          {fromDisp.length===0 ? <EmptyState icon={Download} message="No documents from dispatch"/> :
+          {fromDisp.length===0 ? <EmptyState icon={Download} message="No documents from inventory"/> :
           fromDisp.map(d=>(
             <DocCard key={d._id} d={d} paySummary={docPayments[d.student?._id]} accMap={payAccounts}
               accent="border-violet-200"

@@ -23,7 +23,7 @@ const newInvC = require('../controllers/newInventory.controller');
 const loginSchema     = z.object({ email: z.string().email(), password: z.string().min(1) });
 const userCreateSchema= z.object({
   name: z.string().min(1), email: z.string().email(), password: z.string().min(6),
-  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','PaymentCoordinator','Payment','AdmissionMarker']),
+  role: z.enum(['Admin','Counselor','ViewerCounselor','Center','Accountant','University','Dispatch','Inventory','PaymentCoordinator','Payment','AdmissionMarker']),
   centerId:     z.string().optional(),
   centerIds:    z.array(z.string()).optional(),
   universityId: z.string().optional(),
@@ -98,14 +98,14 @@ router.get   ('/admission-timeline', protect, requireRole('Admin','Accountant','
 router.get   ('/admission-timeline/history', protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor'), studentC.admissionHistory);
 router.post  ('/students/existing-admission', protect, requireRole('Admin'), upload.any(), studentC.createExistingAdmission);
 router.get   ('/students/:id', protect, studentC.get);
-router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator','Center','AdmissionMarker'), addedDocsC.list);
-router.post  ('/students/:id/added-docs/:docId/file',       protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), upload.single('file'), addedDocsC.uploadFile);
-router.patch ('/students/:id/added-docs/:docId/visibility', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.setVisibility);
-router.post  ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.add);
-router.patch ('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.update);
-router.delete('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), addedDocsC.remove);
+router.get   ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory','PaymentCoordinator','Center','AdmissionMarker'), addedDocsC.list);
+router.post  ('/students/:id/added-docs/:docId/file',       protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), upload.single('file'), addedDocsC.uploadFile);
+router.patch ('/students/:id/added-docs/:docId/visibility', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), addedDocsC.setVisibility);
+router.post  ('/students/:id/added-docs',                 protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), addedDocsC.add);
+router.patch ('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), addedDocsC.update);
+router.delete('/students/:id/added-docs/:docId',          protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), addedDocsC.remove);
 router.delete('/students/:id/added-docs/:docId/payments/:payId', protect, requireRole('Admin'), addedDocsC.removePayment);
-router.post  ('/students/:id/added-docs/:docId/payments', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch'), upload.single('paymentScreenshot'), addedDocsC.addPayment);
+router.post  ('/students/:id/added-docs/:docId/payments', protect, requireRole('Admin','Counselor','ViewerCounselor','Dispatch','Inventory'), upload.single('paymentScreenshot'), addedDocsC.addPayment);
 router.post  ('/students',     protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), upload.array('submissionFiles', 10), studentC.create);
 router.put   ('/students/:id', protect, requireRole('Admin','Counselor','ViewerCounselor','Center','PaymentCoordinator','AdmissionMarker'), upload.any(), studentC.update);
 router.delete('/students/:id', protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), studentC.remove);
@@ -154,21 +154,22 @@ router.patch ('/payments/:studentId/transactions/:txId/resend',          protect
 router.patch ('/payments/:studentId/transactions/:txId/account-verify',  protect, requireRole('Admin','Accountant'), payC.accountantVerifyFeePayment);
 router.delete('/payments/:studentId/transactions/:txId',                 protect, requireRole('Admin','Counselor','Center'), payC.deleteTransaction);
 router.get   ('/payments-rejected',                                      protect, requireRole('Admin'), payC.getRejectedPayments);
-router.get   ('/document-inventory',                    protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), docC.inventoryList);
-router.post  ('/document-inventory/:studentId/docs',    protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryAddDoc);
-router.patch ('/document-inventory/docs/:id/receive',   protect, requireRole('Admin','Dispatch'), docC.inventoryReceiveDoc);
-router.patch ('/document-inventory/docs/:id/request',   protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryRequestDoc);
-router.patch ('/document-inventory/docs/:id/urgent',    protect, requireRole('Admin','Accountant','Counselor','Dispatch'), docC.inventoryUrgentRequestDoc);
+router.get   ('/document-inventory',                    protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','Inventory','PaymentCoordinator'), docC.inventoryList);
+router.post  ('/document-inventory/:studentId/docs',    protect, requireRole('Admin','Accountant','Counselor','Inventory'), docC.inventoryAddDoc);
+router.patch ('/document-inventory/docs/:id/receive',   protect, requireRole('Admin','Inventory'), docC.inventoryReceiveDoc);
+router.patch ('/document-inventory/docs/:id/request',   protect, requireRole('Admin','Accountant','Counselor','Inventory'), docC.inventoryRequestDoc);
+router.patch ('/document-inventory/docs/:id/urgent',    protect, requireRole('Admin','Accountant','Counselor','Inventory'), docC.inventoryUrgentRequestDoc);
 router.patch ('/document-inventory/docs/:id/dispatched', protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDispatchedDoc);
 router.patch ('/document-inventory/docs/:id/delivered',  protect, requireRole('Admin','Dispatch'), docC.inventoryMarkDeliveredDoc);
 
-// New Inventory: documents physically held per student (the Document Inventory above is unchanged)
-router.get  ('/new-inventory/students',           protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), newInvC.students);
-router.get  ('/new-inventory/students/:id',       protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','PaymentCoordinator'), newInvC.student);
-router.post ('/new-inventory/students/:id/items', protect, requireRole('Admin','Accountant','Counselor','Dispatch'), newInvC.addItem);
-router.patch('/new-inventory/items/:itemId/centre', protect, requireRole('Admin','Dispatch'), newInvC.setCentreState);
-router.get  ('/new-inventory/check-pending',      protect, requireRole('Admin','Dispatch'), newInvC.checkPending);
-router.post ('/new-inventory/correction-checked', protect, requireRole('Admin','Dispatch'), newInvC.correctionChecked);
+// New Inventory: documents physically held per student (the Document Inventory above is unchanged).
+// The Inventory team keeps it; Dispatch and the others can only look.
+router.get  ('/new-inventory/students',           protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','Inventory','PaymentCoordinator'), newInvC.students);
+router.get  ('/new-inventory/students/:id',       protect, requireRole('Admin','Accountant','Counselor','ViewerCounselor','Dispatch','Inventory','PaymentCoordinator'), newInvC.student);
+router.post ('/new-inventory/students/:id/items', protect, requireRole('Admin','Accountant','Counselor','Inventory'), newInvC.addItem);
+router.patch('/new-inventory/items/:itemId/centre', protect, requireRole('Admin','Inventory'), newInvC.setCentreState);
+router.get  ('/new-inventory/check-pending',      protect, requireRole('Admin','Inventory'), newInvC.checkPending);
+router.post ('/new-inventory/correction-checked', protect, requireRole('Admin','Inventory'), newInvC.correctionChecked);
 // ── DOCUMENTS ────────────────────────────────────────────────
 router.get   ('/documents',                       protect, docC.list);
 router.get   ('/documents/:id',                   protect, docC.get);
@@ -181,14 +182,16 @@ router.patch('/documents/:id/urgent',             protect, requireRole('Admin','
 router.patch('/documents/:id/forward',            protect, requireRole('Admin','Counselor'), docC.forward);
 router.patch('/documents/:id/request-changes',    protect, requireRole('Admin','Counselor','Accountant'), docC.requestChanges);
 router.patch('/documents/:id/accountant-action',  protect, requireRole('Admin','Accountant'), docC.accountantAction);
-router.patch('/documents/:id/dispatch-receive',     protect, requireRole('Admin','Dispatch'), docC.dispatchReceive);
-router.post ('/documents/dispatch-receive',         protect, requireRole('Admin','Dispatch'), docC.dispatchReceiveMany);
-router.post ('/documents/close',                    protect, requireRole('Admin','Dispatch'), docC.closeRequests);
-router.post ('/documents/reopen',                   protect, requireRole('Admin','Dispatch'), docC.reopenRequests);
+// documents from the university: the Inventory team receives, checks, scans, closes / reopens them
+router.patch('/documents/:id/dispatch-receive',     protect, requireRole('Admin','Inventory'), docC.dispatchReceive);
+router.post ('/documents/dispatch-receive',         protect, requireRole('Admin','Inventory'), docC.dispatchReceiveMany);
+router.post ('/documents/close',                    protect, requireRole('Admin','Inventory'), docC.closeRequests);
+router.post ('/documents/reopen',                   protect, requireRole('Admin','Inventory'), docC.reopenRequests);
+// Dispatch couriers what is ready to the centre and can mark it received there
 router.post ('/documents/centre-received',          protect, requireRole('Admin','Dispatch'), docC.centreReceivedMany);
-router.post ('/documents/correction-checked',       protect, requireRole('Admin','Dispatch'), docC.correctionChecked);
-router.post ('/documents/send-for-correction',      protect, requireRole('Admin','Dispatch'), docC.sendForCorrection);
-router.patch('/documents/:id/upload-scan',          protect, requireRole('Admin','Dispatch'), upload.single('file'), docC.uploadScan);
+router.post ('/documents/correction-checked',       protect, requireRole('Admin','Inventory'), docC.correctionChecked);
+router.post ('/documents/send-for-correction',      protect, requireRole('Admin','Inventory'), docC.sendForCorrection);
+router.patch('/documents/:id/upload-scan',          protect, requireRole('Admin','Inventory'), upload.single('file'), docC.uploadScan);
 router.patch('/documents/:id/accountant-forward-scan', protect, requireRole('Admin','Accountant'), docC.accountantForwardScan);
 router.patch('/documents/:id/forward-to-center',    protect, requireRole('Admin','Counselor'), docC.counselorForwardToCenter);
 router.patch('/documents/:id/request-dispatch',      protect, requireRole('Admin','Center','Counselor','ViewerCounselor','PaymentCoordinator'), docC.requestDispatch);

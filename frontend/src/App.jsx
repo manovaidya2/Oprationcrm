@@ -48,6 +48,7 @@ const ROLE_HOME = {
   Accountant: '/accountant',
   University: '/university',
   Dispatch:   '/dispatch',
+  Inventory:  '/inventory-desk',
   PaymentCoordinator: '/payment-coordinator',
   Payment:    '/payment-desk',
   AdmissionMarker: '/admissions',
@@ -59,6 +60,7 @@ const ROLE_ALLOWED = {
   Accountant: ['/admission-timeline', '/accountant','/students', '/students/', '/new-inventory', '/centre-billing', '/account-ledger', '/invoice', '/payment-desk', '/chat'],
   University: ['/university', '/students/'],
   Dispatch:   ['/dispatch', '/students', '/students/', '/new-inventory', '/chat'],
+  Inventory:  ['/inventory-desk', '/students', '/students/', '/new-inventory', '/chat'],
   PaymentCoordinator: ['/payment-coordinator', '/payment-due-timeline', '/center', '/students', '/students/', '/new-inventory', '/chat'],
   Payment:    ['/payment-desk', '/chat'],
   // Adds admissions inside a centre's panel (/center); students and centres are view-only
@@ -103,8 +105,9 @@ export default function App() {
           <Route path="university"          element={<W><UniversityPage /></W>} />
           {/* University management (Admin only) */}
           <Route path="universities"        element={<W><UniversityManagePage /></W>} />
-          {/* Dispatch */}
-          <Route path="dispatch"            element={<W><DispatchPage /></W>} />
+          {/* Inventory team: documents from the university (receive, check, scan); Dispatch: courier to centres */}
+          <Route path="inventory-desk"      element={<W><DispatchPage key="inventory" mode="inventory" /></W>} />
+          <Route path="dispatch"            element={<W><DispatchPage key="dispatch" mode="dispatch" /></W>} />
           <Route path="new-inventory"       element={<W><NewInventoryPage /></W>} />
           <Route path="new-inventory/:studentId" element={<W><NewInventoryStudentPage /></W>} />
           {/* Admin / Counselor shared */}

@@ -16,8 +16,8 @@ const fmtFull= d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:
 
 const DOC_STATUS = {
   Sent_To_University:   { label:'Pending Action',     color:'bg-amber-100 text-amber-700',    dot:'bg-amber-500' },
-  University_Dispatched:{ label:'Sent to Dispatch',   color:'bg-teal-100 text-teal-700',      dot:'bg-teal-500' },
-  Dispatch_Received:    { label:'Dispatch Received',  color:'bg-blue-100 text-blue-700',      dot:'bg-blue-500' },
+  University_Dispatched:{ label:'Sent to Inventory',  color:'bg-teal-100 text-teal-700',      dot:'bg-teal-500' },
+  Dispatch_Received:    { label:'Inventory Received', color:'bg-blue-100 text-blue-700',      dot:'bg-blue-500' },
   Scanned:              { label:'Scanned',             color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
   Accountant_Received:  { label:'With Accountant',    color:'bg-indigo-100 text-indigo-700',  dot:'bg-indigo-500' },
   Counselor_Received:   { label:'With Counselor',     color:'bg-purple-100 text-purple-700',  dot:'bg-purple-500' },

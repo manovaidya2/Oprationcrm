@@ -828,8 +828,8 @@ export default function AccountantPage() {
     setSaving(true);
     try {
       const res = await docsApi.accountantAction(dialog.item._id, action, note);
-      // an other document held in the New Inventory goes to Dispatch, not to the university
-      toast.success(action === 'approve' && res?.inventoryItem ? `${dialog.item.name} is in the New Inventory — sent to Dispatch, not to the university` : 'Done');
+      // a document held in the New Inventory goes to the Inventory Desk, not to the university
+      toast.success(action === 'approve' && res?.inventoryItem ? `${dialog.item.name} is in the New Inventory — sent to the Inventory Desk, not to the university` : 'Done');
       setDialog(null); setNote(''); refreshCurrentTab();
     }
     catch(e) { toast.error(e.message); } finally { setSaving(false); }
@@ -1170,7 +1170,7 @@ export default function AccountantPage() {
       >
         <TabsList className="flex flex-wrap h-auto gap-1 bg-slate-100 p-1 rounded-xl">
           {[
-            // scans now go straight from Dispatch to the counselor; this tab stays only while older scans are left here
+            // scans now go straight from the Inventory Desk to the counselor; this tab stays only while older scans are left here
             ...(scanReviewList.total > 0 || activeTab === 'scans' ? [{ val:'scans', label:'Scan Review', count: scanReviewList.total, dot:'bg-violet-500' }] : []),
             { val:'admissions',  label:'Admissions',     count: admissionsList.total,          dot:'bg-blue-500'   },
             { val:'unireject',   label:'Uni Rejected',   count: uniRejectedList.total,    dot:'bg-orange-500' },
@@ -1287,7 +1287,7 @@ export default function AccountantPage() {
         {/* Admissions Tab */}
         {/* Scan Review Tab - scanned docs from dispatch */}
         <TabsContent value="scans" className="space-y-2 mt-3">
-          <p className="text-sm text-muted-foreground">Older scans received from Dispatch — forward them to the Counselor. New scans now go straight from Dispatch to the Counselor.</p>
+          <p className="text-sm text-muted-foreground">Older scans received from Dispatch — forward them to the Counselor. New scans now go straight from the Inventory Desk to the Counselor.</p>
           {scanDocs.length===0
             ?<div className="text-center py-10 text-muted-foreground">No scanned documents pending review</div>
             :scanDocs.map(d=>(

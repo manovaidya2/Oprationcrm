@@ -9,7 +9,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     // AdmissionMarker: adds admissions (student, fee, payment, submit) from inside any centre's panel; views everything else
-    enum: ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Dispatch', 'PaymentCoordinator', 'Payment', 'AdmissionMarker'],
+    enum: ['Admin', 'Counselor', 'ViewerCounselor', 'Center', 'Accountant', 'University', 'Dispatch', 'Inventory', 'PaymentCoordinator', 'Payment', 'AdmissionMarker'],
     required: true,
   },
   // Counselor link

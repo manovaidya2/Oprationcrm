@@ -15,7 +15,7 @@ const ROLE_COLORS = {
   Admin:'bg-red-100 text-red-700', Counselor:'bg-indigo-100 text-indigo-700',
   ViewerCounselor:'bg-slate-100 text-slate-700',
   Center:'bg-sky-100 text-sky-700', Accountant:'bg-amber-100 text-amber-700',
-  University:'bg-purple-100 text-purple-700', Dispatch:'bg-teal-100 text-teal-700',
+  University:'bg-purple-100 text-purple-700', Dispatch:'bg-teal-100 text-teal-700', Inventory:'bg-violet-100 text-violet-700',
   PaymentCoordinator:'bg-cyan-100 text-cyan-700', Payment:'bg-sky-100 text-sky-700',
   AdmissionMarker:'bg-lime-100 text-lime-700',
 };
@@ -30,6 +30,7 @@ const ROLE_OPTIONS = [
   { value: 'Payment', label: 'Payment Desk' },
   { value: 'AdmissionMarker', label: 'Admission Marker' },
   { value: 'University', label: 'University' },
+  { value: 'Inventory', label: 'Inventory' },
   { value: 'Dispatch', label: 'Dispatch' },
 ];
 const ALL_ROLES = ROLE_OPTIONS.map(r => r.value);

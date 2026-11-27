@@ -47,7 +47,7 @@ export default function NewInventoryPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-800">New Inventory</h1>
             <p className="mt-0.5 max-w-2xl text-xs text-slate-500">
-              Each student's marksheets and other documents — in the office, sent to the centre, or received by the centre. When the accountant approves a request and that document is here in the office, the request goes to Dispatch instead of the university.
+              Each student's marksheets and other documents — in the office, sent to the centre, or received by the centre. When the accountant approves a request and that document is here in the office, the request goes to the Inventory Desk instead of the university.
             </p>
           </div>
         </div>

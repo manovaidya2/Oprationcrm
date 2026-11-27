@@ -901,7 +901,7 @@ export default function StudentDetailPage() {
                 <div className="space-y-2 border-t pt-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{isCenter ? 'Shared with the centre' : 'Added manually earlier'} ({added.length})</p>
                   <StudentDocsPanel studentId={student._id} category={section} api={studentsApi.addedDocs} allowAdd={false}
-                    canEdit={!isCenter && (isCounselor || isAdmin || isViewerCounselor || user?.role === 'Dispatch')}
+                    canEdit={!isCenter && (isCounselor || isAdmin || isViewerCounselor || ['Dispatch', 'Inventory'].includes(user?.role))}
                     onChange={next => setAddedDocs(p => ({ ...p, [section]: next || [] }))} />
                 </div>
               )}
